@@ -331,114 +331,159 @@ app.get("/admin", adminAuth, (_req, res) => {
   res.sendFile(path.join(__dirname, "admin.html"));
 });
 
+// ── Admin helper: merge auth users + profiles ─────────────────────
+// Fetches up to 1000 auth users (email + ban status), all profile
+// rows, and merges them in memory.  Suitable for both stats + users.
+async function fetchAllUsersData() {
+  const [authRes, profilesRes] = await Promise.all([
+    supabaseAdmin.auth.admin.listUsers({ perPage: 1000 }),
+    supabaseAdmin.from("profiles")
+      .select("id, display_name, credits, total_credits_purchased, total_credits_used, created_at, last_seen"),
+  ]);
+
+  const authUsers = authRes.data?.users || [];
+  const profiles  = profilesRes.data   || [];
+
+  const authMap = {};
+  authUsers.forEach(u => {
+    authMap[u.id] = {
+      email:     u.email || "—",
+      is_banned: u.banned_until ? new Date(u.banned_until) > new Date() : false,
+    };
+  });
+
+  const merged = profiles.map(p => {
+    const auth = authMap[p.id] || {};
+    return {
+      id:                p.id,
+      email:             auth.email     || "—",
+      name:              p.display_name || "—",
+      credits_balance:   p.credits                 || 0,
+      credits_purchased: p.total_credits_purchased || 0,
+      credits_used:      p.total_credits_used      || 0,
+      last_seen_at:      p.last_seen               || null,
+      is_banned:         auth.is_banned            || false,
+      created_at:        p.created_at,
+    };
+  });
+
+  return { merged, authUsers, profiles };
+}
+
 // ── Admin: stats overview ─────────────────────────────────────────
 app.get("/admin/api/stats", adminAuth, async (_req, res) => {
   const now   = Date.now();
-  const day   = 86_400_000;
-  const week  = 7 * day;
-  const month = 30 * day;
+  const DAY   = 86_400_000;
+  const WEEK  = 7  * DAY;
+  const MONTH = 30 * DAY;
 
   try {
-    const [profilesRes, purchasesRes, usageRes] = await Promise.all([
-      supabaseAdmin.from("profiles")
-        .select("id, credits, total_credits_purchased, total_credits_used, created_at, last_seen"),
+    const [{ merged, profiles }, purchasesRes, usageRes] = await Promise.all([
+      fetchAllUsersData(),
       supabaseAdmin.from("purchases").select("price_usd, credits_added, pack_name, created_at"),
       supabaseAdmin.from("usage").select("credits_used, session_seconds, created_at"),
     ]);
 
-    const profiles  = profilesRes.data  || [];
     const purchases = purchasesRes.data || [];
     const usages    = usageRes.data     || [];
 
-    const totalUsers      = profiles.length;
-    const activeToday     = profiles.filter(p => p.last_seen && (now - new Date(p.last_seen).getTime()) < day).length;
-    const newThisWeek     = profiles.filter(p => p.created_at && (now - new Date(p.created_at).getTime()) < week).length;
-    const totalRevenue    = purchases.reduce((s, p) => s + (p.price_usd || 0), 0);
-    const revenueMonth    = purchases.filter(p => (now - new Date(p.created_at).getTime()) < month)
-                                     .reduce((s, p) => s + (p.price_usd || 0), 0);
-    const revenueToday    = purchases.filter(p => (now - new Date(p.created_at).getTime()) < day)
-                                     .reduce((s, p) => s + (p.price_usd || 0), 0);
-    const totalCreditsUsed    = profiles.reduce((s, p) => s + (p.total_credits_used || 0), 0);
-    const totalCreditsPurch   = purchases.reduce((s, p) => s + (p.credits_added || 0), 0);
-    const totalSecondsUsed    = usages.reduce((s, u) => s + (u.session_seconds || 0), 0);
-    // Decart cost estimate: $0.00625 per credit used (rough)
-    const estimatedDecartCost = (totalCreditsUsed * 0.00625).toFixed(2);
-    const avgCreditsPerUser   = totalUsers ? (totalCreditsUsed / totalUsers).toFixed(1) : "0";
+    const totalUsers   = merged.length;
+    const activeToday  = merged.filter(u => u.last_seen_at && (now - new Date(u.last_seen_at).getTime()) < DAY).length;
+    const newThisWeek  = profiles.filter(p => p.created_at && (now - new Date(p.created_at).getTime()) < WEEK).length;
+    const revenueTotal = purchases.reduce((s, p) => s + (p.price_usd || 0), 0);
+    const revenueMonth = purchases.filter(p => (now - new Date(p.created_at).getTime()) < MONTH)
+                                  .reduce((s, p) => s + (p.price_usd || 0), 0);
+    const revenueToday = purchases.filter(p => (now - new Date(p.created_at).getTime()) < DAY)
+                                  .reduce((s, p) => s + (p.price_usd || 0), 0);
+    const creditsUsed        = merged.reduce((s, u) => s + u.credits_used, 0);
+    const totalSecondsUsed   = usages.reduce((s, u) => s + (u.session_seconds || 0), 0);
+    const estimatedDecartCost = Number((creditsUsed * 0.00625).toFixed(2));
 
-    // Pack breakdown
+    // Pack breakdown — count + revenue per pack
     const packBreakdown = {};
     purchases.forEach(p => {
       const name = p.pack_name || "Unknown";
-      if (!packBreakdown[name]) packBreakdown[name] = { units: 0, revenue: 0, credits: 0 };
-      packBreakdown[name].units++;
-      packBreakdown[name].revenue += p.price_usd || 0;
-      packBreakdown[name].credits += p.credits_added || 0;
+      if (!packBreakdown[name]) packBreakdown[name] = { count: 0, revenue: 0 };
+      packBreakdown[name].count++;
+      packBreakdown[name].revenue = Number((packBreakdown[name].revenue + (p.price_usd || 0)).toFixed(2));
     });
+
+    // Best-selling pack by units sold
+    let bestPack = null, bestCount = 0;
+    Object.entries(packBreakdown).forEach(([name, d]) => {
+      if (d.count > bestCount) { bestCount = d.count; bestPack = name; }
+    });
+
+    // Revenue chart — last 30 days as [{ date, total }]
+    const byDay = {};
+    for (let i = 29; i >= 0; i--) {
+      const key = new Date(now - i * DAY).toISOString().split("T")[0];
+      byDay[key] = 0;
+    }
+    purchases.forEach(p => {
+      const key = (p.created_at || "").split("T")[0];
+      if (key in byDay) byDay[key] = Number((byDay[key] + (p.price_usd || 0)).toFixed(2));
+    });
+    const revenueChart = Object.entries(byDay).map(([date, total]) => ({ date, total }));
 
     res.json({
       ok: true,
-      stats: {
-        totalUsers, activeToday, newThisWeek,
-        totalRevenue: totalRevenue.toFixed(2),
-        revenueMonth: revenueMonth.toFixed(2),
-        revenueToday: revenueToday.toFixed(2),
-        totalCreditsUsed, totalCreditsPurch, totalSecondsUsed,
-        estimatedDecartCost, avgCreditsPerUser,
-        packBreakdown,
-      },
+      totalUsers,
+      activeToday,
+      newThisWeek,
+      revenueTotal:         Number(revenueTotal.toFixed(2)),
+      revenueMonth:         Number(revenueMonth.toFixed(2)),
+      revenueToday:         Number(revenueToday.toFixed(2)),
+      creditsUsed,
+      totalSecondsUsed,
+      estimatedDecartCost,
+      packBreakdown,
+      bestPack,
+      revenueChart,
     });
   } catch (err) {
+    console.error("[Tzurah] /admin/api/stats error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── Admin: users (paginated) ──────────────────────────────────────
+// ── Admin: users (paginated, searchable) ─────────────────────────
 app.get("/admin/api/users", adminAuth, async (req, res) => {
-  const page   = Math.max(1, parseInt(req.query.page || "1", 10));
-  const limit  = 20;
-  const offset = (page - 1) * limit;
+  const page   = Math.max(1, parseInt(req.query.page  || "1",  10));
+  const limit  = Math.min(100, parseInt(req.query.limit || "20", 10));
   const search = (req.query.search || "").toLowerCase().trim();
 
   try {
-    const { data: profiles, error, count } = await supabaseAdmin
-      .from("profiles")
-      .select("id, display_name, credits, total_credits_purchased, total_credits_used, created_at, last_seen", { count: "exact" })
-      .order("created_at", { ascending: false })
-      .range(offset, offset + limit - 1);
+    const { merged } = await fetchAllUsersData();
 
-    if (error) return res.status(500).json({ error: error.message });
-
-    // Fetch emails from auth.users for this page
-    const users = profiles || [];
-    for (const u of users) {
-      try {
-        const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(u.id);
-        u.email = authUser?.user?.email || "—";
-      } catch { u.email = "—"; }
-    }
-
+    // Filter by email or display name
     const filtered = search
-      ? users.filter(u =>
-          (u.email || "").toLowerCase().includes(search) ||
-          (u.display_name || "").toLowerCase().includes(search)
+      ? merged.filter(u =>
+          u.email.toLowerCase().includes(search) ||
+          u.name.toLowerCase().includes(search)
         )
-      : users;
+      : merged;
 
-    res.json({
-      ok: true,
-      users:  filtered,
-      total:  count || 0,
-      page,
-      pages:  Math.ceil((count || 0) / limit),
-    });
+    // Sort newest first
+    filtered.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+
+    const total      = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const users      = filtered.slice((page - 1) * limit, page * limit);
+
+    res.json({ ok: true, users, total, totalPages, page });
   } catch (err) {
+    console.error("[Tzurah] /admin/api/users error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
 // ── Admin: revenue chart (last 30 days) ───────────────────────────
+// Kept for backward compat — /admin/api/stats now also embeds revenueChart
 app.get("/admin/api/revenue-chart", adminAuth, async (_req, res) => {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const now = Date.now();
+  const DAY = 86_400_000;
+  const thirtyDaysAgo = new Date(now - 30 * DAY).toISOString();
   try {
     const { data } = await supabaseAdmin
       .from("purchases")
@@ -447,18 +492,17 @@ app.get("/admin/api/revenue-chart", adminAuth, async (_req, res) => {
       .order("created_at");
 
     const byDay = {};
-    // Seed all 30 days with 0
     for (let i = 29; i >= 0; i--) {
-      const d = new Date(Date.now() - i * 86_400_000);
-      const key = d.toISOString().split("T")[0];
+      const key = new Date(now - i * DAY).toISOString().split("T")[0];
       byDay[key] = 0;
     }
-    data?.forEach(p => {
-      const day = p.created_at.split("T")[0];
-      if (day in byDay) byDay[day] = (byDay[day] || 0) + (p.price_usd || 0);
+    (data || []).forEach(p => {
+      const key = (p.created_at || "").split("T")[0];
+      if (key in byDay) byDay[key] = Number((byDay[key] + (p.price_usd || 0)).toFixed(2));
     });
 
-    res.json({ ok: true, chart: byDay });
+    const chart = Object.entries(byDay).map(([date, total]) => ({ date, total }));
+    res.json({ ok: true, chart });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -466,7 +510,7 @@ app.get("/admin/api/revenue-chart", adminAuth, async (_req, res) => {
 
 // ── Admin: recent purchases ───────────────────────────────────────
 app.get("/admin/api/purchases", adminAuth, async (req, res) => {
-  const limit = parseInt(req.query.limit || "50", 10);
+  const limit = Math.min(200, parseInt(req.query.limit || "50", 10));
   try {
     const { data } = await supabaseAdmin
       .from("purchases")
@@ -474,53 +518,72 @@ app.get("/admin/api/purchases", adminAuth, async (req, res) => {
       .order("created_at", { ascending: false })
       .limit(limit);
 
-    // Fetch emails
     const purchases = data || [];
-    for (const p of purchases.slice(0, 20)) { // only first 20 for speed
-      try {
-        const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(p.user_id);
-        p.email = authUser?.user?.email || "—";
-      } catch { p.email = "—"; }
-    }
 
-    res.json({ ok: true, purchases });
+    // Enrich with user email in parallel (cap at 50)
+    await Promise.all(purchases.slice(0, 50).map(async (p) => {
+      try {
+        const { data: au } = await supabaseAdmin.auth.admin.getUserById(p.user_id);
+        p.user_email = au?.user?.email || "—";
+      } catch { p.user_email = "—"; }
+    }));
+
+    // Normalise field names to match admin.html expectations
+    const normalised = purchases.map(p => ({
+      id:                p.id,
+      user_id:           p.user_id,
+      user_email:        p.user_email || "—",
+      pack_name:         p.pack_name,
+      amount_usd:        p.price_usd,
+      credits_added:     p.credits_added,
+      stripe_session_id: p.stripe_payment_id,
+      created_at:        p.created_at,
+    }));
+
+    res.json({ ok: true, purchases: normalised });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // ── Admin: gift credits ───────────────────────────────────────────
+// Accepts { userId, amount } (admin.html) OR legacy { user_id, credits }
 app.post("/admin/api/gift-credits", adminAuth, async (req, res) => {
-  const { user_id, credits, reason } = req.body || {};
-  if (!user_id || typeof credits !== "number" || credits < 1) {
-    return res.status(400).json({ error: "user_id and credits (≥1) required" });
+  const body    = req.body || {};
+  const userId  = body.userId  || body.user_id;
+  const credits = body.amount  != null ? body.amount : body.credits;
+  const reason  = body.reason  || "";
+
+  if (!userId || typeof credits !== "number" || credits < 1) {
+    return res.status(400).json({ error: "userId and amount (>=1) required" });
   }
 
   try {
     const { data: profile, error: fetchErr } = await supabaseAdmin
       .from("profiles")
       .select("credits, total_credits_purchased")
-      .eq("id", user_id)
+      .eq("id", userId)
       .single();
 
     if (fetchErr || !profile) return res.status(404).json({ error: "User not found" });
 
+    const newBalance = profile.credits + credits;
     await supabaseAdmin.from("profiles").update({
-      credits:                 profile.credits + credits,
+      credits:                 newBalance,
       total_credits_purchased: (profile.total_credits_purchased || 0) + credits,
-    }).eq("id", user_id);
+    }).eq("id", userId);
 
     await supabaseAdmin.from("purchases").insert({
-      user_id,
-      pack_name:         `Gift${reason ? ": " + reason : ""}`,
+      user_id:           userId,
+      pack_name:         "Gift" + (reason ? ": " + reason : ""),
       price_usd:         0,
       credits_added:     credits,
-      stripe_payment_id: `gift_${Date.now()}`,
+      stripe_payment_id: "gift_" + Date.now(),
       created_at:        new Date().toISOString(),
     });
 
-    console.log(`[Tzurah] Admin gifted ${credits} credits to ${user_id}${reason ? " ("+reason+")" : ""}`);
-    res.json({ ok: true, new_balance: profile.credits + credits });
+    console.log(`[Tzurah] Admin gifted ${credits} credits to ${userId}` + (reason ? ` (${reason})` : ""));
+    res.json({ ok: true, new_balance: newBalance });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -528,22 +591,25 @@ app.post("/admin/api/gift-credits", adminAuth, async (req, res) => {
 
 // ── Admin: deduct credits ─────────────────────────────────────────
 app.post("/admin/api/deduct-credits", adminAuth, async (req, res) => {
-  const { user_id, credits, reason } = req.body || {};
-  if (!user_id || typeof credits !== "number" || credits < 1) {
-    return res.status(400).json({ error: "user_id and credits (≥1) required" });
+  const body    = req.body || {};
+  const userId  = body.userId  || body.user_id;
+  const credits = body.amount  != null ? body.amount : body.credits;
+  const reason  = body.reason  || "";
+
+  if (!userId || typeof credits !== "number" || credits < 1) {
+    return res.status(400).json({ error: "userId and amount (>=1) required" });
   }
 
   try {
     const { data: profile, error: fetchErr } = await supabaseAdmin
-      .from("profiles").select("credits").eq("id", user_id).single();
+      .from("profiles").select("credits").eq("id", userId).single();
 
     if (fetchErr || !profile) return res.status(404).json({ error: "User not found" });
 
     const newBalance = Math.max(0, profile.credits - credits);
-    await supabaseAdmin.from("profiles")
-      .update({ credits: newBalance }).eq("id", user_id);
+    await supabaseAdmin.from("profiles").update({ credits: newBalance }).eq("id", userId);
 
-    console.log(`[Tzurah] Admin deducted ${credits} credits from ${user_id}${reason ? " ("+reason+")" : ""}`);
+    console.log(`[Tzurah] Admin deducted ${credits} credits from ${userId}` + (reason ? ` (${reason})` : ""));
     res.json({ ok: true, new_balance: newBalance });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -552,16 +618,16 @@ app.post("/admin/api/deduct-credits", adminAuth, async (req, res) => {
 
 // ── Admin: ban user ───────────────────────────────────────────────
 app.post("/admin/api/ban-user", adminAuth, async (req, res) => {
-  const { user_id } = req.body || {};
-  if (!user_id) return res.status(400).json({ error: "user_id required" });
+  const body   = req.body || {};
+  const userId = body.userId || body.user_id;
+  if (!userId) return res.status(400).json({ error: "userId required" });
 
   try {
-    const { error } = await supabaseAdmin.auth.admin.updateUserById(user_id, {
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
       ban_duration: "87600h", // ~10 years
     });
     if (error) return res.status(500).json({ error: error.message });
-
-    console.log(`[Tzurah] Admin banned user ${user_id}`);
+    console.log(`[Tzurah] Admin banned user ${userId}`);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -570,15 +636,15 @@ app.post("/admin/api/ban-user", adminAuth, async (req, res) => {
 
 // ── Admin: unban user ─────────────────────────────────────────────
 app.post("/admin/api/unban-user", adminAuth, async (req, res) => {
-  const { user_id } = req.body || {};
-  if (!user_id) return res.status(400).json({ error: "user_id required" });
+  const body   = req.body || {};
+  const userId = body.userId || body.user_id;
+  if (!userId) return res.status(400).json({ error: "userId required" });
 
   try {
-    const { error } = await supabaseAdmin.auth.admin.updateUserById(user_id, {
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
       ban_duration: "none",
     });
     if (error) return res.status(500).json({ error: error.message });
-
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
