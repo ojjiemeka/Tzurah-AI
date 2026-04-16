@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tzurah Live — Admin</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #07070f;
+      --surface:  #0f0f1a;
+      --surface2: #1a1a2e;
+      --border:   #2a2a4a;
+      --accent:   #6366f1;
+      --electric: #06b6d4;
+      --success:  #22c55e;
+      --warning:  #f59e0b;
+      --danger:   #ef4444;
+      --text:     #e2e8f0;
+      --muted:    #64748b;
+      --radius:   10px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* ── Dev credentials banner ── */
+    #dev-banner {
+      background: linear-gradient(90deg, #78350f, #92400e);
+      border-bottom: 1px solid #d97706;
+      padding: 8px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 12px;
+    }
+    #dev-banner .banner-icon { font-size: 16px; }
+    #dev-banner strong { color: #fbbf24; }
+    #dev-banner code {
+      background: rgba(0,0,0,.3);
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-family: monospace;
+      color: #fde68a;
+      font-size: 11px;
+    }
+    #dev-banner .banner-close {
+      margin-left: auto;
+      background: none;
+      border: none;
+      color: #fbbf24;
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+      padding: 0 4px;
+      opacity: .8;
+    }
+    #dev-banner .banner-close:hover { opacity: 1; }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      height: 56px;
+    }
+
+    .logo {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      white-space: nowrap;
+    }
+    .logo .tz   { color: var(--accent); }
+    .logo .urah { color: var(--text); }
+    .logo .live {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      color: var(--electric);
+      text-transform: uppercase;
+      margin-left: 4px;
+      vertical-align: middle;
+    }
+
+    .tab-nav {
+      display: flex;
+      gap: 4px;
+      flex: 1;
+    }
+    .tab-btn {
+      background: none;
+      border: none;
+      color: var(--muted);
+      padding: 6px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all .15s;
+    }
+    .tab-btn:hover { color: var(--text); background: var(--surface2); }
+    .tab-btn.active {
+      color: var(--accent);
+      background: rgba(99,102,241,.15);
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-left: auto;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border-radius: 6px;
+      border: none;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .btn-ghost {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: #4f46e5; }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-success:hover { opacity: .85; }
+    .btn-danger  { background: var(--danger); color: #fff; }
+    .btn-danger:hover  { opacity: .85; }
+    .btn-warning { background: var(--warning); color: #000; }
+    .btn-warning:hover { opacity: .85; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ── Spinner ── */
+    .spinner {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Content area ── */
+    main {
+      padding: 24px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── Stats grid ── */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+    }
+    .stat-card .label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .stat-card .value {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1;
+    }
+    .stat-card .sub {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+    .stat-card.accent-border { border-color: var(--accent); }
+    .stat-card.warn-border   { border-color: var(--warning); }
+
+    /* ── Warning alert ── */
+    .alert {
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+    }
+    .alert-warning {
+      background: rgba(245,158,11,.1);
+      border: 1px solid rgba(245,158,11,.4);
+      color: #fbbf24;
+    }
+
+    /* ── Section header ── */
+    .section-hdr {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .section-hdr h2 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .section-hdr .subtitle {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* ── Bar chart ── */
+    .bar-chart-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 28px;
+    }
+    .bar-chart {
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      height: 120px;
+    }
+    .bar-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 4px;
+    }
+    .bar {
+      width: 100%;
+      min-height: 2px;
+      background: linear-gradient(180deg, var(--accent), rgba(99,102,241,.4));
+      border-radius: 3px 3px 0 0;
+      transition: opacity .2s;
+      cursor: default;
+    }
+    .bar:hover { opacity: .75; }
+    .bar-label {
+      font-size: 9px;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+      text-align: center;
+    }
+    .bar-axis {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 6px;
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    /* ── Table ── */
+    .table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    thead th {
+      background: var(--surface2);
+      padding: 10px 14px;
+      text-align: left;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      color: var(--muted);
+      white-space: nowrap;
+      border-bottom: 1px solid var(--border);
+    }
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background .1s;
+    }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--surface2); }
+    tbody td {
+      padding: 10px 14px;
+      font-size: 13px;
+      vertical-align: middle;
+    }
+    .cell-mono { font-family: monospace; font-size: 12px; color: var(--muted); }
+    .cell-email { font-weight: 500; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-green  { background: rgba(34,197,94,.15);  color: #4ade80; }
+    .badge-red    { background: rgba(239,68,68,.15);   color: #f87171; }
+    .badge-muted  { background: var(--surface2);       color: var(--muted); }
+    .badge-accent { background: rgba(99,102,241,.15);  color: #818cf8; }
+
+    .actions-cell { display: flex; gap: 6px; flex-wrap: wrap; }
+
+    /* ── Pagination ── */
+    .pagination {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .pagination span { font-size: 12px; color: var(--muted); }
+
+    /* ── Search bar ── */
+    .search-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .search-input {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 14px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      transition: border-color .15s;
+    }
+    .search-input::placeholder { color: var(--muted); }
+    .search-input:focus { border-color: var(--accent); }
+
+    /* ── Revenue summary cards ── */
+    .rev-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+
+    /* ── Pack breakdown ── */
+    .pack-table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    /* ── Modals ── */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.7);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 28px;
+      width: 420px;
+      max-width: 95vw;
+    }
+    .modal h3 { font-size: 16px; margin-bottom: 6px; }
+    .modal .modal-sub { font-size: 12px; color: var(--muted); margin-bottom: 20px; }
+    .modal label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; margin-top: 14px; }
+    .modal input[type="number"],
+    .modal input[type="text"] {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 9px 12px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+    }
+    .modal input:focus { border-color: var(--accent); }
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 22px;
+      justify-content: flex-end;
+    }
+
+    /* ── Loading placeholder ── */
+    .loading-cell {
+      text-align: center;
+      padding: 40px;
+      color: var(--muted);
+    }
+
+    /* ── Auto-refresh indicator ── */
+    .refresh-indicator {
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .refresh-dot {
+      width: 6px; height: 6px;
+      background: var(--success);
+      border-radius: 50%;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: .3; }
+    }
+
+    /* ── Empty state ── */
+    .empty-state {
+      text-align: center;
+      padding: 48px 20px;
+      color: var(--muted);
+    }
+    .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+
+<!-- Dev credentials banner -->
+<div id="dev-banner">
+  <span class="banner-icon">&#9888;&#65039;</span>
+  <span><strong>Dev Mode</strong> &mdash; Default credentials active. Change before production:</span>
+  <code>admin@tzurah.ai</code>
+  <span>/</span>
+  <code>TzurahAdmin2025!</code>
+  <button class="banner-close" onclick="document.getElementById('dev-banner').remove()" title="Dismiss">&times;</button>
+</div>
+
+<!-- Header -->
+<header>
+  <div class="logo">
+    <span class="tz">Tz</span><span class="urah">urah</span><span class="live">LIVE</span>
+  </div>
+
+  <nav class="tab-nav">
+    <button class="tab-btn active" data-tab="overview">Overview</button>
+    <button class="tab-btn" data-tab="users">Users</button>
+    <button class="tab-btn" data-tab="revenue">Revenue</button>
+    <button class="tab-btn" data-tab="purchases">Purchases</button>
+  </nav>
+
+  <div class="header-actions">
+    <div class="refresh-indicator">
+      <div class="refresh-dot"></div>
+      <span id="refresh-countdown">60s</span>
+    </div>
+    <button class="btn btn-ghost" id="refresh-btn">&#8635; Refresh</button>
+  </div>
+</header>
+
+<!-- ================================================================
+     OVERVIEW TAB
+     ================================================================ -->
+<main>
+  <div class="tab-panel active" id="tab-overview">
+    <div id="overview-loading" style="text-align:center;padding:60px;color:var(--muted)">
+      <div class="spinner" style="width:32px;height:32px;margin:0 auto 12px"></div>
+      Loading stats&hellip;
+    </div>
+    <div id="overview-content" style="display:none">
+      <div class="stats-grid" id="stats-grid"></div>
+
+      <div id="decart-warning" style="display:none" class="alert alert-warning">
+        &#9888; Estimated Decart cost this month exceeds $400. Consider reviewing usage or adjusting credit pricing.
+      </div>
+
+      <div class="bar-chart-wrap">
+        <div class="section-hdr" style="margin-bottom:16px">
+          <div>
+            <h2>Revenue &mdash; Last 30 Days</h2>
+            <div class="subtitle">Daily totals in USD</div>
+          </div>
+        </div>
+        <div class="bar-chart" id="revenue-chart"></div>
+        <div class="bar-axis">
+          <span id="chart-start-label"></span>
+          <span id="chart-end-label"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       USERS TAB
+       ================================================================ -->
+  <div class="tab-panel" id="tab-users">
+    <div class="search-row">
+      <input type="text" class="search-input" id="user-search" placeholder="Search by email or name&hellip;" />
+      <button class="btn btn-ghost" id="user-search-btn">Search</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Email</th>
+            <th>Name</th>
+            <th>Credits</th>
+            <th>Purchased</th>
+            <th>Used</th>
+            <th>Last Seen</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="users-tbody">
+          <tr><td colspan="8" class="loading-cell"><div class="spinner" style="margin:0 auto"></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px">
+      <span id="users-count-label" style="font-size:12px;color:var(--muted)"></span>
+      <div class="pagination">
+        <button class="btn btn-ghost btn-sm" id="users-prev">&#8592; Prev</button>
+        <span id="users-page-label">Page 1</span>
+        <button class="btn btn-ghost btn-sm" id="users-next">Next &#8594;</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       REVENUE TAB
+       ================================================================ -->
+  <div class="tab-panel" id="tab-revenue">
+    <div id="revenue-loading" style="text-align:center;padding:60px;color:var(--muted)">
+      <div class="spinner" style="width:32px;height:32px;margin:0 auto 12px"></div>
+      Loading revenue data&hellip;
+    </div>
+    <div id="revenue-content" style="display:none">
+      <div class="rev-cards" id="rev-cards"></div>
+
+      <div class="section-hdr">
+        <h2>Pack Breakdown</h2>
+      </div>
+      <div class="pack-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Pack</th>
+              <th>Units Sold</th>
+              <th>Revenue</th>
+              <th>% of Total</th>
+            </tr>
+          </thead>
+          <tbody id="pack-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================
+       PURCHASES TAB
+       ================================================================ -->
+  <div class="tab-panel" id="tab-purchases">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Email</th>
+            <th>Pack</th>
+            <th>Amount</th>
+            <th>Payment ID</th>
+          </tr>
+        </thead>
+        <tbody id="purchases-tbody">
+          <tr><td colspan="5" class="loading-cell"><div class="spinner" style="margin:0 auto"></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<!-- Gift Credits Modal -->
+<div class="modal-backdrop" id="modal-gift">
+  <div class="modal">
+    <h3>Gift Credits</h3>
+    <div class="modal-sub" id="modal-gift-sub">Adding credits to user</div>
+    <label>Credits to add</label>
+    <input type="number" id="gift-amount" min="1" max="100000" value="100" />
+    <label>Reason (optional)</label>
+    <input type="text" id="gift-reason" placeholder="e.g. Compensation, promo&hellip;" />
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modal-gift')">Cancel</button>
+      <button class="btn btn-success" id="gift-confirm-btn">Gift Credits</button>
+    </div>
+  </div>
+</div>
+
+<!-- Deduct Credits Modal -->
+<div class="modal-backdrop" id="modal-deduct">
+  <div class="modal">
+    <h3>Deduct Credits</h3>
+    <div class="modal-sub" id="modal-deduct-sub">Removing credits from user</div>
+    <label>Credits to deduct</label>
+    <input type="number" id="deduct-amount" min="1" max="100000" value="10" />
+    <label>Reason (optional)</label>
+    <input type="text" id="deduct-reason" placeholder="e.g. Abuse, correction&hellip;" />
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modal-deduct')">Cancel</button>
+      <button class="btn btn-warning" id="deduct-confirm-btn">Deduct Credits</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+// ── XSS escape ──────────────────────────────────────────────────
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// ── Tab navigation ───────────────────────────────────────────────
+const tabBtns   = document.querySelectorAll(".tab-btn");
+const tabPanels = document.querySelectorAll(".tab-panel");
+
+function switchTab(tabId) {
+  tabBtns.forEach(b => b.classList.toggle("active", b.dataset.tab === tabId));
+  tabPanels.forEach(p => p.classList.toggle("active", p.id === "tab-" + tabId));
+  if (tabId === "revenue")   loadRevenue();
+  if (tabId === "purchases") loadPurchases();
+}
+tabBtns.forEach(b => b.addEventListener("click", () => switchTab(b.dataset.tab)));
+
+// ── Modal helpers ────────────────────────────────────────────────
+function openModal(id)  { document.getElementById(id).classList.add("open"); }
+function closeModal(id) { document.getElementById(id).classList.remove("open"); }
+document.querySelectorAll(".modal-backdrop").forEach(m => {
+  m.addEventListener("click", e => { if (e.target === m) closeModal(m.id); });
+});
+
+// ── API fetch helpers ─────────────────────────────────────────────
+async function api(path) {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.json();
+}
+async function apiPost(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let err = {};
+    try { err = await res.json(); } catch (_) {}
+    throw new Error(err.error || "HTTP " + res.status);
+  }
+  return res.json();
+}
+
+// ── Formatters ────────────────────────────────────────────────────
+function fmt$(n)  { return "$" + Number(n || 0).toFixed(2); }
+function fmtN(n)  { return Number(n || 0).toLocaleString(); }
+function fmtDate(s) {
+  if (!s) return "—";
+  return new Date(s).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" });
+}
+function fmtDateTime(s) {
+  if (!s) return "—";
+  return new Date(s).toLocaleString("en-US", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" });
+}
+function relTime(s) {
+  if (!s) return "Never";
+  const m = Math.floor((Date.now() - new Date(s).getTime()) / 60000);
+  if (m < 1)  return "Just now";
+  if (m < 60) return m + "m ago";
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + "h ago";
+  return Math.floor(h / 24) + "d ago";
+}
+
+// ================================================================
+//  OVERVIEW
+// ================================================================
+async function loadOverview() {
+  document.getElementById("overview-loading").style.display = "";
+  document.getElementById("overview-content").style.display  = "none";
+
+  try {
+    const data = await api("/admin/api/stats");
+
+    document.getElementById("overview-loading").style.display = "none";
+    document.getElementById("overview-content").style.display = "block";
+
+    document.getElementById("stats-grid").innerHTML = [
+      { label: "Total Users",      value: fmtN(data.totalUsers),            sub: "All registered accounts",                            accent: true },
+      { label: "Active Today",     value: fmtN(data.activeToday),           sub: "Unique sessions today" },
+      { label: "New This Week",    value: fmtN(data.newThisWeek),           sub: "Signups in last 7 days" },
+      { label: "Total Revenue",    value: fmt$(data.revenueTotal),          sub: fmt$(data.revenueMonth) + " this month &middot; " + fmt$(data.revenueToday) + " today", accent: true },
+      { label: "Credits Used",     value: fmtN(data.creditsUsed),           sub: "Across all users" },
+      { label: "Est. Decart Cost", value: fmt$(data.estimatedDecartCost),   sub: "This month (" + fmt$((data.estimatedDecartCost || 0) / 30) + "/day avg)", warn: (data.estimatedDecartCost || 0) > 400 },
+    ].map(c => `
+      <div class="stat-card ${c.accent ? "accent-border" : c.warn ? "warn-border" : ""}">
+        <div class="label">${c.label}</div>
+        <div class="value">${c.value}</div>
+        <div class="sub">${c.sub}</div>
+      </div>`).join("");
+
+    if ((data.estimatedDecartCost || 0) > 400) {
+      document.getElementById("decart-warning").style.display = "flex";
+    }
+
+    renderChart(data.revenueChart || []);
+  } catch (e) {
+    document.getElementById("overview-loading").innerHTML =
+      '<div style="color:var(--danger)">Failed to load: ' + esc(e.message) + "</div>";
+  }
+}
+
+function renderChart(days) {
+  const el = document.getElementById("revenue-chart");
+  if (!days.length) {
+    el.innerHTML = '<div class="empty-state" style="flex:1"><div class="icon">&#128202;</div>No revenue data yet</div>';
+    return;
+  }
+  const max = Math.max(...days.map(d => d.total || 0), 0.01);
+  el.innerHTML = days.map(d => {
+    const pct = Math.max(((d.total || 0) / max) * 100, 1).toFixed(1);
+    return '<div class="bar-col" title="' + esc(d.date) + ': ' + fmt$(d.total) + '">' +
+      '<div class="bar" style="height:' + pct + '%"></div>' +
+      '<div class="bar-label">' + esc((d.date || "").slice(5)) + '</div>' +
+      '</div>';
+  }).join("");
+  document.getElementById("chart-start-label").textContent = days[0].date || "";
+  document.getElementById("chart-end-label").textContent   = days[days.length - 1].date || "";
+}
+
+// ================================================================
+//  USERS
+// ================================================================
+let usersPage       = 1;
+let usersSearch     = "";
+let usersTotalPages = 1;
+let usersTotalCount = 0;
+let selectedUserId    = null;
+let selectedUserEmail = "";
+
+async function loadUsers() {
+  const tbody = document.getElementById("users-tbody");
+  tbody.innerHTML = '<tr><td colspan="8" class="loading-cell"><div class="spinner" style="margin:0 auto"></div></td></tr>';
+
+  try {
+    const qs   = new URLSearchParams({ page: usersPage, limit: 20, search: usersSearch });
+    const data = await api("/admin/api/users?" + qs);
+
+    usersTotalPages = data.totalPages || 1;
+    usersTotalCount = data.total      || 0;
+
+    document.getElementById("users-count-label").textContent =
+      fmtN(usersTotalCount) + " user" + (usersTotalCount !== 1 ? "s" : "");
+    document.getElementById("users-page-label").textContent =
+      "Page " + usersPage + " / " + usersTotalPages;
+    document.getElementById("users-prev").disabled = usersPage <= 1;
+    document.getElementById("users-next").disabled = usersPage >= usersTotalPages;
+
+    if (!data.users || !data.users.length) {
+      tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><div class="icon">&#128101;</div>No users found</div></td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.users.map(u => {
+      const uid   = esc(u.id    || "");
+      const email = esc(u.email || "");
+      return '<tr>' +
+        '<td class="cell-email">' + email + '</td>' +
+        '<td>' + esc(u.name || "—") + '</td>' +
+        '<td><strong>' + fmtN(u.credits_balance) + '</strong></td>' +
+        '<td>' + fmtN(u.credits_purchased) + '</td>' +
+        '<td>' + fmtN(u.credits_used) + '</td>' +
+        '<td>' + relTime(u.last_seen_at) + '</td>' +
+        '<td>' + (u.is_banned
+          ? '<span class="badge badge-red">Banned</span>'
+          : '<span class="badge badge-green">Active</span>') + '</td>' +
+        '<td><div class="actions-cell">' +
+          '<button class="btn btn-success btn-sm" onclick="openGift(\'' + uid + '\',\'' + email + '\')">Gift</button>' +
+          '<button class="btn btn-warning btn-sm" onclick="openDeduct(\'' + uid + '\',\'' + email + '\')">Deduct</button>' +
+          (u.is_banned
+            ? '<button class="btn btn-ghost btn-sm" onclick="doUnban(\'' + uid + '\',\'' + email + '\')">Unban</button>'
+            : '<button class="btn btn-danger btn-sm"  onclick="doBan(\'' + uid + '\',\'' + email + '\')">Ban</button>') +
+        '</div></td>' +
+        '</tr>';
+    }).join("");
+
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="8" style="color:var(--danger);text-align:center;padding:24px">Error: ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+document.getElementById("users-prev").addEventListener("click", () => {
+  if (usersPage > 1) { usersPage--; loadUsers(); }
+});
+document.getElementById("users-next").addEventListener("click", () => {
+  if (usersPage < usersTotalPages) { usersPage++; loadUsers(); }
+});
+document.getElementById("user-search-btn").addEventListener("click", () => {
+  usersSearch = document.getElementById("user-search").value.trim();
+  usersPage   = 1;
+  loadUsers();
+});
+document.getElementById("user-search").addEventListener("keydown", e => {
+  if (e.key === "Enter") document.getElementById("user-search-btn").click();
+});
+
+// ── Gift modal ────────────────────────────────────────────────────
+function openGift(uid, email) {
+  selectedUserId    = uid;
+  selectedUserEmail = email;
+  document.getElementById("modal-gift-sub").textContent  = "Adding credits to " + email;
+  document.getElementById("gift-amount").value  = 100;
+  document.getElementById("gift-reason").value  = "";
+  openModal("modal-gift");
+}
+document.getElementById("gift-confirm-btn").addEventListener("click", async () => {
+  const amount = parseInt(document.getElementById("gift-amount").value, 10);
+  const reason = document.getElementById("gift-reason").value.trim();
+  if (!amount || amount < 1) { alert("Enter a valid amount"); return; }
+  try {
+    await apiPost("/admin/api/gift-credits", { userId: selectedUserId, amount, reason });
+    closeModal("modal-gift");
+    alert("Gifted " + amount + " credits to " + selectedUserEmail);
+    loadUsers();
+  } catch (e) { alert("Error: " + e.message); }
+});
+
+// ── Deduct modal ──────────────────────────────────────────────────
+function openDeduct(uid, email) {
+  selectedUserId    = uid;
+  selectedUserEmail = email;
+  document.getElementById("modal-deduct-sub").textContent = "Removing credits from " + email;
+  document.getElementById("deduct-amount").value = 10;
+  document.getElementById("deduct-reason").value = "";
+  openModal("modal-deduct");
+}
+document.getElementById("deduct-confirm-btn").addEventListener("click", async () => {
+  const amount = parseInt(document.getElementById("deduct-amount").value, 10);
+  const reason = document.getElementById("deduct-reason").value.trim();
+  if (!amount || amount < 1) { alert("Enter a valid amount"); return; }
+  try {
+    await apiPost("/admin/api/deduct-credits", { userId: selectedUserId, amount, reason });
+    closeModal("modal-deduct");
+    alert("Deducted " + amount + " credits from " + selectedUserEmail);
+    loadUsers();
+  } catch (e) { alert("Error: " + e.message); }
+});
+
+// ── Ban / Unban ───────────────────────────────────────────────────
+async function doBan(uid, email) {
+  if (!confirm("Ban " + email + "? They will lose access immediately.")) return;
+  try {
+    await apiPost("/admin/api/ban-user", { userId: uid });
+    loadUsers();
+  } catch (e) { alert("Error: " + e.message); }
+}
+async function doUnban(uid, email) {
+  if (!confirm("Unban " + email + "?")) return;
+  try {
+    await apiPost("/admin/api/unban-user", { userId: uid });
+    loadUsers();
+  } catch (e) { alert("Error: " + e.message); }
+}
+
+// ================================================================
+//  REVENUE
+// ================================================================
+let revenueLoaded = false;
+
+async function loadRevenue() {
+  if (revenueLoaded) return;
+
+  document.getElementById("revenue-loading").style.display = "";
+  document.getElementById("revenue-content").style.display  = "none";
+
+  try {
+    const data = await api("/admin/api/stats");
+
+    document.getElementById("revenue-loading").style.display = "none";
+    document.getElementById("revenue-content").style.display = "block";
+
+    document.getElementById("rev-cards").innerHTML = [
+      { label: "All-Time Revenue", value: fmt$(data.revenueTotal) },
+      { label: "This Month",       value: fmt$(data.revenueMonth) },
+      { label: "Today",            value: fmt$(data.revenueToday) },
+      { label: "Best-Selling Pack",value: data.bestPack || "—", small: true },
+    ].map(c => `
+      <div class="stat-card">
+        <div class="label">${c.label}</div>
+        <div class="value" style="${c.small ? "font-size:18px" : ""}">${c.value}</div>
+      </div>`).join("");
+
+    const breakdown = data.packBreakdown || {};
+    const totalRev  = Object.values(breakdown).reduce((s, p) => s + (p.revenue || 0), 0) || 1;
+    const rows      = Object.entries(breakdown)
+      .sort((a, b) => (b[1].revenue || 0) - (a[1].revenue || 0));
+
+    document.getElementById("pack-tbody").innerHTML = rows.length ? rows.map(([pack, p]) => {
+      const pct = ((p.revenue || 0) / totalRev * 100).toFixed(1);
+      return '<tr>' +
+        '<td><strong>' + esc(pack) + '</strong></td>' +
+        '<td>' + fmtN(p.count) + '</td>' +
+        '<td>' + fmt$(p.revenue) + '</td>' +
+        '<td><div style="display:flex;align-items:center;gap:8px">' +
+          '<div style="flex:1;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">' +
+            '<div style="width:' + pct + '%;height:100%;background:var(--accent);border-radius:3px"></div>' +
+          '</div>' +
+          '<span style="font-size:12px;color:var(--muted);white-space:nowrap">' + pct + '%</span>' +
+        '</div></td>' +
+        '</tr>';
+    }).join("") :
+      '<tr><td colspan="4"><div class="empty-state"><div class="icon">&#128179;</div>No sales yet</div></td></tr>';
+
+    revenueLoaded = true;
+  } catch (e) {
+    document.getElementById("revenue-loading").innerHTML =
+      '<div style="color:var(--danger)">Failed to load revenue: ' + esc(e.message) + '</div>';
+  }
+}
+
+// ================================================================
+//  PURCHASES
+// ================================================================
+let purchasesLoaded = false;
+
+async function loadPurchases() {
+  if (purchasesLoaded) return;
+  const tbody = document.getElementById("purchases-tbody");
+
+  try {
+    const data = await api("/admin/api/purchases");
+
+    if (!data.purchases || !data.purchases.length) {
+      tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="icon">&#129534;</div>No purchases yet</div></td></tr>';
+    } else {
+      tbody.innerHTML = data.purchases.map(p => {
+        const sid = esc(p.stripe_session_id || "—");
+        return '<tr>' +
+          '<td>' + fmtDateTime(p.created_at) + '</td>' +
+          '<td class="cell-email">' + esc(p.user_email || "—") + '</td>' +
+          '<td><span class="badge badge-accent">' + esc(p.pack_name || "—") + '</span></td>' +
+          '<td>' + fmt$(p.amount_usd) + '</td>' +
+          '<td class="cell-mono">' + (sid.length > 28 ? sid.slice(0, 28) + "…" : sid) + '</td>' +
+          '</tr>';
+      }).join("");
+    }
+    purchasesLoaded = true;
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--danger);text-align:center;padding:24px">Error: ' + esc(e.message) + '</td></tr>';
+  }
+}
+
+// ================================================================
+//  AUTO-REFRESH (60 s)
+// ================================================================
+let countdown = 60;
+const countdownEl = document.getElementById("refresh-countdown");
+
+function doRefresh() {
+  revenueLoaded   = false;
+  purchasesLoaded = false;
+  countdown       = 60;
+  loadOverview();
+  const active = (document.querySelector(".tab-btn.active") || {}).dataset.tab;
+  if (active === "users")     loadUsers();
+  if (active === "revenue")   loadRevenue();
+  if (active === "purchases") loadPurchases();
+}
+
+document.getElementById("refresh-btn").addEventListener("click", doRefresh);
+
+setInterval(() => {
+  countdown--;
+  countdownEl.textContent = countdown + "s";
+  if (countdown <= 0) doRefresh();
+}, 1000);
+
+// ── Initial load ───────────────────────────────────────────────────
+loadOverview();
+loadUsers();
+</script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "name": "tzurah-server",
+  "version": "1.0.0",
+  "description": "Tzurah Live — API Server",
+  "main": "gcp-server.js",
+  "scripts": {
+    "start": "node gcp-server.js",
+    "dev": "NODE_ENV=development node gcp-server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.0.0",
+    "@decartai/sdk": "^0.0.60",
+    "express": "^4.21.0",
+    "express-basic-auth": "^1.2.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "stripe": "^17.0.0",
+    "node-fetch": "^3.3.2"
+  }
+}

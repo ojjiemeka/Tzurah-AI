@@ -1,0 +1,36 @@
+# ── Secrets ───────────────────────────────────────────────────────
+.env
+.env.production
+
+# ── Node ──────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+
+# ── Logs ──────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── Build artifacts ───────────────────────────────────────────────
+dist/
+build/
+out/
+release/
+
+# ── Electron files (not needed on server) ─────────────────────────
+electron.js
+preload.js
+db.js
+licence.html
+settings.html
+
+# ── Local dev files ───────────────────────────────────────────────
+.env.example
+
+# ── IDE / OS ──────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,28 @@
+name: Deploy to GCP
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Deploy to GCP VM
+        uses: appleboy/ssh-action@master
+        with:
+          host: 34.39.83.195
+          username: ojjiemeka
+          key: ${{ secrets.GCP_SSH_KEY }}
+          script: |
+            set -e
+            cd ~/tzurah-server
+            git pull origin main
+            npm install --production
+            pm2 restart tzurah-server || pm2 start ecosystem.config.js --env production
+            pm2 save
+            echo "✅ Deployed successfully at $(date)"
