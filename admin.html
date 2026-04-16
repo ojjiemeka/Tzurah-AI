@@ -411,6 +411,155 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 /* ── Empty state ────────────────────────────────────────────────── */
 .empty { text-align:center; padding:40px 20px; color:var(--muted); }
 .empty .eicon { font-size:36px; margin-bottom:10px; }
+
+/* ── Clickable stat cards ──────────────────────────────────────── */
+.stat-card.clickable {
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+.stat-card.clickable:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(99,102,241,0.2);
+}
+.stat-card.clickable::after {
+  content: '→';
+  position: absolute;
+  bottom: 10px; right: 12px;
+  font-size: 0.7rem;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.stat-card.clickable:hover::after { opacity: 1; }
+
+/* ── Slide-over panel ──────────────────────────────────────────── */
+.slide-over-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 8999;
+  display: none;
+}
+.slide-over-backdrop.open { display: block; }
+.slide-over {
+  position: fixed;
+  top: 0; right: -440px;
+  width: 440px; height: 100vh;
+  background: #12121e;
+  border-left: 1px solid var(--border);
+  z-index: 9000;
+  transition: right 0.3s cubic-bezier(0.4,0,0.2,1);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.slide-over.open { right: 0; }
+.slide-over-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.slide-over-title { font-size: 14px; font-weight: 700; }
+.slide-over-close {
+  background: none; border: none; color: var(--muted);
+  font-size: 20px; cursor: pointer; line-height: 1; padding: 2px;
+}
+.slide-over-close:hover { color: var(--text); }
+.slide-over-body {
+  flex: 1; overflow-y: auto; padding: 16px;
+}
+.so-user-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border-radius: 8px; cursor: pointer;
+  transition: background .1s; border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.so-user-row:hover { background: var(--surface2); }
+.so-user-email { font-weight: 600; color: var(--text); flex: 1; }
+.so-user-meta  { color: var(--muted); font-size: 11px; }
+
+/* ── Email tab ─────────────────────────────────────────────────── */
+.email-compose {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r); padding: 20px; margin-bottom: 20px;
+}
+.email-compose h3 { font-size: 13px; font-weight: 700; margin-bottom: 16px; }
+.email-field { margin-bottom: 14px; }
+.email-field label {
+  display: block; font-size: 11px; color: var(--muted);
+  font-weight: 600; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px;
+}
+.email-input {
+  width: 100%; padding: 8px 10px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font-size: 12px;
+  outline: none; font-family: inherit;
+}
+.email-input:focus { border-color: var(--accent); }
+.email-textarea {
+  width: 100%; min-height: 160px; padding: 10px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font-size: 12px;
+  outline: none; font-family: inherit; resize: vertical; line-height: 1.6;
+}
+.email-textarea:focus { border-color: var(--accent); }
+.email-recipient-group {
+  display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px;
+}
+.email-recipient-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg);
+  cursor: pointer; transition: border-color .15s;
+}
+.email-recipient-row:hover { border-color: var(--accent); }
+.email-recipient-row.selected { border-color: var(--accent); background: rgba(99,102,241,.08); }
+.email-recipient-row input[type="radio"] { accent-color: var(--accent); flex-shrink: 0; }
+.email-template-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.email-template-chip {
+  padding: 4px 12px; border-radius: 20px;
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text2); font-size: 11px; cursor: pointer; transition: all .15s;
+}
+.email-template-chip:hover { border-color: var(--accent); color: var(--text); }
+.email-preview-box {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; padding: 12px; font-size: 12px;
+  white-space: pre-wrap; color: var(--text2); max-height: 200px; overflow-y: auto;
+  line-height: 1.6; margin-top: 8px; display: none;
+}
+.email-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.email-count-badge {
+  display: inline-block; background: rgba(99,102,241,.2); color: var(--accent);
+  border-radius: 20px; padding: 1px 8px; font-size: 11px; font-weight: 700;
+  margin-left: 4px;
+}
+
+/* ── System health ─────────────────────────────────────────────── */
+.health-panel {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r); overflow: hidden; margin-bottom: 20px;
+}
+.health-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 14px; border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.health-row:last-child { border-bottom: none; }
+.health-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  flex-shrink: 0;
+}
+.health-dot.up   { background: var(--success); box-shadow: 0 0 6px rgba(34,197,94,.5); }
+.health-dot.down { background: var(--danger); }
+.health-dot.unknown { background: var(--muted); }
+.health-name { flex: 1; color: var(--text2); }
+.health-val  { color: var(--muted); font-size: 11px; }
+
+/* ── Last updated ──────────────────────────────────────────────── */
+.last-updated { font-size: 11px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -444,12 +593,38 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   <button class="tab-btn" data-tab="revenue">Revenue</button>
   <button class="tab-btn" data-tab="purchases">Purchases</button>
   <button class="tab-btn" data-tab="alerts">Alerts</button>
+  <button class="tab-btn" data-tab="email">✉ Email</button>
 </div>
 
 <!-- Toast container -->
 <div id="toast-container"></div>
 
 <main>
+
+<!-- Slide-over backdrop -->
+<div class="slide-over-backdrop" id="so-backdrop" onclick="closeSlideOver()"></div>
+
+<!-- Slide-over: Active Today -->
+<div class="slide-over" id="so-active">
+  <div class="slide-over-header">
+    <span class="slide-over-title">🟢 Active Today</span>
+    <button class="slide-over-close" onclick="closeSlideOver()">✕</button>
+  </div>
+  <div class="slide-over-body" id="so-active-body">
+    <div class="loading-cell"><div class="spinner"></div></div>
+  </div>
+</div>
+
+<!-- Slide-over: New This Week -->
+<div class="slide-over" id="so-new">
+  <div class="slide-over-header">
+    <span class="slide-over-title">🆕 New This Week</span>
+    <button class="slide-over-close" onclick="closeSlideOver()">✕</button>
+  </div>
+  <div class="slide-over-body" id="so-new-body">
+    <div class="loading-cell"><div class="spinner"></div></div>
+  </div>
+</div>
 
 <!-- ══ OVERVIEW ══════════════════════════════════════════════════ -->
 <div class="tab-panel active" id="tab-overview">
@@ -510,11 +685,36 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 
   <!-- Activity Feed -->
   <div class="panel-card">
-    <div class="panel-hdr"><span class="ptitle">Recent Activity</span></div>
+    <div class="panel-hdr">
+      <span class="ptitle">Recent Activity</span>
+      <span class="last-updated" id="last-updated" style="margin-left:auto">—</span>
+    </div>
     <div class="panel-body" style="padding:0 14px">
       <ul class="activity-list" id="activity-list">
         <li><span class="act-icon">&#8987;</span><span class="act-body" style="color:var(--muted)">Loading…</span></li>
       </ul>
+    </div>
+  </div>
+
+  <!-- System Health -->
+  <div class="panel-card health-panel" style="margin-top:16px">
+    <div class="panel-hdr"><span class="ptitle">System Health</span></div>
+    <div id="health-rows">
+      <div class="health-row">
+        <div class="health-dot unknown" id="h-api-dot"></div>
+        <span class="health-name">API Server (34.39.83.195)</span>
+        <span class="health-val" id="h-api-val">Checking…</span>
+      </div>
+      <div class="health-row">
+        <div class="health-dot unknown" id="h-db-dot"></div>
+        <span class="health-name">Supabase DB</span>
+        <span class="health-val" id="h-db-val">—</span>
+      </div>
+      <div class="health-row">
+        <div class="health-dot unknown" id="h-email-dot"></div>
+        <span class="health-name">Email (Gmail SMTP)</span>
+        <span class="health-val" id="h-email-val">—</span>
+      </div>
     </div>
   </div>
 </div>
@@ -673,6 +873,89 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
         </div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ══ EMAIL ══════════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-email">
+  <div class="email-compose">
+    <h3>✉ Compose Email</h3>
+
+    <!-- Recipient group selector -->
+    <div class="email-field">
+      <label>To</label>
+      <div class="email-recipient-group" id="email-recipient-group">
+        <label class="email-recipient-row selected" id="eg-all">
+          <input type="radio" name="email-group" value="all" checked onchange="onRecipientGroupChange()">
+          <span>All users</span>
+          <span class="email-count-badge" id="eg-all-count">—</span>
+        </label>
+        <label class="email-recipient-row" id="eg-active">
+          <input type="radio" name="email-group" value="active_this_week" onchange="onRecipientGroupChange()">
+          <span>Active this week</span>
+          <span class="email-count-badge" id="eg-active-count">—</span>
+        </label>
+        <label class="email-recipient-row" id="eg-zero">
+          <input type="radio" name="email-group" value="zero_credits" onchange="onRecipientGroupChange()">
+          <span>Zero credits</span>
+          <span class="email-count-badge" id="eg-zero-count">—</span>
+        </label>
+        <label class="email-recipient-row" id="eg-low">
+          <input type="radio" name="email-group" value="low_credits" onchange="onRecipientGroupChange()">
+          <span>Low credits (&lt;10)</span>
+          <span class="email-count-badge" id="eg-low-count">—</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Subject -->
+    <div class="email-field">
+      <label>Subject</label>
+      <input id="email-subject" class="email-input" type="text" placeholder="Subject line…">
+    </div>
+
+    <!-- Templates -->
+    <div class="email-field">
+      <label>Template</label>
+      <div class="email-template-chips">
+        <button class="email-template-chip" onclick="applyEmailTemplate('welcome')">👋 Welcome</button>
+        <button class="email-template-chip" onclick="applyEmailTemplate('low_credits')">⚠ Low Credits</button>
+        <button class="email-template-chip" onclick="applyEmailTemplate('promo')">🎉 Promo</button>
+      </div>
+    </div>
+
+    <!-- Body -->
+    <div class="email-field">
+      <label>Message <span style="color:var(--muted);font-weight:400;text-transform:none">— use {{name}}, {{credits}} as placeholders</span></label>
+      <textarea id="email-body" class="email-textarea" placeholder="Write your message…"></textarea>
+    </div>
+
+    <!-- Preview -->
+    <div class="email-field">
+      <div style="display:flex;align-items:center;gap:8px">
+        <label style="margin-bottom:0">Preview</label>
+        <button class="btn btn-ghost btn-xs" onclick="toggleEmailPreview()">Show preview</button>
+      </div>
+      <div id="email-preview-box" class="email-preview-box"></div>
+    </div>
+
+    <div class="email-actions">
+      <button class="btn btn-ghost" onclick="sendTestEmail()">📨 Send Test to Admin</button>
+      <button class="btn btn-accent" id="btn-send-email" onclick="sendEmail()">
+        Send to <span id="email-send-count">—</span> recipients
+      </button>
+    </div>
+  </div>
+
+  <!-- Sent history -->
+  <div class="sec-hdr"><h3>Sent Emails</h3></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Date</th><th>Subject</th><th>Recipients</th><th>Status</th></tr></thead>
+      <tbody id="sent-emails-tbody">
+        <tr><td colspan="4" class="loading-cell"><div class="spinner"></div></td></tr>
+      </tbody>
+    </table>
   </div>
 </div>
 
@@ -896,7 +1179,8 @@ function switchTab(id) {
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id==="tab-"+id));
   if (id==="revenue"   && !cache.allPurchases.length) loadRevenuePurchases();
   if (id==="purchases" && !allPurchases.length)       loadPurchasesData();
-  if (id==="alerts") loadAlertRules();
+  if (id==="alerts")   loadAlertRules();
+  if (id==="email")    loadEmailTab();
 }
 
 // ── Logout (clears Basic Auth) ────────────────────────────────────
@@ -945,13 +1229,13 @@ async function loadStats() {
     // Stats cards
     document.getElementById("stats-grid").innerHTML = [
       { label:"Total Users",     val:fmtN(d.totalUsers),      sub:"All accounts",                  hi:true },
-      { label:"Active Today",    val:fmtN(d.activeToday),     sub:"Sessions today" },
-      { label:"New This Week",   val:fmtN(d.newThisWeek),     sub:"Last 7 days" },
-      { label:"Total Revenue",   val:fmt$(d.revenueTotal),    sub:`${fmt$(d.revenueMonth)} this month · ${fmt$(d.revenueToday)} today`, hi:true },
+      { label:"Active Today",    val:fmtN(d.activeToday),     sub:"Sessions today",                click:"openActiveToday" },
+      { label:"New This Week",   val:fmtN(d.newThisWeek),     sub:"Last 7 days",                   click:"openNewThisWeek" },
+      { label:"Total Revenue",   val:fmt$(d.revenueTotal),    sub:`${fmt$(d.revenueMonth)} this month · ${fmt$(d.revenueToday)} today`, hi:true, click:"openRevenue" },
       { label:"Credits Used",    val:fmtN(d.creditsUsed),     sub:"Across all users" },
       { label:"Est. Decart Cost",val:fmt$(estDecartCost),     sub:`~${fmtN(estDecartCr)} Decart cr consumed`, warn:estDecartCost>400 },
     ].map(c=>`
-      <div class="stat-card ${c.hi?"hi":c.warn?"warn":""}">
+      <div class="stat-card ${c.hi?"hi":c.warn?"warn":""}${c.click?" clickable":""}" ${c.click?`onclick="${c.click}()"`:""}>
         <div class="slabel">${c.label}</div>
         <div class="sval">${c.val}</div>
         <div class="ssub">${c.sub}</div>
@@ -1557,6 +1841,293 @@ function testLowBalanceAlert() {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// SLIDE-OVER
+// ══════════════════════════════════════════════════════════════════
+function openSlideOver(id) {
+  document.querySelectorAll(".slide-over").forEach(s => s.classList.remove("open"));
+  document.getElementById("so-backdrop").classList.add("open");
+  document.getElementById(id).classList.add("open");
+}
+function closeSlideOver() {
+  document.querySelectorAll(".slide-over").forEach(s => s.classList.remove("open"));
+  document.getElementById("so-backdrop").classList.remove("open");
+}
+
+function openRevenue() { switchTab("revenue"); }
+
+function openActiveToday() {
+  openSlideOver("so-active");
+  const body = document.getElementById("so-active-body");
+  const now = Date.now();
+  const DAY = 86400000;
+  const activeUsers = cache.users.filter(u => u.last_seen_at && (now - new Date(u.last_seen_at).getTime()) < DAY);
+  if (!activeUsers.length) {
+    body.innerHTML = `<div class="empty"><div class="eicon">😴</div>No users active today</div>`;
+    return;
+  }
+  body.innerHTML = activeUsers
+    .sort((a,b) => new Date(b.last_seen_at) - new Date(a.last_seen_at))
+    .map(u => `
+    <div class="so-user-row" onclick="closeSlideOver();switchTab('users');document.getElementById('user-search').value='${esc(u.email)}';applyUserFilters()">
+      <div>
+        <div class="so-user-email">${esc(u.email)}</div>
+        <div class="so-user-meta">Last seen: ${relTime(u.last_seen_at)} · ${fmtN(u.credits_balance)} cr</div>
+      </div>
+    </div>`).join("");
+}
+
+function openNewThisWeek() {
+  openSlideOver("so-new");
+  const body = document.getElementById("so-new-body");
+  const now = Date.now();
+  const WEEK = 7 * 86400000;
+  const newUsers = cache.users.filter(u => u.created_at && (now - new Date(u.created_at).getTime()) < WEEK);
+  if (!newUsers.length) {
+    body.innerHTML = `<div class="empty"><div class="eicon">🚀</div>No new signups this week</div>`;
+    return;
+  }
+  body.innerHTML = newUsers
+    .sort((a,b) => new Date(b.created_at) - new Date(a.created_at))
+    .map(u => `
+    <div class="so-user-row" onclick="closeSlideOver();switchTab('users');document.getElementById('user-search').value='${esc(u.email)}';applyUserFilters()">
+      <div>
+        <div class="so-user-email">${esc(u.email)}</div>
+        <div class="so-user-meta">Joined: ${relTime(u.created_at)} · ${fmtN(u.credits_balance)} cr remaining</div>
+      </div>
+    </div>`).join("");
+}
+
+// ══════════════════════════════════════════════════════════════════
+// EMAIL TAB
+// ══════════════════════════════════════════════════════════════════
+const EMAIL_TEMPLATES = {
+  welcome: {
+    subject: "Welcome to Tzurah Live! 🎭",
+    body: `Hi {{name}},
+
+Welcome to Tzurah Live! You've received 1 minute of free credits to get started.
+
+Transform your identity in real time — load a reference image, describe the character, and hit Start.
+
+Need more time? Check our credit packs starting at $20.
+
+– The Tzurah Team`
+  },
+  low_credits: {
+    subject: "Your Tzurah credits are running low",
+    body: `Hi {{name}},
+
+You have {{credits}} credits remaining.
+
+Top up now to keep transforming:
+→ Starter: $20 for 7 mins
+→ Standard: $60 for 22 mins
+→ Pro: $100 for 36 mins
+
+– The Tzurah Team`
+  },
+  promo: {
+    subject: "🎉 Special offer from Tzurah Live",
+    body: `Hi {{name}},
+
+We have a special offer just for you...
+
+[Edit this message]
+
+– The Tzurah Team`
+  }
+};
+
+let emailRecipients = {};
+let emailSelectedGroup = "all";
+
+async function loadEmailTab() {
+  try {
+    const d = await api("/admin/api/email/recipients");
+    emailRecipients = d;
+    const groups = { all: d.all?.length||0, active_this_week: d.active_this_week?.length||0, zero_credits: d.zero_credits?.length||0, low_credits: d.low_credits?.length||0 };
+    document.getElementById("eg-all-count").textContent    = groups.all;
+    document.getElementById("eg-active-count").textContent = groups.active_this_week;
+    document.getElementById("eg-zero-count").textContent   = groups.zero_credits;
+    document.getElementById("eg-low-count").textContent    = groups.low_credits;
+    updateEmailSendCount();
+  } catch(e) { console.error("loadEmailTab:", e.message); }
+  loadSentEmails();
+}
+
+function onRecipientGroupChange() {
+  const sel = document.querySelector('input[name="email-group"]:checked');
+  emailSelectedGroup = sel ? sel.value : "all";
+  // Update selected styling
+  document.querySelectorAll(".email-recipient-row").forEach(r => {
+    r.classList.toggle("selected", r.querySelector("input").value === emailSelectedGroup);
+  });
+  updateEmailSendCount();
+}
+
+function updateEmailSendCount() {
+  const list = emailRecipients[emailSelectedGroup] || emailRecipients.all || [];
+  document.getElementById("email-send-count").textContent = list.length;
+}
+
+function applyEmailTemplate(name) {
+  const tpl = EMAIL_TEMPLATES[name];
+  if (!tpl) return;
+  document.getElementById("email-subject").value = tpl.subject;
+  document.getElementById("email-body").value    = tpl.body;
+  document.getElementById("email-preview-box").style.display = "none";
+}
+
+function toggleEmailPreview() {
+  const box  = document.getElementById("email-preview-box");
+  const body = document.getElementById("email-body").value;
+  if (box.style.display === "block") { box.style.display = "none"; return; }
+  box.style.display = "block";
+  box.textContent = body
+    .replace(/{{name}}/g,    "John")
+    .replace(/{{credits}}/g, "5")
+    .replace(/{{email}}/g,   "john@example.com");
+}
+
+async function sendTestEmail() {
+  const subject = document.getElementById("email-subject").value.trim();
+  const body    = document.getElementById("email-body").value.trim();
+  if (!subject || !body) { toast("Subject and body required", "error"); return; }
+  try {
+    const d = await apiPost("/admin/api/email/send", {
+      recipients: [{ email: "admin", name: "Admin" }],
+      subject, body, test_only: true
+    });
+    if (d.sent > 0) toast("✓ Test email sent to admin", "success");
+    else toast("Failed: " + (d.errors?.[0]||"unknown"), "error");
+  } catch(e) { toast("Error: " + e.message, "error"); }
+}
+
+async function sendEmail() {
+  const subject    = document.getElementById("email-subject").value.trim();
+  const body       = document.getElementById("email-body").value.trim();
+  const recipients = emailRecipients[emailSelectedGroup] || emailRecipients.all || [];
+  if (!subject || !body) { toast("Subject and body required", "error"); return; }
+  if (!recipients.length) { toast("No recipients in selected group", "error"); return; }
+
+  Modal.confirm(
+    "Send Email",
+    `Send "${esc(subject)}" to <strong>${recipients.length}</strong> recipient(s)?`,
+    async () => {
+      const btn = document.getElementById("btn-send-email");
+      btn.disabled = true;
+      btn.textContent = "Sending…";
+      try {
+        const d = await apiPost("/admin/api/email/send", { recipients, subject, body });
+        toast(`✓ Sent ${d.sent} emails${d.failed?`, ${d.failed} failed`:""}`, d.failed?"warning":"success");
+        loadSentEmails();
+      } catch(e) {
+        toast("Error: " + e.message, "error");
+      } finally {
+        btn.disabled = false;
+        updateEmailSendCount();
+        btn.innerHTML = `Send to <span id="email-send-count">${recipients.length}</span> recipients`;
+      }
+    }
+  );
+}
+
+async function loadSentEmails() {
+  try {
+    const d = await api("/admin/api/email/sent");
+    const tbody = document.getElementById("sent-emails-tbody");
+    if (!d.emails?.length) {
+      tbody.innerHTML = `<tr><td colspan="4"><div class="empty"><div class="eicon">📭</div>No emails sent yet</div></td></tr>`;
+      return;
+    }
+    tbody.innerHTML = d.emails.map(e => `
+      <tr>
+        <td>${fmtDateTime(e.sent_at)}</td>
+        <td>${esc(e.subject||"—")}</td>
+        <td>${fmtN(e.recipient_count)}</td>
+        <td><span class="badge badge-green">✓ Sent</span></td>
+      </tr>`).join("");
+  } catch(_) {}
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SYSTEM HEALTH
+// ══════════════════════════════════════════════════════════════════
+async function checkHealth() {
+  // API server
+  try {
+    const start = Date.now();
+    const r = await fetch("/health");
+    const ms = Date.now() - start;
+    if (r.ok) {
+      document.getElementById("h-api-dot").className = "health-dot up";
+      document.getElementById("h-api-val").textContent = `Online — ${ms}ms`;
+      document.getElementById("h-db-dot").className  = "health-dot up";
+      document.getElementById("h-db-val").textContent = "Connected via API";
+    }
+  } catch {
+    document.getElementById("h-api-dot").className = "health-dot down";
+    document.getElementById("h-api-val").textContent = "Unreachable";
+    document.getElementById("h-db-dot").className  = "health-dot unknown";
+    document.getElementById("h-db-val").textContent = "—";
+  }
+
+  // Email
+  const emailFrom = document.getElementById("h-email-val");
+  try {
+    const r = await fetch("/admin/api/email/sent");
+    if (r.ok) {
+      document.getElementById("h-email-dot").className = "health-dot up";
+      emailFrom.textContent = "Endpoint ready";
+    }
+  } catch {
+    document.getElementById("h-email-dot").className = "health-dot unknown";
+    emailFrom.textContent = "Not configured";
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ALERTS — auto-check
+// ══════════════════════════════════════════════════════════════════
+async function checkAlerts() {
+  const rules = JSON.parse(localStorage.getItem("tzurah_alert_rules") || "{}");
+
+  // Low Decart balance
+  const balance   = parseInt(localStorage.getItem("tzurah_decart_balance") || "0", 10);
+  const threshold = rules.decartVal || 5000;
+  if (rules.decartEnabled !== false && balance > 0 && balance < threshold) {
+    triggerAlert("decart", `Low Decart balance: ${fmtN(balance)} cr (threshold: ${fmtN(threshold)})`);
+  }
+
+  // High usage sessions
+  const sessionThreshold = rules.sessionVal || 100;
+  if (rules.sessionEnabled !== false) {
+    cache.liveSessions.forEach(s => {
+      if ((s.credits_used || 0) > sessionThreshold) {
+        triggerAlert("session", `High usage: ${s.email} used ${Math.round(s.credits_used)} cr`);
+      }
+    });
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// LAST UPDATED counter
+// ══════════════════════════════════════════════════════════════════
+let lastRefreshTime = Date.now();
+setInterval(() => {
+  const secs = Math.floor((Date.now() - lastRefreshTime) / 1000);
+  const el = document.getElementById("last-updated");
+  if (el) el.textContent = secs < 60 ? `Updated ${secs}s ago` : `Updated ${Math.floor(secs/60)}m ago`;
+}, 1000);
+
+// Hook into loadActivity to reset the timer
+const _origLoadActivity = loadActivity;
+async function loadActivityWithTimer() {
+  await _origLoadActivity();
+  lastRefreshTime = Date.now();
+}
+
+// ══════════════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════════════
 function init() {
@@ -1565,6 +2136,9 @@ function init() {
   loadLiveSessions();
   loadActivity();
   startAutoRefresh();
+  checkHealth();
+  setInterval(checkHealth, 30000);
+  setInterval(checkAlerts, 60000);
 }
 init();
 </script>

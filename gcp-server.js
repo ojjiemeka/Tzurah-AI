@@ -21,6 +21,18 @@ const cors      = require("cors");
 const path      = require("path");
 const { createClient } = require("@supabase/supabase-js");
 
+// ── Nodemailer ─────────────────────────────────────────────────────
+let nodemailer = null;
+try { nodemailer = require("nodemailer"); } catch (_) {}
+
+function getEmailTransporter() {
+  if (!nodemailer || !process.env.EMAIL_FROM || !process.env.EMAIL_PASS) return null;
+  return nodemailer.createTransport({
+    service: "gmail",
+    auth: { user: process.env.EMAIL_FROM, pass: process.env.EMAIL_PASS },
+  });
+}
+
 // ── Stripe ─────────────────────────────────────────────────────────
 const Stripe      = require("stripe");
 const StripeClass = typeof Stripe === "function" ? Stripe : (Stripe.default || Stripe);
@@ -673,28 +685,33 @@ app.post("/admin/api/unban-user", adminAuth, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════
 
 // POST /session/ping — Electron app calls every 10 s during active stream
-app.post("/session/ping", requireAuth, async (req, res) => {
-  const { credits_used } = req.body || {};
+// No JWT required — user_id comes from body (Electron local session)
+app.post("/session/ping", async (req, res) => {
+  const { user_id, email, credits_used } = req.body || {};
+  if (!user_id) return res.status(400).json({ error: "user_id required" });
   try {
     await supabaseAdmin.from("sessions").upsert({
-      user_id:      req.userId,
+      user_id,
+      email:        email || "unknown",
       last_ping:    new Date().toISOString(),
       credits_used: Number(credits_used) || 0,
       is_active:    true,
     }, { onConflict: "user_id" });
     res.json({ ok: true });
   } catch (err) {
-    // Non-fatal — sessions table may not exist yet
     res.json({ ok: true, warn: err.message });
   }
 });
 
 // POST /session/end — Electron calls when stream stops
-app.post("/session/end", requireAuth, async (req, res) => {
+app.post("/session/end", async (req, res) => {
+  const { user_id } = req.body || {};
+  const uid = user_id;
+  if (!uid) return res.status(400).json({ error: "user_id required" });
   try {
     await supabaseAdmin.from("sessions")
       .update({ is_active: false })
-      .eq("user_id", req.userId);
+      .eq("user_id", uid);
     res.json({ ok: true });
   } catch (err) {
     res.json({ ok: true, warn: err.message });
@@ -703,31 +720,24 @@ app.post("/session/end", requireAuth, async (req, res) => {
 
 // ── Admin: live sessions ──────────────────────────────────────────
 app.get("/admin/api/live-sessions", adminAuth, async (_req, res) => {
-  const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
   try {
     const { data: sessions, error } = await supabaseAdmin
       .from("sessions")
       .select("*")
       .eq("is_active", true)
-      .gte("last_ping", fiveMinAgo);
+      .gte("last_ping", twoMinAgo)
+      .order("last_ping", { ascending: false });
 
     if (error) {
-      // Table doesn't exist yet — return empty gracefully
       return res.json({ ok: true, sessions: [], count: 0, note: "sessions table not created yet" });
     }
 
-    const enriched = await Promise.all((sessions || []).map(async (s) => {
-      try {
-        const { data: au } = await supabaseAdmin.auth.admin.getUserById(s.user_id);
-        return {
-          ...s,
-          email:          au?.user?.email || "unknown",
-          duration_secs:  Math.max(0, Math.floor((Date.now() - new Date(s.started_at).getTime()) / 1000)),
-          credits_per_min: 130.8, // 2.18 cr/sec × 60
-        };
-      } catch {
-        return { ...s, email: "unknown", duration_secs: 0, credits_per_min: 130.8 };
-      }
+    const enriched = (sessions || []).map(s => ({
+      ...s,
+      email:          s.email || "unknown",
+      duration_secs:  Math.max(0, Math.floor((Date.now() - new Date(s.started_at).getTime()) / 1000)),
+      credits_per_min: 130.8,
     }));
 
     res.json({ ok: true, sessions: enriched, count: enriched.length });
@@ -814,6 +824,105 @@ app.get("/admin/api/activity", adminAuth, async (_req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// EMAIL  (admin → users)
+//
+// Requires in .env:
+//   EMAIL_FROM=your@gmail.com
+//   EMAIL_PASS=your_gmail_app_password
+//
+// sent_emails table SQL:
+//   CREATE TABLE IF NOT EXISTS public.sent_emails (
+//     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+//     subject TEXT, recipient_count INTEGER,
+//     sent_by TEXT, sent_at TIMESTAMPTZ DEFAULT NOW()
+//   );
+// ═══════════════════════════════════════════════════════════════════
+
+// GET /admin/api/email/recipients — categorised recipient groups
+app.get("/admin/api/email/recipients", adminAuth, async (_req, res) => {
+  try {
+    const [{ merged }] = await Promise.all([fetchAllUsersData()]);
+    const oneWeekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+    res.json({
+      all:              merged,
+      active_this_week: merged.filter(u => u.last_seen_at && u.last_seen_at > oneWeekAgo),
+      zero_credits:     merged.filter(u => u.credits_balance <= 0),
+      low_credits:      merged.filter(u => u.credits_balance > 0 && u.credits_balance <= 10),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /admin/api/email/sent — last 20 sent emails log
+app.get("/admin/api/email/sent", adminAuth, async (_req, res) => {
+  try {
+    const { data } = await supabaseAdmin
+      .from("sent_emails")
+      .select("*")
+      .order("sent_at", { ascending: false })
+      .limit(20);
+    res.json({ ok: true, emails: data || [] });
+  } catch (_) {
+    res.json({ ok: true, emails: [] });
+  }
+});
+
+// POST /admin/api/email/send — send email to recipient list
+app.post("/admin/api/email/send", adminAuth, async (req, res) => {
+  const { recipients, subject, body, test_only } = req.body || {};
+  if (!recipients?.length) return res.status(400).json({ error: "No recipients" });
+  if (!subject?.trim())    return res.status(400).json({ error: "Subject required" });
+  if (!body?.trim())       return res.status(400).json({ error: "Body required" });
+
+  const transporter = getEmailTransporter();
+  if (!transporter) {
+    return res.status(503).json({ error: "Email not configured — set EMAIL_FROM and EMAIL_PASS in .env" });
+  }
+
+  const targets = test_only
+    ? [{ email: process.env.ADMIN_EMAIL || process.env.EMAIL_FROM, name: "Admin (test)", credits_balance: 0 }]
+    : recipients;
+
+  const results = { sent: 0, failed: 0, errors: [] };
+
+  for (const recipient of targets) {
+    const name = recipient.name || (recipient.email || "").split("@")[0];
+    const personalizedBody = (body || "")
+      .replace(/{{name}}/g,    name)
+      .replace(/{{credits}}/g, recipient.credits_balance ?? 0)
+      .replace(/{{email}}/g,   recipient.email || "");
+
+    try {
+      await transporter.sendMail({
+        from:    `Tzurah Live <${process.env.EMAIL_FROM}>`,
+        to:      recipient.email,
+        subject: subject,
+        text:    personalizedBody,
+        html:    "<pre style='font-family:sans-serif'>" + personalizedBody.replace(/\n/g, "<br>") + "</pre>",
+      });
+      results.sent++;
+    } catch (err) {
+      results.failed++;
+      results.errors.push(`${recipient.email}: ${err.message}`);
+    }
+    // Rate limit
+    await new Promise(r => setTimeout(r, 100));
+  }
+
+  // Log to sent_emails (non-fatal)
+  await supabaseAdmin.from("sent_emails").insert({
+    subject,
+    recipient_count: results.sent,
+    sent_by:         "admin",
+    sent_at:         new Date().toISOString(),
+  }).then(() => {}).catch(() => {});
+
+  console.log(`[Tzurah] Email sent: ${results.sent} ok, ${results.failed} failed`);
+  res.json(results);
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // START
 // ═══════════════════════════════════════════════════════════════════
 
@@ -833,5 +942,8 @@ app.listen(PORT, () => {
   console.log("  GET  /admin                    → Admin dashboard (Basic Auth)");
   console.log("  GET  /admin/api/live-sessions  → Live sessions");
   console.log("  GET  /admin/api/activity       → Recent activity feed");
+  console.log("  GET  /admin/api/email/recipients → Email recipient groups");
+  console.log("  POST /admin/api/email/send     → Send email to users");
+  console.log("  GET  /admin/api/email/sent     → Sent email log");
   console.log("═══════════════════════════════════════════════════════\n");
 });
