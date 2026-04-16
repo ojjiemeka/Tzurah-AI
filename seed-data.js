@@ -161,10 +161,10 @@ async function continueSeeding(userId, userData) {
 
     for (let i = 0; i < sessionCount; i++) {
       const sessionSecs   = rand(30, 300);
-      const sessionCredit = Math.min(
-        parseFloat((sessionSecs * 0.1).toFixed(1)),
+      const sessionCredit = Math.round(Math.min(
+        sessionSecs * 0.1,
         remainingCredits > 0 ? remainingCredits : sessionSecs * 0.1
-      );
+      ));
       const endedAt   = randomDate(14);
       const startedAt = new Date(new Date(endedAt).getTime() - sessionSecs * 1000).toISOString();
 
