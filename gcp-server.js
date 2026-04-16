@@ -395,9 +395,11 @@ app.get("/admin/api/stats", adminAuth, async (_req, res) => {
                                   .reduce((s, p) => s + (p.price_usd || 0), 0);
     const revenueToday = purchases.filter(p => (now - new Date(p.created_at).getTime()) < DAY)
                                   .reduce((s, p) => s + (p.price_usd || 0), 0);
-    const creditsUsed        = merged.reduce((s, u) => s + u.credits_used, 0);
-    const totalSecondsUsed   = usages.reduce((s, u) => s + (u.session_seconds || 0), 0);
-    const estimatedDecartCost = Number((creditsUsed * 0.00625).toFixed(2));
+    const creditsUsed      = merged.reduce((s, u) => s + u.credits_used, 0);
+    const totalSecondsUsed = usages.reduce((s, u) => s + (u.session_seconds || 0), 0);
+    // Decart cost: 2.18 Decart credits/sec × $0.00625/credit (from $500/80,000cr best-rate pack)
+    // Formula: total_session_seconds * 2.18 * 0.00625
+    const estimatedDecartCost = Number((totalSecondsUsed * 2.18 * 0.00625).toFixed(2));
 
     // Pack breakdown — count + revenue per pack
     const packBreakdown = {};
@@ -652,6 +654,166 @@ app.post("/admin/api/unban-user", adminAuth, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// USER SESSIONS  (live session tracking for admin dashboard)
+//
+// Requires a `sessions` table in Supabase.  Run this in the SQL editor:
+//
+//   CREATE TABLE IF NOT EXISTS public.sessions (
+//     id         UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+//     user_id    UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+//     started_at TIMESTAMPTZ DEFAULT NOW(),
+//     last_ping  TIMESTAMPTZ DEFAULT NOW(),
+//     credits_used REAL DEFAULT 0,
+//     is_active  BOOLEAN DEFAULT true,
+//     UNIQUE(user_id)
+//   );
+//   ALTER TABLE public.sessions ENABLE ROW LEVEL SECURITY;
+//   CREATE POLICY "Service role full access sessions"
+//     ON public.sessions FOR ALL USING (auth.role() = 'service_role');
+// ═══════════════════════════════════════════════════════════════════
+
+// POST /session/ping — Electron app calls every 10 s during active stream
+app.post("/session/ping", requireAuth, async (req, res) => {
+  const { credits_used } = req.body || {};
+  try {
+    await supabaseAdmin.from("sessions").upsert({
+      user_id:      req.userId,
+      last_ping:    new Date().toISOString(),
+      credits_used: Number(credits_used) || 0,
+      is_active:    true,
+    }, { onConflict: "user_id" });
+    res.json({ ok: true });
+  } catch (err) {
+    // Non-fatal — sessions table may not exist yet
+    res.json({ ok: true, warn: err.message });
+  }
+});
+
+// POST /session/end — Electron calls when stream stops
+app.post("/session/end", requireAuth, async (req, res) => {
+  try {
+    await supabaseAdmin.from("sessions")
+      .update({ is_active: false })
+      .eq("user_id", req.userId);
+    res.json({ ok: true });
+  } catch (err) {
+    res.json({ ok: true, warn: err.message });
+  }
+});
+
+// ── Admin: live sessions ──────────────────────────────────────────
+app.get("/admin/api/live-sessions", adminAuth, async (_req, res) => {
+  const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  try {
+    const { data: sessions, error } = await supabaseAdmin
+      .from("sessions")
+      .select("*")
+      .eq("is_active", true)
+      .gte("last_ping", fiveMinAgo);
+
+    if (error) {
+      // Table doesn't exist yet — return empty gracefully
+      return res.json({ ok: true, sessions: [], count: 0, note: "sessions table not created yet" });
+    }
+
+    const enriched = await Promise.all((sessions || []).map(async (s) => {
+      try {
+        const { data: au } = await supabaseAdmin.auth.admin.getUserById(s.user_id);
+        return {
+          ...s,
+          email:          au?.user?.email || "unknown",
+          duration_secs:  Math.max(0, Math.floor((Date.now() - new Date(s.started_at).getTime()) / 1000)),
+          credits_per_min: 130.8, // 2.18 cr/sec × 60
+        };
+      } catch {
+        return { ...s, email: "unknown", duration_secs: 0, credits_per_min: 130.8 };
+      }
+    }));
+
+    res.json({ ok: true, sessions: enriched, count: enriched.length });
+  } catch (err) {
+    res.json({ ok: true, sessions: [], count: 0, error: err.message });
+  }
+});
+
+// POST /admin/api/end-session — force-end a user's active session
+app.post("/admin/api/end-session", adminAuth, async (req, res) => {
+  const body   = req.body || {};
+  const userId = body.userId || body.user_id;
+  if (!userId) return res.status(400).json({ error: "userId required" });
+  try {
+    await supabaseAdmin.from("sessions")
+      .update({ is_active: false })
+      .eq("user_id", userId);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Admin: recent activity feed ───────────────────────────────────
+app.get("/admin/api/activity", adminAuth, async (_req, res) => {
+  try {
+    const [purchRes, usageRes, signupRes] = await Promise.all([
+      supabaseAdmin.from("purchases")
+        .select("user_id, pack_name, price_usd, created_at")
+        .order("created_at", { ascending: false }).limit(10),
+      supabaseAdmin.from("usage")
+        .select("user_id, session_seconds, credits_used, ended_at, created_at")
+        .order("created_at", { ascending: false }).limit(10),
+      supabaseAdmin.from("profiles")
+        .select("id, display_name, created_at")
+        .order("created_at", { ascending: false }).limit(10),
+    ]);
+
+    const events = [];
+
+    for (const p of purchRes.data || []) {
+      events.push({
+        type:    p.price_usd > 0 ? "purchase" : "gift",
+        user_id: p.user_id,
+        detail:  p.price_usd > 0
+          ? `purchased ${p.pack_name} ($${p.price_usd})`
+          : `received gift: ${p.pack_name}`,
+        ts: p.created_at,
+      });
+    }
+    for (const u of usageRes.data || []) {
+      const m = Math.floor((u.session_seconds || 0) / 60);
+      const s = (u.session_seconds || 0) % 60;
+      events.push({
+        type:    "session",
+        user_id: u.user_id,
+        detail:  `session ended (${m}m ${s}s, ${Math.round(u.credits_used || 0)} cr)`,
+        ts:      u.ended_at || u.created_at,
+      });
+    }
+    for (const p of signupRes.data || []) {
+      events.push({
+        type:    "signup",
+        user_id: p.id,
+        detail:  `signed up${p.display_name ? " as " + p.display_name : ""}`,
+        ts:      p.created_at,
+      });
+    }
+
+    events.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+    const top = events.slice(0, 15);
+
+    await Promise.all(top.slice(0, 10).map(async (e) => {
+      try {
+        const { data: au } = await supabaseAdmin.auth.admin.getUserById(e.user_id);
+        e.email = au?.user?.email || "unknown";
+      } catch { e.email = "unknown"; }
+    }));
+
+    res.json({ ok: true, events: top });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // START
 // ═══════════════════════════════════════════════════════════════════
 
@@ -660,12 +822,16 @@ app.listen(PORT, () => {
   console.log("  Tzurah Live — GCP Server");
   console.log(`  http://localhost:${PORT}`);
   console.log("───────────────────────────────────────────────────────");
-  console.log("  GET  /health                  → Health check");
-  console.log("  GET  /decart/token            → Decart token proxy");
-  console.log("  POST /credits/deduct          → Deduct credits");
-  console.log("  POST /credits/sync            → Bulk usage sync");
-  console.log("  POST /stripe/create-checkout  → Stripe checkout");
-  console.log("  POST /stripe/webhook          → Stripe fulfillment");
-  console.log("  GET  /admin                   → Admin dashboard (Basic Auth)");
+  console.log("  GET  /health                   → Health check");
+  console.log("  GET  /decart/token             → Decart token proxy");
+  console.log("  POST /credits/deduct           → Deduct credits");
+  console.log("  POST /credits/sync             → Bulk usage sync");
+  console.log("  POST /session/ping             → Live session ping");
+  console.log("  POST /session/end              → End session");
+  console.log("  POST /stripe/create-checkout   → Stripe checkout");
+  console.log("  POST /stripe/webhook           → Stripe fulfillment");
+  console.log("  GET  /admin                    → Admin dashboard (Basic Auth)");
+  console.log("  GET  /admin/api/live-sessions  → Live sessions");
+  console.log("  GET  /admin/api/activity       → Recent activity feed");
   console.log("═══════════════════════════════════════════════════════\n");
 });

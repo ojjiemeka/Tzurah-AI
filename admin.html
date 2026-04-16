@@ -1,1034 +1,1564 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Tzurah Live — Admin</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Tzurah Live — Admin</title>
+<style>
+/* ── Variables ─────────────────────────────────────────────────── */
+:root {
+  --bg:       #07070f;
+  --surface:  #0f0f1a;
+  --surface2: #1a1a2e;
+  --surface3: #111120;
+  --border:   #2a2a4a;
+  --accent:   #6366f1;
+  --electric: #06b6d4;
+  --success:  #22c55e;
+  --warning:  #f59e0b;
+  --danger:   #ef4444;
+  --purple:   #8b5cf6;
+  --text:     #e2e8f0;
+  --text2:    #94a3b8;
+  --muted:    #64748b;
+  --r:        10px;
+}
+*,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
+html,body { height:100%; background:var(--bg); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:13px; line-height:1.5; }
+button { font-family:inherit; cursor:pointer; }
+input,select { font-family:inherit; }
+a { color:var(--accent); text-decoration:none; }
 
-    :root {
-      --bg:       #07070f;
-      --surface:  #0f0f1a;
-      --surface2: #1a1a2e;
-      --border:   #2a2a4a;
-      --accent:   #6366f1;
-      --electric: #06b6d4;
-      --success:  #22c55e;
-      --warning:  #f59e0b;
-      --danger:   #ef4444;
-      --text:     #e2e8f0;
-      --muted:    #64748b;
-      --radius:   10px;
-    }
+/* ── Dev banner ────────────────────────────────────────────────── */
+#dev-banner {
+  background:linear-gradient(90deg,#78350f,#92400e);
+  border-bottom:1px solid #d97706;
+  padding:6px 20px;
+  display:flex; align-items:center; gap:10px; font-size:11px;
+}
+#dev-banner strong { color:#fbbf24; }
+#dev-banner code {
+  background:rgba(0,0,0,.3); padding:2px 6px; border-radius:4px;
+  font-family:monospace; color:#fde68a; font-size:11px;
+}
+#dev-banner .x {
+  margin-left:auto; background:none; border:none; color:#fbbf24;
+  font-size:18px; line-height:1; opacity:.7;
+}
+#dev-banner .x:hover { opacity:1; }
 
-    html, body {
-      height: 100%;
-      background: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 14px;
-      line-height: 1.5;
-    }
+/* ── Header ────────────────────────────────────────────────────── */
+header {
+  background:var(--surface); border-bottom:1px solid var(--border);
+  padding:0 20px; height:52px;
+  display:flex; align-items:center; gap:16px;
+}
+.logo { font-size:17px; font-weight:800; letter-spacing:-.5px; white-space:nowrap; }
+.logo .tz   { color:var(--accent); }
+.logo .live { font-size:9px; font-weight:700; letter-spacing:3px; color:var(--electric);
+               text-transform:uppercase; margin-left:4px; vertical-align:middle; }
+.live-pill {
+  display:flex; align-items:center; gap:6px;
+  background:var(--surface2); border:1px solid var(--border);
+  border-radius:20px; padding:3px 10px; font-size:11px; color:var(--text2);
+}
+.live-dot { width:7px; height:7px; border-radius:50%; background:var(--success);
+             animation:pulse 2s ease-in-out infinite; }
+.live-dot.none { background:var(--muted); animation:none; }
+@keyframes pulse { 0%,100%{opacity:1}50%{opacity:.3} }
 
-    /* ── Dev credentials banner ── */
-    #dev-banner {
-      background: linear-gradient(90deg, #78350f, #92400e);
-      border-bottom: 1px solid #d97706;
-      padding: 8px 20px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 12px;
-    }
-    #dev-banner .banner-icon { font-size: 16px; }
-    #dev-banner strong { color: #fbbf24; }
-    #dev-banner code {
-      background: rgba(0,0,0,.3);
-      padding: 2px 7px;
-      border-radius: 4px;
-      font-family: monospace;
-      color: #fde68a;
-      font-size: 11px;
-    }
-    #dev-banner .banner-close {
-      margin-left: auto;
-      background: none;
-      border: none;
-      color: #fbbf24;
-      cursor: pointer;
-      font-size: 18px;
-      line-height: 1;
-      padding: 0 4px;
-      opacity: .8;
-    }
-    #dev-banner .banner-close:hover { opacity: 1; }
+.hdr-actions { margin-left:auto; display:flex; align-items:center; gap:8px; }
+.refresh-countdown { font-size:11px; color:var(--muted); min-width:28px; text-align:right; }
 
-    /* ── Header ── */
-    header {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      padding: 0 24px;
-      display: flex;
-      align-items: center;
-      gap: 24px;
-      height: 56px;
-    }
+/* ── Shared button styles ──────────────────────────────────────── */
+.btn {
+  display:inline-flex; align-items:center; gap:5px;
+  padding:6px 12px; border-radius:6px; border:none;
+  font-size:12px; font-weight:600; transition:all .15s;
+}
+.btn:disabled { opacity:.4; cursor:not-allowed; }
+.btn-ghost { background:var(--surface2); color:var(--text2); border:1px solid var(--border); }
+.btn-ghost:hover { color:var(--text); border-color:var(--accent); }
+.btn-accent { background:var(--accent); color:#fff; }
+.btn-accent:hover { background:#4f46e5; }
+.btn-green  { background:var(--success); color:#fff; }
+.btn-green:hover  { opacity:.85; }
+.btn-red    { background:var(--danger); color:#fff; }
+.btn-red:hover    { opacity:.85; }
+.btn-amber  { background:var(--warning); color:#000; }
+.btn-amber:hover  { opacity:.85; }
+.btn-purple { background:var(--purple); color:#fff; }
+.btn-purple:hover { opacity:.85; }
+.btn-sm { padding:3px 9px; font-size:11px; }
+.btn-xs { padding:2px 7px; font-size:10px; }
 
-    .logo {
-      font-size: 18px;
-      font-weight: 800;
-      letter-spacing: -0.5px;
-      white-space: nowrap;
-    }
-    .logo .tz   { color: var(--accent); }
-    .logo .urah { color: var(--text); }
-    .logo .live {
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 3px;
-      color: var(--electric);
-      text-transform: uppercase;
-      margin-left: 4px;
-      vertical-align: middle;
-    }
+/* ── Tab nav ───────────────────────────────────────────────────── */
+.tab-bar {
+  background:var(--surface); border-bottom:1px solid var(--border);
+  padding:0 20px; display:flex; align-items:center; gap:2px;
+}
+.tab-btn {
+  background:none; border:none; border-bottom:2px solid transparent;
+  color:var(--muted); padding:12px 14px; font-size:13px; font-weight:500;
+  transition:all .15s; cursor:pointer; white-space:nowrap;
+}
+.tab-btn:hover { color:var(--text2); }
+.tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
 
-    .tab-nav {
-      display: flex;
-      gap: 4px;
-      flex: 1;
-    }
-    .tab-btn {
-      background: none;
-      border: none;
-      color: var(--muted);
-      padding: 6px 16px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 500;
-      transition: all .15s;
-    }
-    .tab-btn:hover { color: var(--text); background: var(--surface2); }
-    .tab-btn.active {
-      color: var(--accent);
-      background: rgba(99,102,241,.15);
-    }
+/* ── Main / panels ─────────────────────────────────────────────── */
+main { padding:20px; max-width:1400px; margin:0 auto; }
+.tab-panel { display:none; }
+.tab-panel.active { display:block; }
 
-    .header-actions {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-left: auto;
-    }
+/* ── Stats grid ────────────────────────────────────────────────── */
+.stats-grid {
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+  gap:14px; margin-bottom:20px;
+}
+.stat-card {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r); padding:16px 18px;
+}
+.stat-card .slabel {
+  font-size:10px; text-transform:uppercase; letter-spacing:.8px;
+  color:var(--muted); margin-bottom:6px;
+}
+.stat-card .sval { font-size:26px; font-weight:800; line-height:1; color:var(--text); }
+.stat-card .ssub { font-size:11px; color:var(--muted); margin-top:4px; }
+.stat-card.hi { border-color:var(--accent); }
+.stat-card.warn { border-color:var(--warning); }
 
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 7px 14px;
-      border-radius: 6px;
-      border: none;
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all .15s;
-    }
-    .btn-ghost {
-      background: var(--surface2);
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-    .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-primary:hover { background: #4f46e5; }
-    .btn-success { background: var(--success); color: #fff; }
-    .btn-success:hover { opacity: .85; }
-    .btn-danger  { background: var(--danger); color: #fff; }
-    .btn-danger:hover  { opacity: .85; }
-    .btn-warning { background: var(--warning); color: #000; }
-    .btn-warning:hover { opacity: .85; }
-    .btn-sm { padding: 4px 10px; font-size: 12px; }
-    .btn:disabled { opacity: .4; cursor: not-allowed; }
+/* ── Two-col layout ────────────────────────────────────────────── */
+.two-col { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+@media(max-width:800px) { .two-col { grid-template-columns:1fr; } }
 
-    /* ── Spinner ── */
-    .spinner {
-      display: inline-block;
-      width: 16px; height: 16px;
-      border: 2px solid var(--border);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin .6s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
+/* ── Panel card ────────────────────────────────────────────────── */
+.panel-card {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r); overflow:hidden;
+}
+.panel-hdr {
+  background:var(--surface2); border-bottom:1px solid var(--border);
+  padding:10px 14px; display:flex; align-items:center; gap:8px;
+}
+.panel-hdr .ptitle { font-size:11px; text-transform:uppercase; letter-spacing:.7px; font-weight:700; }
+.panel-body { padding:14px; }
 
-    /* ── Content area ── */
-    main {
-      padding: 24px;
-      max-width: 1280px;
-      margin: 0 auto;
-    }
+/* ── Decart Balance card ───────────────────────────────────────── */
+.decart-input-row {
+  display:flex; gap:8px; margin-bottom:12px;
+}
+.decart-input-row input {
+  flex:1; background:var(--bg); border:1px solid var(--border);
+  border-radius:6px; padding:7px 10px; color:var(--text); font-size:12px; outline:none;
+}
+.decart-input-row input:focus { border-color:var(--accent); }
+.decart-track {
+  height:8px; background:var(--surface2); border-radius:4px; overflow:hidden; margin-bottom:8px;
+}
+.decart-bar {
+  height:100%; background:linear-gradient(90deg,var(--accent),var(--electric));
+  border-radius:4px; transition:width .5s ease;
+}
+.decart-meta { display:flex; justify-content:space-between; font-size:11px; color:var(--muted); }
+.decart-warn {
+  margin-top:10px; background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.3);
+  border-radius:6px; padding:7px 10px; font-size:11px; color:#f87171;
+}
 
-    .tab-panel { display: none; }
-    .tab-panel.active { display: block; }
+/* ── Live sessions ─────────────────────────────────────────────── */
+.live-burn { font-size:11px; color:var(--warning); padding:8px 14px; border-top:1px solid var(--border); }
 
-    /* ── Stats grid ── */
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 16px;
-      margin-bottom: 28px;
-    }
+/* ── Activity feed ─────────────────────────────────────────────── */
+.activity-list { list-style:none; }
+.activity-list li {
+  display:flex; align-items:flex-start; gap:10px; padding:8px 0;
+  border-bottom:1px solid var(--border); font-size:12px;
+}
+.activity-list li:last-child { border-bottom:none; }
+.act-icon { font-size:14px; flex-shrink:0; margin-top:1px; }
+.act-body  { flex:1; }
+.act-email { font-weight:600; color:var(--text); }
+.act-detail { color:var(--muted); }
+.act-time  { font-size:10px; color:var(--muted); white-space:nowrap; }
 
-    .stat-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 18px 20px;
-    }
-    .stat-card .label {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: .8px;
-      color: var(--muted);
-      margin-bottom: 8px;
-    }
-    .stat-card .value {
-      font-size: 28px;
-      font-weight: 700;
-      color: var(--text);
-      line-height: 1;
-    }
-    .stat-card .sub {
-      font-size: 11px;
-      color: var(--muted);
-      margin-top: 6px;
-    }
-    .stat-card.accent-border { border-color: var(--accent); }
-    .stat-card.warn-border   { border-color: var(--warning); }
+/* ── Alert box ─────────────────────────────────────────────────── */
+.alert-box {
+  border-radius:var(--r); padding:10px 14px; margin-bottom:16px;
+  display:flex; align-items:flex-start; gap:8px; font-size:12px;
+}
+.alert-warn { background:rgba(245,158,11,.1); border:1px solid rgba(245,158,11,.3); color:#fbbf24; }
+.alert-info { background:rgba(99,102,241,.1); border:1px solid rgba(99,102,241,.3); color:#a5b4fc; }
 
-    /* ── Warning alert ── */
-    .alert {
-      border-radius: var(--radius);
-      padding: 12px 16px;
-      margin-bottom: 20px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 13px;
-    }
-    .alert-warning {
-      background: rgba(245,158,11,.1);
-      border: 1px solid rgba(245,158,11,.4);
-      color: #fbbf24;
-    }
+/* ── Section header ────────────────────────────────────────────── */
+.sec-hdr { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.sec-hdr h3 { font-size:13px; font-weight:700; }
+.sec-hdr .sub { font-size:11px; color:var(--muted); margin-top:2px; }
 
-    /* ── Section header ── */
-    .section-hdr {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 14px;
-    }
-    .section-hdr h2 {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--text);
-    }
-    .section-hdr .subtitle {
-      font-size: 12px;
-      color: var(--muted);
-      margin-top: 2px;
-    }
+/* ── Search / filter row ───────────────────────────────────────── */
+.filter-row { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+.filter-row input, .filter-row select {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:6px; padding:6px 10px; color:var(--text); font-size:12px; outline:none;
+}
+.filter-row input:focus, .filter-row select:focus { border-color:var(--accent); }
+.filter-row input { flex:1; min-width:160px; }
+.filter-row input::placeholder { color:var(--muted); }
+select option { background:var(--surface2); }
 
-    /* ── Bar chart ── */
-    .bar-chart-wrap {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 20px;
-      margin-bottom: 28px;
-    }
-    .bar-chart {
-      display: flex;
-      align-items: flex-end;
-      gap: 3px;
-      height: 120px;
-    }
-    .bar-col {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-end;
-      gap: 4px;
-    }
-    .bar {
-      width: 100%;
-      min-height: 2px;
-      background: linear-gradient(180deg, var(--accent), rgba(99,102,241,.4));
-      border-radius: 3px 3px 0 0;
-      transition: opacity .2s;
-      cursor: default;
-    }
-    .bar:hover { opacity: .75; }
-    .bar-label {
-      font-size: 9px;
-      color: var(--muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 100%;
-      text-align: center;
-    }
-    .bar-axis {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 6px;
-      font-size: 10px;
-      color: var(--muted);
-    }
+/* ── Filter chips ──────────────────────────────────────────────── */
+.chip-row { display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap; }
+.chip {
+  padding:3px 10px; border-radius:20px; border:1px solid var(--border);
+  background:var(--surface2); color:var(--text2); font-size:11px; font-weight:500;
+  cursor:pointer; transition:all .15s;
+}
+.chip:hover { border-color:var(--accent); color:var(--text); }
+.chip.on { background:rgba(99,102,241,.2); border-color:var(--accent); color:var(--accent); }
 
-    /* ── Table ── */
-    .table-wrap {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      overflow: hidden;
-      margin-bottom: 20px;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-    thead th {
-      background: var(--surface2);
-      padding: 10px 14px;
-      text-align: left;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: .6px;
-      color: var(--muted);
-      white-space: nowrap;
-      border-bottom: 1px solid var(--border);
-    }
-    tbody tr {
-      border-bottom: 1px solid var(--border);
-      transition: background .1s;
-    }
-    tbody tr:last-child { border-bottom: none; }
-    tbody tr:hover { background: var(--surface2); }
-    tbody td {
-      padding: 10px 14px;
-      font-size: 13px;
-      vertical-align: middle;
-    }
-    .cell-mono { font-family: monospace; font-size: 12px; color: var(--muted); }
-    .cell-email { font-weight: 500; }
-    .badge {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 20px;
-      font-size: 11px;
-      font-weight: 600;
-    }
-    .badge-green  { background: rgba(34,197,94,.15);  color: #4ade80; }
-    .badge-red    { background: rgba(239,68,68,.15);   color: #f87171; }
-    .badge-muted  { background: var(--surface2);       color: var(--muted); }
-    .badge-accent { background: rgba(99,102,241,.15);  color: #818cf8; }
+/* ── Bulk action bar ───────────────────────────────────────────── */
+.bulk-bar {
+  display:none; align-items:center; gap:10px;
+  background:var(--surface2); border:1px solid var(--accent);
+  border-radius:8px; padding:8px 14px; margin-bottom:10px; font-size:12px;
+}
+.bulk-bar.show { display:flex; }
+.bulk-count { color:var(--accent); font-weight:700; }
 
-    .actions-cell { display: flex; gap: 6px; flex-wrap: wrap; }
+/* ── Table ─────────────────────────────────────────────────────── */
+.table-wrap {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r); overflow:hidden; margin-bottom:12px;
+}
+table { width:100%; border-collapse:collapse; }
+thead th {
+  background:var(--surface2); padding:8px 12px; text-align:left;
+  font-size:10px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted);
+  border-bottom:1px solid var(--border); white-space:nowrap;
+}
+tbody tr { border-bottom:1px solid var(--border); transition:background .1s; }
+tbody tr:last-child { border-bottom:none; }
+tbody tr:hover { background:var(--surface2); }
+tbody td { padding:8px 12px; font-size:12px; vertical-align:middle; }
+.td-email { font-weight:600; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.td-mono  { font-family:monospace; font-size:11px; color:var(--muted); max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cursor:pointer; }
 
-    /* ── Pagination ── */
-    .pagination {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      justify-content: flex-end;
-    }
-    .pagination span { font-size: 12px; color: var(--muted); }
+/* ── Badges ────────────────────────────────────────────────────── */
+.badge {
+  display:inline-block; padding:2px 8px; border-radius:20px;
+  font-size:10px; font-weight:700;
+}
+.badge-green  { background:rgba(34,197,94,.15);  color:#4ade80; }
+.badge-red    { background:rgba(239,68,68,.15);   color:#f87171; }
+.badge-accent { background:rgba(99,102,241,.15);  color:#818cf8; }
+.badge-amber  { background:rgba(245,158,11,.15);  color:#fbbf24; }
+.badge-muted  { background:var(--surface2);       color:var(--muted); }
 
-    /* ── Search bar ── */
-    .search-row {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 16px;
-    }
-    .search-input {
-      flex: 1;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 8px 14px;
-      color: var(--text);
-      font-size: 13px;
-      outline: none;
-      transition: border-color .15s;
-    }
-    .search-input::placeholder { color: var(--muted); }
-    .search-input:focus { border-color: var(--accent); }
+/* ── ⋯ action dropdown ─────────────────────────────────────────── */
+.action-dropdown {
+  position:fixed; z-index:9999;
+  background:var(--surface2); border:1px solid var(--border);
+  border-radius:8px; padding:4px; min-width:180px;
+  box-shadow:0 8px 32px rgba(0,0,0,.6);
+}
+.action-dropdown button {
+  display:flex; align-items:center; gap:8px; width:100%;
+  background:none; border:none; color:var(--text2);
+  padding:7px 10px; border-radius:5px; font-size:12px; text-align:left;
+}
+.action-dropdown button:hover { background:var(--surface); color:var(--text); }
+.action-dropdown .sep { height:1px; background:var(--border); margin:3px 0; }
+.action-dropdown .item-red { color:var(--danger); }
+.action-dropdown .item-green { color:var(--success); }
 
-    /* ── Revenue summary cards ── */
-    .rev-cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 14px;
-      margin-bottom: 24px;
-    }
+/* ── Pagination ────────────────────────────────────────────────── */
+.pager { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.pager .info { font-size:11px; color:var(--muted); }
+.pager .btns { display:flex; gap:6px; }
 
-    /* ── Pack breakdown ── */
-    .pack-table-wrap {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      overflow: hidden;
-    }
+/* ── Revenue chart (from spec) ─────────────────────────────────── */
+.chart-container {
+  display:flex; align-items:flex-end; gap:4px; height:180px; padding:16px 0 0;
+}
+.chart-col { flex:1; display:flex; flex-direction:column; align-items:center; height:100%; }
+.chart-bar-wrap { flex:1; display:flex; align-items:flex-end; width:100%; }
+.chart-bar {
+  width:100%; min-height:2px;
+  background:linear-gradient(to top,#6366f1,#8b5cf6);
+  border-radius:3px 3px 0 0; position:relative; transition:height .3s ease; cursor:pointer;
+}
+.chart-bar:hover { background:linear-gradient(to top,#818cf8,#a78bfa); }
+.chart-val {
+  position:absolute; top:-18px; left:50%; transform:translateX(-50%);
+  font-size:9px; color:var(--muted); white-space:nowrap;
+}
+.chart-label { font-size:9px; color:var(--muted); margin-top:4px; white-space:nowrap; }
 
-    /* ── Modals ── */
-    .modal-backdrop {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,.7);
-      z-index: 100;
-      align-items: center;
-      justify-content: center;
-    }
-    .modal-backdrop.open { display: flex; }
-    .modal {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 28px;
-      width: 420px;
-      max-width: 95vw;
-    }
-    .modal h3 { font-size: 16px; margin-bottom: 6px; }
-    .modal .modal-sub { font-size: 12px; color: var(--muted); margin-bottom: 20px; }
-    .modal label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 5px; margin-top: 14px; }
-    .modal input[type="number"],
-    .modal input[type="text"] {
-      width: 100%;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 9px 12px;
-      color: var(--text);
-      font-size: 13px;
-      outline: none;
-    }
-    .modal input:focus { border-color: var(--accent); }
-    .modal-actions {
-      display: flex;
-      gap: 10px;
-      margin-top: 22px;
-      justify-content: flex-end;
-    }
+/* ── Time range pills ──────────────────────────────────────────── */
+.time-range { display:flex; gap:6px; margin-bottom:16px; }
+.time-pill {
+  padding:4px 12px; border-radius:20px; border:1px solid var(--border);
+  background:var(--surface2); color:var(--muted); font-size:11px; font-weight:600;
+  cursor:pointer; transition:all .15s;
+}
+.time-pill.on { background:rgba(99,102,241,.2); border-color:var(--accent); color:var(--accent); }
 
-    /* ── Loading placeholder ── */
-    .loading-cell {
-      text-align: center;
-      padding: 40px;
-      color: var(--muted);
-    }
+/* ── Rev summary cards ─────────────────────────────────────────── */
+.rev-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:20px; }
 
-    /* ── Auto-refresh indicator ── */
-    .refresh-indicator {
-      font-size: 11px;
-      color: var(--muted);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .refresh-dot {
-      width: 6px; height: 6px;
-      background: var(--success);
-      border-radius: 50%;
-      animation: pulse 2s ease-in-out infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: .3; }
-    }
+/* ── Spinner ────────────────────────────────────────────────────── */
+.spinner {
+  display:inline-block; width:16px; height:16px;
+  border:2px solid var(--border); border-top-color:var(--accent);
+  border-radius:50%; animation:spin .6s linear infinite;
+}
+.spinner-lg { width:32px; height:32px; border-width:3px; }
+@keyframes spin { to{transform:rotate(360deg)} }
+.loading-cell { text-align:center; padding:36px; color:var(--muted); }
 
-    /* ── Empty state ── */
-    .empty-state {
-      text-align: center;
-      padding: 48px 20px;
-      color: var(--muted);
-    }
-    .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
-  </style>
+/* ── Alerts tab ─────────────────────────────────────────────────── */
+.alert-rules { background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:16px; margin-bottom:16px; }
+.rule-row { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border); }
+.rule-row:last-child { border-bottom:none; }
+.rule-row label { flex:1; font-size:12px; color:var(--text2); cursor:pointer; }
+.rule-row input[type="number"] {
+  width:70px; background:var(--bg); border:1px solid var(--border);
+  border-radius:5px; padding:4px 7px; color:var(--text); font-size:11px; outline:none; text-align:center;
+}
+.alert-hist-item {
+  display:flex; align-items:center; gap:10px; padding:8px 14px;
+  border-bottom:1px solid var(--border); font-size:12px;
+}
+.alert-hist-item:last-child { border-bottom:none; }
+
+/* ── Modal system (from spec) ──────────────────────────────────── */
+.admin-modal-overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,.7); backdrop-filter:blur(4px);
+  display:flex; align-items:center; justify-content:center;
+  z-index:99999; animation:mfade .18s ease;
+}
+@keyframes mfade { from{opacity:0;transform:scale(.96)} to{opacity:1;transform:scale(1)} }
+.admin-modal-card {
+  background:#1a1a2e; border:1px solid #2a2a4a; border-radius:12px;
+  padding:24px; min-width:380px; max-width:480px; width:100%;
+}
+.modal-header { font-size:1rem; font-weight:800; color:#fff; margin-bottom:12px; }
+.modal-body   { margin-bottom:18px; color:var(--text2); }
+.modal-subtitle { color:#fff; margin-bottom:10px; font-size:13px; }
+.modal-field  { margin-bottom:10px; }
+.modal-field label { display:block; font-size:11px; color:var(--muted); margin-bottom:3px; font-weight:600; }
+.modal-input {
+  width:100%; padding:7px 10px; background:var(--bg); border:1px solid var(--border);
+  border-radius:6px; color:#fff; font-size:12px; outline:none; font-family:inherit;
+}
+.modal-input:focus { border-color:var(--accent); }
+.modal-hint { font-size:11px; color:var(--accent); margin-top:4px; }
+.modal-warning {
+  color:#f87171; font-size:11px; background:rgba(239,68,68,.1);
+  padding:7px 10px; border-radius:6px; margin-top:8px;
+}
+.modal-footer { display:flex; gap:8px; justify-content:flex-end; margin-top:20px; }
+.modal-btn-cancel {
+  padding:7px 14px; background:transparent; color:var(--muted);
+  border:1px solid var(--border); border-radius:6px; cursor:pointer; font-family:inherit; font-size:12px;
+}
+.modal-btn-cancel:hover { color:#fff; }
+.modal-btn-confirm {
+  padding:7px 18px; border:none; border-radius:6px; cursor:pointer;
+  font-weight:700; font-family:inherit; font-size:12px;
+  background:var(--accent); color:#fff;
+}
+.modal-btn-confirm.btn-red    { background:#ef4444; }
+.modal-btn-confirm.btn-green  { background:#22c55e; }
+.modal-btn-confirm.btn-purple { background:#8b5cf6; }
+.modal-btn-confirm.btn-amber  { background:#f59e0b; color:#000; }
+.modal-btn-confirm:hover { filter:brightness(1.1); }
+
+/* ── Toast system (from spec) ──────────────────────────────────── */
+#toast-container {
+  position:fixed; bottom:24px; right:24px;
+  display:flex; flex-direction:column; gap:8px; z-index:999999;
+}
+.toast {
+  padding:10px 16px; border-radius:8px; font-size:12px; font-weight:600;
+  opacity:0; transform:translateY(8px); transition:all .3s ease;
+  pointer-events:none; max-width:320px;
+}
+.toast.show { opacity:1; transform:translateY(0); }
+.toast-success { background:#166534; color:#4ade80; border:1px solid #16a34a; }
+.toast-error   { background:#7f1d1d; color:#f87171; border:1px solid #dc2626; }
+.toast-info    { background:#1e1b4b; color:#a5b4fc; border:1px solid #6366f1; }
+.toast-warning { background:#78350f; color:#fbbf24; border:1px solid #d97706; }
+
+/* ── Usage history modal table ─────────────────────────────────── */
+.usage-table { width:100%; border-collapse:collapse; font-size:11px; }
+.usage-table th,
+.usage-table td { padding:5px 8px; text-align:left; border-bottom:1px solid var(--border); }
+.usage-table th { color:var(--muted); font-weight:600; }
+.usage-table td { color:var(--text2); }
+
+/* ── Empty state ────────────────────────────────────────────────── */
+.empty { text-align:center; padding:40px 20px; color:var(--muted); }
+.empty .eicon { font-size:36px; margin-bottom:10px; }
+</style>
 </head>
 <body>
 
-<!-- Dev credentials banner -->
+<!-- Dev Credentials Banner -->
 <div id="dev-banner">
-  <span class="banner-icon">&#9888;&#65039;</span>
-  <span><strong>Dev Mode</strong> &mdash; Default credentials active. Change before production:</span>
-  <code>admin@tzurah.ai</code>
-  <span>/</span>
-  <code>TzurahAdmin2025!</code>
-  <button class="banner-close" onclick="document.getElementById('dev-banner').remove()" title="Dismiss">&times;</button>
+  <span>&#9888;&#65039; <strong>Dev Mode</strong> — Default credentials active:</span>
+  <code>admin@tzurah.ai</code> / <code>TzurahAdmin2025!</code>
+  <button class="x" onclick="this.closest('#dev-banner').remove()">&#215;</button>
 </div>
 
 <!-- Header -->
 <header>
-  <div class="logo">
-    <span class="tz">Tz</span><span class="urah">urah</span><span class="live">LIVE</span>
+  <div class="logo"><span class="tz">Tz</span>urah<span class="live">LIVE</span> <span style="font-size:11px;font-weight:400;color:var(--muted)">Admin</span></div>
+  <div class="live-pill">
+    <div class="live-dot none" id="live-dot"></div>
+    <span>Live: <strong id="live-count">0</strong></span>
   </div>
-
-  <nav class="tab-nav">
-    <button class="tab-btn active" data-tab="overview">Overview</button>
-    <button class="tab-btn" data-tab="users">Users</button>
-    <button class="tab-btn" data-tab="revenue">Revenue</button>
-    <button class="tab-btn" data-tab="purchases">Purchases</button>
-  </nav>
-
-  <div class="header-actions">
-    <div class="refresh-indicator">
-      <div class="refresh-dot"></div>
-      <span id="refresh-countdown">60s</span>
-    </div>
-    <button class="btn btn-ghost" id="refresh-btn">&#8635; Refresh</button>
+  <div class="hdr-actions">
+    <span class="refresh-countdown" id="refresh-cd" title="Auto-refresh"></span>
+    <button class="btn btn-ghost" id="auto-btn" onclick="toggleAuto()">&#8635; Auto</button>
+    <button class="btn btn-ghost" onclick="manualRefresh()">&#8635; Now</button>
+    <button class="btn btn-ghost" onclick="logout()">Logout</button>
   </div>
 </header>
 
-<!-- ================================================================
-     OVERVIEW TAB
-     ================================================================ -->
+<!-- Tab bar -->
+<div class="tab-bar">
+  <button class="tab-btn active" data-tab="overview">Overview</button>
+  <button class="tab-btn" data-tab="users">Users</button>
+  <button class="tab-btn" data-tab="revenue">Revenue</button>
+  <button class="tab-btn" data-tab="purchases">Purchases</button>
+  <button class="tab-btn" data-tab="alerts">Alerts</button>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
 <main>
-  <div class="tab-panel active" id="tab-overview">
-    <div id="overview-loading" style="text-align:center;padding:60px;color:var(--muted)">
-      <div class="spinner" style="width:32px;height:32px;margin:0 auto 12px"></div>
-      Loading stats&hellip;
-    </div>
-    <div id="overview-content" style="display:none">
-      <div class="stats-grid" id="stats-grid"></div>
 
-      <div id="decart-warning" style="display:none" class="alert alert-warning">
-        &#9888; Estimated Decart cost this month exceeds $400. Consider reviewing usage or adjusting credit pricing.
-      </div>
-
-      <div class="bar-chart-wrap">
-        <div class="section-hdr" style="margin-bottom:16px">
-          <div>
-            <h2>Revenue &mdash; Last 30 Days</h2>
-            <div class="subtitle">Daily totals in USD</div>
-          </div>
-        </div>
-        <div class="bar-chart" id="revenue-chart"></div>
-        <div class="bar-axis">
-          <span id="chart-start-label"></span>
-          <span id="chart-end-label"></span>
-        </div>
-      </div>
-    </div>
+<!-- ══ OVERVIEW ══════════════════════════════════════════════════ -->
+<div class="tab-panel active" id="tab-overview">
+  <div id="decart-cost-alert" class="alert-box alert-warn" style="display:none">
+    &#9888; Estimated Decart spend approaching $500 pack threshold.
+    Consider purchasing the $500 pack ($0.00625/cr best rate).
+  </div>
+  <div class="stats-grid" id="stats-grid">
+    <div class="stat-card"><div class="slabel">Total Users</div><div class="sval">—</div></div>
+    <div class="stat-card"><div class="slabel">Active Today</div><div class="sval">—</div></div>
+    <div class="stat-card"><div class="slabel">New This Week</div><div class="sval">—</div></div>
+    <div class="stat-card hi"><div class="slabel">Total Revenue</div><div class="sval">—</div></div>
+    <div class="stat-card"><div class="slabel">Credits Used</div><div class="sval">—</div></div>
+    <div class="stat-card" id="decart-stat-card"><div class="slabel">Est. Decart Cost</div><div class="sval">—</div><div class="ssub"></div></div>
   </div>
 
-  <!-- ================================================================
-       USERS TAB
-       ================================================================ -->
-  <div class="tab-panel" id="tab-users">
-    <div class="search-row">
-      <input type="text" class="search-input" id="user-search" placeholder="Search by email or name&hellip;" />
-      <button class="btn btn-ghost" id="user-search-btn">Search</button>
-    </div>
-
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Email</th>
-            <th>Name</th>
-            <th>Credits</th>
-            <th>Purchased</th>
-            <th>Used</th>
-            <th>Last Seen</th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="users-tbody">
-          <tr><td colspan="8" class="loading-cell"><div class="spinner" style="margin:0 auto"></div></td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:4px">
-      <span id="users-count-label" style="font-size:12px;color:var(--muted)"></span>
-      <div class="pagination">
-        <button class="btn btn-ghost btn-sm" id="users-prev">&#8592; Prev</button>
-        <span id="users-page-label">Page 1</span>
-        <button class="btn btn-ghost btn-sm" id="users-next">Next &#8594;</button>
+  <div class="two-col">
+    <!-- Decart Balance -->
+    <div class="panel-card">
+      <div class="panel-hdr">
+        <span class="ptitle">Decart Balance</span>
+        <span style="font-size:10px;color:var(--muted)">manual — enter from Decart dashboard</span>
+      </div>
+      <div class="panel-body">
+        <div class="decart-input-row">
+          <input id="decart-bal-input" type="number" placeholder="Enter current Decart balance (credits)…" min="0"/>
+          <button class="btn btn-accent" onclick="saveDecartBalance()">Save</button>
+        </div>
+        <div class="decart-track"><div class="decart-bar" id="decart-bar" style="width:100%"></div></div>
+        <div class="decart-meta">
+          <span id="decart-used-lbl">— cr used (est.)</span>
+          <span id="decart-rem-lbl">Est. remaining: —</span>
+        </div>
+        <div class="decart-warn" id="decart-low-warn" style="display:none">
+          &#9888; Below 10,000 cr — Top up now!
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- ================================================================
-       REVENUE TAB
-       ================================================================ -->
-  <div class="tab-panel" id="tab-revenue">
-    <div id="revenue-loading" style="text-align:center;padding:60px;color:var(--muted)">
-      <div class="spinner" style="width:32px;height:32px;margin:0 auto 12px"></div>
-      Loading revenue data&hellip;
-    </div>
-    <div id="revenue-content" style="display:none">
-      <div class="rev-cards" id="rev-cards"></div>
-
-      <div class="section-hdr">
-        <h2>Pack Breakdown</h2>
+    <!-- Live Sessions -->
+    <div class="panel-card">
+      <div class="panel-hdr">
+        <div class="live-dot none" id="sessions-dot"></div>
+        <span class="ptitle">Live Sessions</span>
+        <span id="sessions-count-lbl" style="font-size:11px;color:var(--muted)">0 active</span>
       </div>
-      <div class="pack-table-wrap">
+      <div class="table-wrap" style="border:none;border-radius:0;margin:0">
         <table>
-          <thead>
-            <tr>
-              <th>Pack</th>
-              <th>Units Sold</th>
-              <th>Revenue</th>
-              <th>% of Total</th>
-            </tr>
-          </thead>
-          <tbody id="pack-tbody"></tbody>
+          <thead><tr><th>User</th><th>Duration</th><th>Cr/min</th><th></th></tr></thead>
+          <tbody id="live-tbody">
+            <tr><td colspan="4" class="loading-cell"><div class="spinner"></div></td></tr>
+          </tbody>
         </table>
       </div>
+      <div class="live-burn" id="live-burn">Total burning: 0 cr/min</div>
     </div>
   </div>
 
-  <!-- ================================================================
-       PURCHASES TAB
-       ================================================================ -->
-  <div class="tab-panel" id="tab-purchases">
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Email</th>
-            <th>Pack</th>
-            <th>Amount</th>
-            <th>Payment ID</th>
-          </tr>
-        </thead>
-        <tbody id="purchases-tbody">
-          <tr><td colspan="5" class="loading-cell"><div class="spinner" style="margin:0 auto"></div></td></tr>
-        </tbody>
-      </table>
+  <!-- Activity Feed -->
+  <div class="panel-card">
+    <div class="panel-hdr"><span class="ptitle">Recent Activity</span></div>
+    <div class="panel-body" style="padding:0 14px">
+      <ul class="activity-list" id="activity-list">
+        <li><span class="act-icon">&#8987;</span><span class="act-body" style="color:var(--muted)">Loading…</span></li>
+      </ul>
     </div>
   </div>
+</div>
+
+<!-- ══ USERS ═════════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-users">
+  <div class="filter-row">
+    <input id="user-search" type="text" placeholder="Search email or name…" oninput="debounceSearch()"/>
+    <select id="credit-filter" onchange="applyUserFilters()">
+      <option value="all">Credits: All</option>
+      <option value="has">Has credits</option>
+      <option value="low">Low (&lt;10)</option>
+      <option value="zero">Zero credits</option>
+    </select>
+    <select id="sort-by" onchange="applyUserFilters()">
+      <option value="recent">Sort: Recently Joined</option>
+      <option value="lastActive">Sort: Last Active</option>
+      <option value="mostCredits">Sort: Most Credits</option>
+      <option value="mostSpent">Sort: Most Spent</option>
+    </select>
+    <button class="btn btn-accent" onclick="applyUserFilters()">Search</button>
+  </div>
+  <div class="chip-row">
+    <span class="chip" data-chip="activeToday" onclick="toggleChip(this)">&#128994; Active today</span>
+    <span class="chip" data-chip="lowCredits"  onclick="toggleChip(this)">&#128308; Low credits (&lt;10)</span>
+    <span class="chip" data-chip="noCredits"   onclick="toggleChip(this)">&#9899; Zero credits</span>
+    <span class="chip" data-chip="highUsage"   onclick="toggleChip(this)">&#128200; High usage</span>
+  </div>
+  <div class="bulk-bar" id="bulk-bar">
+    <span class="bulk-count" id="bulk-count">0 selected</span>
+    <button class="btn btn-green btn-sm" onclick="doBulkGift()">&#127873; Gift 10 credits</button>
+    <button class="btn btn-red btn-sm"   onclick="doBulkBan()">&#128683; Ban selected</button>
+    <button class="btn btn-ghost btn-sm" onclick="doExportCSV()">&#128196; Export CSV</button>
+    <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="clearSelection()">&#215; Clear</button>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th><input type="checkbox" id="select-all" onclick="toggleSelectAll(this)"></th>
+        <th>Email</th><th>Name</th><th>Credits</th><th>Time Left</th>
+        <th>Spent</th><th>Joined</th><th>Last Seen</th><th>Status</th><th></th>
+      </tr></thead>
+      <tbody id="users-tbody">
+        <tr><td colspan="10" class="loading-cell"><div class="spinner"></div></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="pager">
+    <span class="info" id="users-info"></span>
+    <div class="btns">
+      <button class="btn btn-ghost btn-sm" id="users-prev" onclick="usersPage--; renderUsersPage()">&#8592; Prev</button>
+      <span id="users-page-lbl" style="font-size:11px;color:var(--muted);align-self:center"></span>
+      <button class="btn btn-ghost btn-sm" id="users-next" onclick="usersPage++; renderUsersPage()">Next &#8594;</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ REVENUE ════════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-revenue">
+  <div class="time-range" id="time-range">
+    <button class="time-pill" data-days="7"  onclick="setTimeRange(7)">7 days</button>
+    <button class="time-pill on" data-days="30" onclick="setTimeRange(30)">30 days</button>
+    <button class="time-pill" data-days="90" onclick="setTimeRange(90)">90 days</button>
+    <button class="time-pill" data-days="0"  onclick="setTimeRange(0)">All time</button>
+  </div>
+  <div class="rev-cards" id="rev-summary-cards">
+    <div class="stat-card"><div class="slabel">Period Revenue</div><div class="sval" id="rv-period">—</div></div>
+    <div class="stat-card"><div class="slabel">vs Prev Period</div><div class="sval" id="rv-change">—</div></div>
+    <div class="stat-card"><div class="slabel">Avg Order Value</div><div class="sval" id="rv-aov">—</div></div>
+    <div class="stat-card"><div class="slabel">Top Spender</div><div class="sval" id="rv-top" style="font-size:13px">—</div></div>
+  </div>
+  <div class="sec-hdr"><h3>Revenue Chart</h3></div>
+  <div class="panel-card" style="padding:16px 20px;margin-bottom:20px">
+    <div id="rev-chart-wrap"><div class="loading-cell"><div class="spinner"></div></div></div>
+  </div>
+  <div class="sec-hdr"><h3>Pack Breakdown</h3></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Pack</th><th>Sales</th><th>Revenue</th><th>% of Total</th><th>Avg/day</th></tr></thead>
+      <tbody id="pack-tbody"><tr><td colspan="5" class="loading-cell"><div class="spinner"></div></td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ══ PURCHASES ══════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-purchases">
+  <div class="filter-row">
+    <input id="purch-search" type="text" placeholder="Search email or payment ID…" oninput="filterPurchases()"/>
+    <select id="purch-filter" onchange="filterPurchases()">
+      <option value="all">All types</option>
+      <option value="paid">Paid</option>
+      <option value="gifted">Gifted</option>
+    </select>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Date</th><th>Email</th><th>Pack</th><th>Amount</th><th>Payment ID</th><th>Type</th></tr></thead>
+      <tbody id="purch-tbody"><tr><td colspan="6" class="loading-cell"><div class="spinner"></div></td></tr></tbody>
+    </table>
+  </div>
+  <div class="pager">
+    <span class="info" id="purch-info"></span>
+    <div class="btns">
+      <button class="btn btn-ghost btn-sm" id="purch-prev" onclick="purchPage--; renderPurchPage()">&#8592; Prev</button>
+      <span id="purch-page-lbl" style="font-size:11px;color:var(--muted);align-self:center"></span>
+      <button class="btn btn-ghost btn-sm" id="purch-next" onclick="purchPage++; renderPurchPage()">Next &#8594;</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ ALERTS ═════════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-alerts">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <!-- Rules -->
+    <div>
+      <div class="sec-hdr"><h3>Alert Rules</h3><button class="btn btn-accent btn-sm" onclick="saveAlertRules()">Save Rules</button></div>
+      <div class="alert-rules" id="alert-rules-panel">
+        <div class="rule-row">
+          <input type="checkbox" id="ar-decart" checked>
+          <label for="ar-decart">Decart balance below</label>
+          <input type="number" id="ar-decart-val" value="5000" min="0"/>
+          <span style="font-size:11px;color:var(--muted)">credits</span>
+        </div>
+        <div class="rule-row">
+          <input type="checkbox" id="ar-session" checked>
+          <label for="ar-session">User session exceeds</label>
+          <input type="number" id="ar-session-val" value="100" min="0"/>
+          <span style="font-size:11px;color:var(--muted)">credits</span>
+        </div>
+        <div class="rule-row">
+          <input type="checkbox" id="ar-signup" checked>
+          <label for="ar-signup">Signup spike:</label>
+          <input type="number" id="ar-signup-val" value="10" min="1"/>
+          <span style="font-size:11px;color:var(--muted)">in 1 hr</span>
+        </div>
+        <div class="rule-row">
+          <input type="checkbox" id="ar-payment" checked>
+          <label for="ar-payment">Payment failed → email me</label>
+        </div>
+        <div class="rule-row">
+          <input type="checkbox" id="ar-ban" checked>
+          <label for="ar-ban">User banned → email confirmation</label>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn btn-ghost" onclick="testEmailAlert()">&#128231; Test Email Alert</button>
+        <button class="btn btn-ghost" onclick="testLowBalanceAlert()">&#9888; Test Low Balance</button>
+      </div>
+    </div>
+    <!-- History -->
+    <div>
+      <div class="sec-hdr"><h3>Alert History</h3><button class="btn btn-ghost btn-sm" onclick="clearAlertHistory()">Clear</button></div>
+      <div class="panel-card">
+        <div id="alert-hist-wrap">
+          <div class="empty"><div class="eicon">&#128276;</div>No alerts triggered yet</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 </main>
-
-<!-- Gift Credits Modal -->
-<div class="modal-backdrop" id="modal-gift">
-  <div class="modal">
-    <h3>Gift Credits</h3>
-    <div class="modal-sub" id="modal-gift-sub">Adding credits to user</div>
-    <label>Credits to add</label>
-    <input type="number" id="gift-amount" min="1" max="100000" value="100" />
-    <label>Reason (optional)</label>
-    <input type="text" id="gift-reason" placeholder="e.g. Compensation, promo&hellip;" />
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('modal-gift')">Cancel</button>
-      <button class="btn btn-success" id="gift-confirm-btn">Gift Credits</button>
-    </div>
-  </div>
-</div>
-
-<!-- Deduct Credits Modal -->
-<div class="modal-backdrop" id="modal-deduct">
-  <div class="modal">
-    <h3>Deduct Credits</h3>
-    <div class="modal-sub" id="modal-deduct-sub">Removing credits from user</div>
-    <label>Credits to deduct</label>
-    <input type="number" id="deduct-amount" min="1" max="100000" value="10" />
-    <label>Reason (optional)</label>
-    <input type="text" id="deduct-reason" placeholder="e.g. Abuse, correction&hellip;" />
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('modal-deduct')">Cancel</button>
-      <button class="btn btn-warning" id="deduct-confirm-btn">Deduct Credits</button>
-    </div>
-  </div>
-</div>
 
 <script>
 "use strict";
 
-// ── XSS escape ──────────────────────────────────────────────────
-function esc(s) {
-  return String(s == null ? "" : s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+// ── Config ────────────────────────────────────────────────────────
+const CREDITS_PER_SEC  = 0.1;   // 1 credit = 10 seconds
+const DECART_CR_PER_SEC = 2.18; // Decart credits burned per second
+const DECART_COST_PER_CR = 0.00625; // $ per Decart credit
 
-// ── Tab navigation ───────────────────────────────────────────────
-const tabBtns   = document.querySelectorAll(".tab-btn");
-const tabPanels = document.querySelectorAll(".tab-panel");
+// ── State ─────────────────────────────────────────────────────────
+const cache = { users: [], allPurchases: [], stats: null, liveSessions: [] };
+let usersFiltered = [];
+let usersPage     = 1;
+const USERS_PER_PAGE = 20;
+const selectedUsers  = new Set();
+let activeChips      = new Set();
+let searchTimer      = null;
 
-function switchTab(tabId) {
-  tabBtns.forEach(b => b.classList.toggle("active", b.dataset.tab === tabId));
-  tabPanels.forEach(p => p.classList.toggle("active", p.id === "tab-" + tabId));
-  if (tabId === "revenue")   loadRevenue();
-  if (tabId === "purchases") loadPurchases();
-}
-tabBtns.forEach(b => b.addEventListener("click", () => switchTab(b.dataset.tab)));
+let allPurchases = [];
+let purchFiltered = [];
+let purchPage    = 1;
+const PURCH_PER_PAGE = 20;
+let revDays = 30;
 
-// ── Modal helpers ────────────────────────────────────────────────
-function openModal(id)  { document.getElementById(id).classList.add("open"); }
-function closeModal(id) { document.getElementById(id).classList.remove("open"); }
-document.querySelectorAll(".modal-backdrop").forEach(m => {
-  m.addEventListener("click", e => { if (e.target === m) closeModal(m.id); });
-});
-
-// ── API fetch helpers ─────────────────────────────────────────────
-async function api(path) {
-  const res = await fetch(path);
-  if (!res.ok) throw new Error("HTTP " + res.status);
-  return res.json();
-}
-async function apiPost(path, body) {
-  const res = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    let err = {};
-    try { err = await res.json(); } catch (_) {}
-    throw new Error(err.error || "HTTP " + res.status);
-  }
-  return res.json();
-}
+let autoOn      = true;
+let overviewInt = null;
+let liveInt     = null;
+let cdValue     = 30;
+let cdInterval  = null;
 
 // ── Formatters ────────────────────────────────────────────────────
-function fmt$(n)  { return "$" + Number(n || 0).toFixed(2); }
-function fmtN(n)  { return Number(n || 0).toLocaleString(); }
-function fmtDate(s) {
-  if (!s) return "—";
-  return new Date(s).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" });
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 }
-function fmtDateTime(s) {
-  if (!s) return "—";
-  return new Date(s).toLocaleString("en-US", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" });
+function fmt$(n)  { return "$" + Number(n||0).toFixed(2); }
+function fmtN(n)  { return Number(n||0).toLocaleString(); }
+function fmtSecs(s) {
+  s = Math.max(0, Math.round(s));
+  const m = Math.floor(s / 60), sec = s % 60;
+  return `${m}:${String(sec).padStart(2,"0")}`;
 }
-function relTime(s) {
-  if (!s) return "Never";
-  const m = Math.floor((Date.now() - new Date(s).getTime()) / 60000);
-  if (m < 1)  return "Just now";
-  if (m < 60) return m + "m ago";
+function relTime(ts) {
+  if (!ts) return "Never";
+  const m = Math.floor((Date.now() - new Date(ts)) / 60000);
+  if (m < 1) return "Just now";
+  if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
-  if (h < 24) return h + "h ago";
-  return Math.floor(h / 24) + "d ago";
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h/24)}d ago`;
+}
+function fmtDate(ts) {
+  if (!ts) return "—";
+  return new Date(ts).toLocaleDateString("en-US",{month:"short",day:"numeric"});
+}
+function fmtDateTime(ts) {
+  if (!ts) return "—";
+  return new Date(ts).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
 }
 
-// ================================================================
-//  OVERVIEW
-// ================================================================
-async function loadOverview() {
-  document.getElementById("overview-loading").style.display = "";
-  document.getElementById("overview-content").style.display  = "none";
+// ── API helpers ───────────────────────────────────────────────────
+async function api(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+async function apiPost(path, body) {
+  const r = await fetch(path, {
+    method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)
+  });
+  if (!r.ok) { let e={}; try{e=await r.json()}catch(_){} throw new Error(e.error||"HTTP "+r.status); }
+  return r.json();
+}
 
+// ── Toast ─────────────────────────────────────────────────────────
+function toast(msg, type="success") {
+  const t = document.createElement("div");
+  t.className = `toast toast-${type}`;
+  t.textContent = msg;
+  document.getElementById("toast-container").appendChild(t);
+  setTimeout(() => t.classList.add("show"), 10);
+  setTimeout(() => { t.classList.remove("show"); setTimeout(() => t.remove(), 300); }, 3500);
+}
+
+// ── Modal system ──────────────────────────────────────────────────
+function showModal(html, opts={}) {
+  const ov = document.createElement("div");
+  ov.className = "admin-modal-overlay";
+  ov.innerHTML = `<div class="admin-modal-card">${html}</div>`;
+  document.body.appendChild(ov);
+
+  ov.querySelector(".modal-btn-cancel")?.addEventListener("click", () => { ov.remove(); opts.onCancel?.(); });
+  ov.addEventListener("click", e => { if (e.target===ov) ov.remove(); });
+
+  const confirmBtn = ov.querySelector(".modal-btn-confirm");
+  if (confirmBtn) {
+    confirmBtn.addEventListener("click", () => {
+      if (opts.type === "gift") {
+        const amount = parseInt(ov.querySelector("#m-amount").value, 10);
+        const reason = ov.querySelector("#m-reason")?.value || "";
+        if (!amount||amount<1) { toast("Enter a valid amount","error"); return; }
+        ov.remove(); opts.onSuccess?.(amount, reason);
+      } else if (opts.type === "deduct") {
+        const amount = parseInt(ov.querySelector("#m-amount").value, 10);
+        const reason = ov.querySelector("#m-reason")?.value || "";
+        if (!amount||amount<1) { toast("Enter a valid amount","error"); return; }
+        ov.remove(); opts.onSuccess?.(amount, reason);
+      } else if (opts.type === "input") {
+        const val = ov.querySelector(".modal-input")?.value;
+        ov.remove(); opts.onSubmit?.(val);
+      } else {
+        ov.remove(); opts.onConfirm?.();
+      }
+    });
+  }
+  setTimeout(() => ov.querySelector("input")?.focus(), 80);
+}
+
+const Modal = {
+  confirm(title, msg, onConfirm, onCancel) {
+    showModal(`
+      <div class="modal-header">${title}</div>
+      <div class="modal-body">${msg}</div>
+      <div class="modal-footer">
+        <button class="modal-btn-cancel">Cancel</button>
+        <button class="modal-btn-confirm">${title}</button>
+      </div>`, { onConfirm, onCancel });
+  },
+  giftCredits(email, userId, onSuccess) {
+    showModal(`
+      <div class="modal-header">&#127873; Gift Credits</div>
+      <div class="modal-body">
+        <p class="modal-subtitle">To: <strong>${esc(email)}</strong></p>
+        <div class="modal-field">
+          <label>Credits to gift</label>
+          <input id="m-amount" class="modal-input" type="number" min="1" max="100000" value="50">
+        </div>
+        <div class="modal-field">
+          <label>Reason (optional)</label>
+          <input id="m-reason" class="modal-input" type="text" placeholder="e.g. compensation, promotion">
+        </div>
+        <p class="modal-hint" id="m-hint">&#8776; 8.3 mins of streaming</p>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn-cancel">Cancel</button>
+        <button class="modal-btn-confirm btn-purple">Gift Credits</button>
+      </div>`, { type:"gift", onSuccess });
+    document.getElementById("m-amount").addEventListener("input", e => {
+      const mins = ((parseInt(e.target.value)||0)*10/60).toFixed(1);
+      const h = document.getElementById("m-hint");
+      if (h) h.textContent = `\u2248 ${mins} mins of streaming`;
+    });
+  },
+  deductCredits(email, userId, onSuccess) {
+    showModal(`
+      <div class="modal-header">&#10134; Deduct Credits</div>
+      <div class="modal-body">
+        <p class="modal-subtitle">From: <strong>${esc(email)}</strong></p>
+        <div class="modal-field">
+          <label>Credits to deduct</label>
+          <input id="m-amount" class="modal-input" type="number" min="1" max="100000" value="10">
+        </div>
+        <div class="modal-field">
+          <label>Reason (optional)</label>
+          <input id="m-reason" class="modal-input" type="text" placeholder="e.g. abuse, correction">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn-cancel">Cancel</button>
+        <button class="modal-btn-confirm btn-amber">Deduct Credits</button>
+      </div>`, { type:"deduct", onSuccess });
+  },
+  banUser(email, userId, isBanned, onSuccess) {
+    const action = isBanned ? "Unban" : "Ban";
+    showModal(`
+      <div class="modal-header">${isBanned ? "&#9989; Unban" : "&#128683; Ban"} User</div>
+      <div class="modal-body">
+        <p>${action} <strong>${esc(email)}</strong>?</p>
+        ${!isBanned ? '<p class="modal-warning">This will immediately prevent them from logging in.</p>' : ""}
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn-cancel">Cancel</button>
+        <button class="modal-btn-confirm ${!isBanned?"btn-red":"btn-green"}">${action} User</button>
+      </div>`, { onConfirm: onSuccess });
+  },
+  viewUsage(email, userId) {
+    const userPurchases = cache.allPurchases.filter(p => p.user_id === userId).slice(0, 20);
+    const rows = userPurchases.length
+      ? userPurchases.map(p => `<tr>
+          <td>${fmtDate(p.created_at)}</td>
+          <td>${esc(p.pack_name||"—")}</td>
+          <td>${fmt$(p.amount_usd)}</td>
+          <td>${esc(p.stripe_session_id||"—").slice(0,20)}</td>
+        </tr>`).join("")
+      : `<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:16px">No purchases found</td></tr>`;
+    showModal(`
+      <div class="modal-header">&#128202; Usage: ${esc(email)}</div>
+      <div class="modal-body" style="max-height:300px;overflow-y:auto">
+        <table class="usage-table">
+          <thead><tr><th>Date</th><th>Pack</th><th>Amount</th><th>Payment ID</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn-cancel">Close</button>
+      </div>`);
+  }
+};
+
+// ── Tabs ──────────────────────────────────────────────────────────
+document.querySelectorAll(".tab-btn").forEach(b => {
+  b.addEventListener("click", () => switchTab(b.dataset.tab));
+});
+function switchTab(id) {
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab===id));
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id==="tab-"+id));
+  if (id==="revenue"   && !cache.allPurchases.length) loadRevenuePurchases();
+  if (id==="purchases" && !allPurchases.length)       loadPurchasesData();
+  if (id==="alerts") loadAlertRules();
+}
+
+// ── Logout (clears Basic Auth) ────────────────────────────────────
+function logout() {
+  const x = new XMLHttpRequest();
+  x.open("GET", window.location.href, true, "logout", "logout");
+  x.send();
+  x.onload = x.onerror = () => window.location.reload();
+}
+
+// ── Auto-refresh ──────────────────────────────────────────────────
+function startAutoRefresh() {
+  clearIntervals();
+  overviewInt = setInterval(() => { loadStats(); loadActivity(); cdValue=30; }, 30000);
+  liveInt     = setInterval(() => loadLiveSessions(), 10000);
+  cdInterval  = setInterval(() => {
+    if (!autoOn) return;
+    cdValue = Math.max(0, cdValue - 1);
+    document.getElementById("refresh-cd").textContent = cdValue + "s";
+  }, 1000);
+}
+function clearIntervals() {
+  clearInterval(overviewInt); clearInterval(liveInt); clearInterval(cdInterval);
+}
+function toggleAuto() {
+  autoOn = !autoOn;
+  const btn = document.getElementById("auto-btn");
+  if (autoOn) { startAutoRefresh(); btn.textContent = "↻ Auto"; btn.classList.remove("btn-amber"); btn.classList.add("btn-ghost"); }
+  else        { clearIntervals(); btn.textContent = "⏸ Paused"; btn.classList.remove("btn-ghost"); btn.classList.add("btn-amber");
+                document.getElementById("refresh-cd").textContent = ""; }
+}
+function manualRefresh() { loadStats(); loadLiveSessions(); loadActivity(); cdValue=30; }
+
+// ══════════════════════════════════════════════════════════════════
+// OVERVIEW
+// ══════════════════════════════════════════════════════════════════
+async function loadStats() {
   try {
-    const data = await api("/admin/api/stats");
+    const d = await api("/admin/api/stats");
+    cache.stats = d;
 
-    document.getElementById("overview-loading").style.display = "none";
-    document.getElementById("overview-content").style.display = "block";
+    const totalSecsUsed    = d.totalSecondsUsed || 0;
+    const estDecartCr      = Math.round(totalSecsUsed * DECART_CR_PER_SEC);
+    const estDecartCost    = d.estimatedDecartCost || 0;
 
+    // Stats cards
     document.getElementById("stats-grid").innerHTML = [
-      { label: "Total Users",      value: fmtN(data.totalUsers),            sub: "All registered accounts",                            accent: true },
-      { label: "Active Today",     value: fmtN(data.activeToday),           sub: "Unique sessions today" },
-      { label: "New This Week",    value: fmtN(data.newThisWeek),           sub: "Signups in last 7 days" },
-      { label: "Total Revenue",    value: fmt$(data.revenueTotal),          sub: fmt$(data.revenueMonth) + " this month &middot; " + fmt$(data.revenueToday) + " today", accent: true },
-      { label: "Credits Used",     value: fmtN(data.creditsUsed),           sub: "Across all users" },
-      { label: "Est. Decart Cost", value: fmt$(data.estimatedDecartCost),   sub: "This month (" + fmt$((data.estimatedDecartCost || 0) / 30) + "/day avg)", warn: (data.estimatedDecartCost || 0) > 400 },
-    ].map(c => `
-      <div class="stat-card ${c.accent ? "accent-border" : c.warn ? "warn-border" : ""}">
-        <div class="label">${c.label}</div>
-        <div class="value">${c.value}</div>
-        <div class="sub">${c.sub}</div>
+      { label:"Total Users",     val:fmtN(d.totalUsers),      sub:"All accounts",                  hi:true },
+      { label:"Active Today",    val:fmtN(d.activeToday),     sub:"Sessions today" },
+      { label:"New This Week",   val:fmtN(d.newThisWeek),     sub:"Last 7 days" },
+      { label:"Total Revenue",   val:fmt$(d.revenueTotal),    sub:`${fmt$(d.revenueMonth)} this month · ${fmt$(d.revenueToday)} today`, hi:true },
+      { label:"Credits Used",    val:fmtN(d.creditsUsed),     sub:"Across all users" },
+      { label:"Est. Decart Cost",val:fmt$(estDecartCost),     sub:`~${fmtN(estDecartCr)} Decart cr consumed`, warn:estDecartCost>400 },
+    ].map(c=>`
+      <div class="stat-card ${c.hi?"hi":c.warn?"warn":""}">
+        <div class="slabel">${c.label}</div>
+        <div class="sval">${c.val}</div>
+        <div class="ssub">${c.sub}</div>
       </div>`).join("");
 
-    if ((data.estimatedDecartCost || 0) > 400) {
-      document.getElementById("decart-warning").style.display = "flex";
-    }
+    // Decart cost alert
+    document.getElementById("decart-cost-alert").style.display = estDecartCost > 400 ? "" : "none";
 
-    renderChart(data.revenueChart || []);
-  } catch (e) {
-    document.getElementById("overview-loading").innerHTML =
-      '<div style="color:var(--danger)">Failed to load: ' + esc(e.message) + "</div>";
+    // Update Decart balance bar
+    updateDecartBar(estDecartCr);
+
+    // Load users for Users tab if not loaded
+    if (!cache.users.length) loadUsersData();
+  } catch(e) {
+    console.error("loadStats:", e.message);
   }
 }
 
-function renderChart(days) {
-  const el = document.getElementById("revenue-chart");
-  if (!days.length) {
-    el.innerHTML = '<div class="empty-state" style="flex:1"><div class="icon">&#128202;</div>No revenue data yet</div>';
-    return;
-  }
-  const max = Math.max(...days.map(d => d.total || 0), 0.01);
-  el.innerHTML = days.map(d => {
-    const pct = Math.max(((d.total || 0) / max) * 100, 1).toFixed(1);
-    return '<div class="bar-col" title="' + esc(d.date) + ': ' + fmt$(d.total) + '">' +
-      '<div class="bar" style="height:' + pct + '%"></div>' +
-      '<div class="bar-label">' + esc((d.date || "").slice(5)) + '</div>' +
-      '</div>';
-  }).join("");
-  document.getElementById("chart-start-label").textContent = days[0].date || "";
-  document.getElementById("chart-end-label").textContent   = days[days.length - 1].date || "";
-}
-
-// ================================================================
-//  USERS
-// ================================================================
-let usersPage       = 1;
-let usersSearch     = "";
-let usersTotalPages = 1;
-let usersTotalCount = 0;
-let selectedUserId    = null;
-let selectedUserEmail = "";
-
-async function loadUsers() {
-  const tbody = document.getElementById("users-tbody");
-  tbody.innerHTML = '<tr><td colspan="8" class="loading-cell"><div class="spinner" style="margin:0 auto"></div></td></tr>';
-
+async function loadLiveSessions() {
   try {
-    const qs   = new URLSearchParams({ page: usersPage, limit: 20, search: usersSearch });
-    const data = await api("/admin/api/users?" + qs);
+    const d = await api("/admin/api/live-sessions");
+    const sessions = d.sessions || [];
+    cache.liveSessions = sessions;
 
-    usersTotalPages = data.totalPages || 1;
-    usersTotalCount = data.total      || 0;
+    const dot = document.getElementById("live-dot");
+    const sdot = document.getElementById("sessions-dot");
+    const countEl = document.getElementById("live-count");
+    const sCountEl = document.getElementById("sessions-count-lbl");
 
-    document.getElementById("users-count-label").textContent =
-      fmtN(usersTotalCount) + " user" + (usersTotalCount !== 1 ? "s" : "");
-    document.getElementById("users-page-label").textContent =
-      "Page " + usersPage + " / " + usersTotalPages;
-    document.getElementById("users-prev").disabled = usersPage <= 1;
-    document.getElementById("users-next").disabled = usersPage >= usersTotalPages;
+    const n = sessions.length;
+    countEl.textContent = n;
+    sCountEl.textContent = `${n} active`;
+    [dot, sdot].forEach(el => el.classList.toggle("none", n===0));
 
-    if (!data.users || !data.users.length) {
-      tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><div class="icon">&#128101;</div>No users found</div></td></tr>';
+    const tbody = document.getElementById("live-tbody");
+    if (!n) {
+      tbody.innerHTML = `<tr><td colspan="4" class="loading-cell" style="color:var(--muted)">No active sessions</td></tr>`;
+      document.getElementById("live-burn").textContent = "Total burning: 0 cr/min";
       return;
     }
+    tbody.innerHTML = sessions.map(s => `
+      <tr>
+        <td class="td-email">${esc(s.email)}</td>
+        <td>${fmtSecs(s.duration_secs)}</td>
+        <td>${(s.credits_per_min||130.8).toFixed(1)}</td>
+        <td><button class="btn btn-red btn-xs" onclick="endSession('${esc(s.user_id)}','${esc(s.email)}')">End</button></td>
+      </tr>`).join("");
 
-    tbody.innerHTML = data.users.map(u => {
-      const uid   = esc(u.id    || "");
-      const email = esc(u.email || "");
-      return '<tr>' +
-        '<td class="cell-email">' + email + '</td>' +
-        '<td>' + esc(u.name || "—") + '</td>' +
-        '<td><strong>' + fmtN(u.credits_balance) + '</strong></td>' +
-        '<td>' + fmtN(u.credits_purchased) + '</td>' +
-        '<td>' + fmtN(u.credits_used) + '</td>' +
-        '<td>' + relTime(u.last_seen_at) + '</td>' +
-        '<td>' + (u.is_banned
-          ? '<span class="badge badge-red">Banned</span>'
-          : '<span class="badge badge-green">Active</span>') + '</td>' +
-        '<td><div class="actions-cell">' +
-          '<button class="btn btn-success btn-sm" onclick="openGift(\'' + uid + '\',\'' + email + '\')">Gift</button>' +
-          '<button class="btn btn-warning btn-sm" onclick="openDeduct(\'' + uid + '\',\'' + email + '\')">Deduct</button>' +
-          (u.is_banned
-            ? '<button class="btn btn-ghost btn-sm" onclick="doUnban(\'' + uid + '\',\'' + email + '\')">Unban</button>'
-            : '<button class="btn btn-danger btn-sm"  onclick="doBan(\'' + uid + '\',\'' + email + '\')">Ban</button>') +
-        '</div></td>' +
-        '</tr>';
-    }).join("");
-
-  } catch (e) {
-    tbody.innerHTML = '<tr><td colspan="8" style="color:var(--danger);text-align:center;padding:24px">Error: ' + esc(e.message) + '</td></tr>';
+    const totalBurn = (sessions.length * 130.8).toFixed(1);
+    document.getElementById("live-burn").textContent = `Total credits burning: ${totalBurn} cr/min`;
+  } catch(e) {
+    document.getElementById("live-tbody").innerHTML = `<tr><td colspan="4" class="loading-cell" style="color:var(--muted)">Unavailable — sessions table not created yet</td></tr>`;
   }
 }
 
-document.getElementById("users-prev").addEventListener("click", () => {
-  if (usersPage > 1) { usersPage--; loadUsers(); }
-});
-document.getElementById("users-next").addEventListener("click", () => {
-  if (usersPage < usersTotalPages) { usersPage++; loadUsers(); }
-});
-document.getElementById("user-search-btn").addEventListener("click", () => {
-  usersSearch = document.getElementById("user-search").value.trim();
-  usersPage   = 1;
-  loadUsers();
-});
-document.getElementById("user-search").addEventListener("keydown", e => {
-  if (e.key === "Enter") document.getElementById("user-search-btn").click();
-});
-
-// ── Gift modal ────────────────────────────────────────────────────
-function openGift(uid, email) {
-  selectedUserId    = uid;
-  selectedUserEmail = email;
-  document.getElementById("modal-gift-sub").textContent  = "Adding credits to " + email;
-  document.getElementById("gift-amount").value  = 100;
-  document.getElementById("gift-reason").value  = "";
-  openModal("modal-gift");
-}
-document.getElementById("gift-confirm-btn").addEventListener("click", async () => {
-  const amount = parseInt(document.getElementById("gift-amount").value, 10);
-  const reason = document.getElementById("gift-reason").value.trim();
-  if (!amount || amount < 1) { alert("Enter a valid amount"); return; }
-  try {
-    await apiPost("/admin/api/gift-credits", { userId: selectedUserId, amount, reason });
-    closeModal("modal-gift");
-    alert("Gifted " + amount + " credits to " + selectedUserEmail);
-    loadUsers();
-  } catch (e) { alert("Error: " + e.message); }
-});
-
-// ── Deduct modal ──────────────────────────────────────────────────
-function openDeduct(uid, email) {
-  selectedUserId    = uid;
-  selectedUserEmail = email;
-  document.getElementById("modal-deduct-sub").textContent = "Removing credits from " + email;
-  document.getElementById("deduct-amount").value = 10;
-  document.getElementById("deduct-reason").value = "";
-  openModal("modal-deduct");
-}
-document.getElementById("deduct-confirm-btn").addEventListener("click", async () => {
-  const amount = parseInt(document.getElementById("deduct-amount").value, 10);
-  const reason = document.getElementById("deduct-reason").value.trim();
-  if (!amount || amount < 1) { alert("Enter a valid amount"); return; }
-  try {
-    await apiPost("/admin/api/deduct-credits", { userId: selectedUserId, amount, reason });
-    closeModal("modal-deduct");
-    alert("Deducted " + amount + " credits from " + selectedUserEmail);
-    loadUsers();
-  } catch (e) { alert("Error: " + e.message); }
-});
-
-// ── Ban / Unban ───────────────────────────────────────────────────
-async function doBan(uid, email) {
-  if (!confirm("Ban " + email + "? They will lose access immediately.")) return;
-  try {
-    await apiPost("/admin/api/ban-user", { userId: uid });
-    loadUsers();
-  } catch (e) { alert("Error: " + e.message); }
-}
-async function doUnban(uid, email) {
-  if (!confirm("Unban " + email + "?")) return;
-  try {
-    await apiPost("/admin/api/unban-user", { userId: uid });
-    loadUsers();
-  } catch (e) { alert("Error: " + e.message); }
+async function endSession(userId, email) {
+  Modal.confirm("End Session", `Force-end session for <strong>${esc(email)}</strong>?`, async () => {
+    try {
+      await apiPost("/admin/api/end-session", { userId });
+      toast(`Ended session for ${email}`);
+      loadLiveSessions();
+    } catch(e) { toast("Error: " + e.message, "error"); }
+  });
 }
 
-// ================================================================
-//  REVENUE
-// ================================================================
-let revenueLoaded = false;
-
-async function loadRevenue() {
-  if (revenueLoaded) return;
-
-  document.getElementById("revenue-loading").style.display = "";
-  document.getElementById("revenue-content").style.display  = "none";
-
+async function loadActivity() {
   try {
-    const data = await api("/admin/api/stats");
-
-    document.getElementById("revenue-loading").style.display = "none";
-    document.getElementById("revenue-content").style.display = "block";
-
-    document.getElementById("rev-cards").innerHTML = [
-      { label: "All-Time Revenue", value: fmt$(data.revenueTotal) },
-      { label: "This Month",       value: fmt$(data.revenueMonth) },
-      { label: "Today",            value: fmt$(data.revenueToday) },
-      { label: "Best-Selling Pack",value: data.bestPack || "—", small: true },
-    ].map(c => `
-      <div class="stat-card">
-        <div class="label">${c.label}</div>
-        <div class="value" style="${c.small ? "font-size:18px" : ""}">${c.value}</div>
-      </div>`).join("");
-
-    const breakdown = data.packBreakdown || {};
-    const totalRev  = Object.values(breakdown).reduce((s, p) => s + (p.revenue || 0), 0) || 1;
-    const rows      = Object.entries(breakdown)
-      .sort((a, b) => (b[1].revenue || 0) - (a[1].revenue || 0));
-
-    document.getElementById("pack-tbody").innerHTML = rows.length ? rows.map(([pack, p]) => {
-      const pct = ((p.revenue || 0) / totalRev * 100).toFixed(1);
-      return '<tr>' +
-        '<td><strong>' + esc(pack) + '</strong></td>' +
-        '<td>' + fmtN(p.count) + '</td>' +
-        '<td>' + fmt$(p.revenue) + '</td>' +
-        '<td><div style="display:flex;align-items:center;gap:8px">' +
-          '<div style="flex:1;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">' +
-            '<div style="width:' + pct + '%;height:100%;background:var(--accent);border-radius:3px"></div>' +
-          '</div>' +
-          '<span style="font-size:12px;color:var(--muted);white-space:nowrap">' + pct + '%</span>' +
-        '</div></td>' +
-        '</tr>';
-    }).join("") :
-      '<tr><td colspan="4"><div class="empty-state"><div class="icon">&#128179;</div>No sales yet</div></td></tr>';
-
-    revenueLoaded = true;
-  } catch (e) {
-    document.getElementById("revenue-loading").innerHTML =
-      '<div style="color:var(--danger)">Failed to load revenue: ' + esc(e.message) + '</div>';
-  }
-}
-
-// ================================================================
-//  PURCHASES
-// ================================================================
-let purchasesLoaded = false;
-
-async function loadPurchases() {
-  if (purchasesLoaded) return;
-  const tbody = document.getElementById("purchases-tbody");
-
-  try {
-    const data = await api("/admin/api/purchases");
-
-    if (!data.purchases || !data.purchases.length) {
-      tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="icon">&#129534;</div>No purchases yet</div></td></tr>';
-    } else {
-      tbody.innerHTML = data.purchases.map(p => {
-        const sid = esc(p.stripe_session_id || "—");
-        return '<tr>' +
-          '<td>' + fmtDateTime(p.created_at) + '</td>' +
-          '<td class="cell-email">' + esc(p.user_email || "—") + '</td>' +
-          '<td><span class="badge badge-accent">' + esc(p.pack_name || "—") + '</span></td>' +
-          '<td>' + fmt$(p.amount_usd) + '</td>' +
-          '<td class="cell-mono">' + (sid.length > 28 ? sid.slice(0, 28) + "…" : sid) + '</td>' +
-          '</tr>';
-      }).join("");
+    const d = await api("/admin/api/activity");
+    const events = d.events || [];
+    const list = document.getElementById("activity-list");
+    if (!events.length) {
+      list.innerHTML = `<li><span class="act-icon">&#8987;</span><span class="act-body" style="color:var(--muted)">No recent activity</span></li>`;
+      return;
     }
-    purchasesLoaded = true;
-  } catch (e) {
-    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--danger);text-align:center;padding:24px">Error: ' + esc(e.message) + '</td></tr>';
+    const icons = { purchase:"&#128179;", gift:"&#127873;", session:"&#128247;", signup:"&#128100;" };
+    list.innerHTML = events.map(e => `
+      <li>
+        <span class="act-icon">${icons[e.type]||"&#8226;"}</span>
+        <span class="act-body">
+          <span class="act-email">${esc(e.email||"unknown")}</span>
+          <span class="act-detail"> ${esc(e.detail)}</span>
+        </span>
+        <span class="act-time">${relTime(e.ts)}</span>
+      </li>`).join("");
+  } catch(e) { console.error("loadActivity:", e.message); }
+}
+
+// ── Decart Balance ────────────────────────────────────────────────
+function initDecartBalance() {
+  const saved = localStorage.getItem("tzurah_decart_balance");
+  if (saved) document.getElementById("decart-bal-input").value = saved;
+}
+function saveDecartBalance() {
+  const val = parseInt(document.getElementById("decart-bal-input").value, 10) || 0;
+  localStorage.setItem("tzurah_decart_balance", val);
+  const estUsed = cache.stats ? Math.round((cache.stats.totalSecondsUsed||0) * DECART_CR_PER_SEC) : 0;
+  updateDecartBar(estUsed);
+  toast("Decart balance saved");
+}
+function updateDecartBar(estUsedCr) {
+  const balance = parseInt(localStorage.getItem("tzurah_decart_balance")||"0",10);
+  const total   = balance + estUsedCr;
+  const pct     = total > 0 ? Math.min(100, (balance / total * 100)).toFixed(1) : 100;
+  document.getElementById("decart-bar").style.width = pct + "%";
+  const hrRem = total > 0 ? ((balance / DECART_CR_PER_SEC) / 3600).toFixed(1) : "—";
+  document.getElementById("decart-used-lbl").textContent = `${fmtN(estUsedCr)} cr used (est.)`;
+  document.getElementById("decart-rem-lbl").textContent  = `Est. remaining: ~${hrRem} hrs`;
+  document.getElementById("decart-low-warn").style.display = balance > 0 && balance < 10000 ? "" : "none";
+}
+
+// ══════════════════════════════════════════════════════════════════
+// USERS
+// ══════════════════════════════════════════════════════════════════
+async function loadUsersData() {
+  try {
+    const d = await api("/admin/api/users?limit=1000");
+    cache.users = d.users || [];
+    applyUserFilters();
+  } catch(e) {
+    document.getElementById("users-tbody").innerHTML =
+      `<tr><td colspan="10" class="loading-cell" style="color:var(--danger)">Error: ${esc(e.message)}</td></tr>`;
   }
 }
 
-// ================================================================
-//  AUTO-REFRESH (60 s)
-// ================================================================
-let countdown = 60;
-const countdownEl = document.getElementById("refresh-countdown");
-
-function doRefresh() {
-  revenueLoaded   = false;
-  purchasesLoaded = false;
-  countdown       = 60;
-  loadOverview();
-  const active = (document.querySelector(".tab-btn.active") || {}).dataset.tab;
-  if (active === "users")     loadUsers();
-  if (active === "revenue")   loadRevenue();
-  if (active === "purchases") loadPurchases();
+function debounceSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(applyUserFilters, 300);
 }
 
-document.getElementById("refresh-btn").addEventListener("click", doRefresh);
+function applyUserFilters() {
+  const search = (document.getElementById("user-search")?.value||"").toLowerCase().trim();
+  const credit = document.getElementById("credit-filter")?.value || "all";
+  const sort   = document.getElementById("sort-by")?.value || "recent";
+  const now    = Date.now();
 
-setInterval(() => {
-  countdown--;
-  countdownEl.textContent = countdown + "s";
-  if (countdown <= 0) doRefresh();
-}, 1000);
+  let list = [...cache.users];
 
-// ── Initial load ───────────────────────────────────────────────────
-loadOverview();
-loadUsers();
+  // Text search
+  if (search) list = list.filter(u =>
+    (u.email||"").toLowerCase().includes(search) ||
+    (u.name||"").toLowerCase().includes(search)
+  );
+
+  // Credit filter
+  if (credit==="has")  list = list.filter(u => u.credits_balance > 0);
+  if (credit==="low")  list = list.filter(u => u.credits_balance > 0 && u.credits_balance < 10);
+  if (credit==="zero") list = list.filter(u => u.credits_balance === 0);
+
+  // Quick filter chips
+  if (activeChips.has("activeToday"))  list = list.filter(u => u.last_seen_at && (now - new Date(u.last_seen_at)) < 86400000);
+  if (activeChips.has("lowCredits"))   list = list.filter(u => u.credits_balance > 0 && u.credits_balance < 10);
+  if (activeChips.has("noCredits"))    list = list.filter(u => u.credits_balance === 0);
+  if (activeChips.has("highUsage"))    list = list.filter(u => u.credits_used > 100);
+
+  // Sort
+  if (sort==="recent")      list.sort((a,b) => new Date(b.created_at||0) - new Date(a.created_at||0));
+  if (sort==="lastActive")  list.sort((a,b) => new Date(b.last_seen_at||0) - new Date(a.last_seen_at||0));
+  if (sort==="mostCredits") list.sort((a,b) => (b.credits_balance||0) - (a.credits_balance||0));
+  if (sort==="mostSpent")   list.sort((a,b) => (b.credits_purchased||0) - (a.credits_purchased||0));
+
+  usersFiltered = list;
+  usersPage = 1;
+  selectedUsers.clear();
+  updateBulkBar();
+  renderUsersPage();
+}
+
+function toggleChip(el) {
+  const chip = el.dataset.chip;
+  el.classList.toggle("on");
+  if (activeChips.has(chip)) activeChips.delete(chip); else activeChips.add(chip);
+  applyUserFilters();
+}
+
+function renderUsersPage() {
+  const total = usersFiltered.length;
+  const pages = Math.max(1, Math.ceil(total / USERS_PER_PAGE));
+  usersPage = Math.max(1, Math.min(usersPage, pages));
+  const slice = usersFiltered.slice((usersPage-1)*USERS_PER_PAGE, usersPage*USERS_PER_PAGE);
+
+  document.getElementById("users-info").textContent = `${fmtN(total)} user${total!==1?"s":""}`;
+  document.getElementById("users-page-lbl").textContent = `Page ${usersPage} / ${pages}`;
+  document.getElementById("users-prev").disabled = usersPage<=1;
+  document.getElementById("users-next").disabled = usersPage>=pages;
+  document.getElementById("select-all").checked = false;
+
+  if (!slice.length) {
+    document.getElementById("users-tbody").innerHTML =
+      `<tr><td colspan="10"><div class="empty"><div class="eicon">&#128101;</div>No users match</div></td></tr>`;
+    return;
+  }
+
+  document.getElementById("users-tbody").innerHTML = slice.map(u => {
+    const minsLeft = ((u.credits_balance||0) * 10 / 60).toFixed(0);
+    return `<tr data-uid="${esc(u.id)}" data-email="${esc(u.email)}" data-banned="${u.is_banned}">
+      <td><input type="checkbox" class="row-check" data-id="${esc(u.id)}" onchange="toggleRowSelect(this)"></td>
+      <td class="td-email" title="${esc(u.email)}">${esc(u.email)}</td>
+      <td>${esc(u.name||"—")}</td>
+      <td><strong>${fmtN(u.credits_balance)}</strong></td>
+      <td style="color:var(--muted)">&approx;${minsLeft}m</td>
+      <td>${fmt$(u.credits_purchased * 100 / 216)}</td>
+      <td>${fmtDate(u.created_at)}</td>
+      <td>${relTime(u.last_seen_at)}</td>
+      <td>${u.is_banned
+        ? '<span class="badge badge-red">Banned</span>'
+        : '<span class="badge badge-green">Active</span>'}</td>
+      <td><button class="btn btn-ghost btn-xs" onclick="openMenu(event)">&#8943;</button></td>
+    </tr>`;
+  }).join("");
+}
+
+function toggleSelectAll(chk) {
+  document.querySelectorAll(".row-check").forEach(c => {
+    c.checked = chk.checked;
+    const id = c.dataset.id;
+    if (chk.checked) selectedUsers.add(id); else selectedUsers.delete(id);
+  });
+  updateBulkBar();
+}
+function toggleRowSelect(chk) {
+  if (chk.checked) selectedUsers.add(chk.dataset.id); else selectedUsers.delete(chk.dataset.id);
+  updateBulkBar();
+}
+function updateBulkBar() {
+  const n = selectedUsers.size;
+  const bar = document.getElementById("bulk-bar");
+  bar.classList.toggle("show", n > 0);
+  document.getElementById("bulk-count").textContent = `${n} selected`;
+}
+function clearSelection() {
+  selectedUsers.clear();
+  document.querySelectorAll(".row-check").forEach(c => c.checked=false);
+  document.getElementById("select-all").checked = false;
+  updateBulkBar();
+}
+
+// ── ⋯ dropdown ────────────────────────────────────────────────────
+function openMenu(event) {
+  document.querySelectorAll(".action-dropdown").forEach(d=>d.remove());
+  const btn  = event.currentTarget;
+  const row  = btn.closest("tr");
+  const uid   = row.dataset.uid;
+  const email = row.dataset.email;
+  const banned = row.dataset.banned === "true";
+  const rect = btn.getBoundingClientRect();
+
+  const menu = document.createElement("div");
+  menu.className = "action-dropdown";
+  menu.innerHTML = `
+    <button onclick="doGift('${esc(uid)}','${esc(email)}')">&#127873; Gift Credits</button>
+    <button onclick="doDeduct('${esc(uid)}','${esc(email)}')">&#10134; Deduct Credits</button>
+    <button onclick="Modal.viewUsage('${esc(email)}','${esc(uid)}')">&#128202; View Purchases</button>
+    <button onclick="window.open('mailto:${esc(email)}')">&#9993; Send Email</button>
+    <div class="sep"></div>
+    ${banned
+      ? `<button class="item-green" onclick="doUnban('${esc(uid)}','${esc(email)}')">&#9989; Unban User</button>`
+      : `<button class="item-red"   onclick="doBan('${esc(uid)}','${esc(email)}')">&#128683; Ban User</button>`}
+  `;
+  menu.style.position = "fixed";
+  menu.style.top  = (rect.bottom + 4) + "px";
+  menu.style.right = (window.innerWidth - rect.right) + "px";
+  document.body.appendChild(menu);
+  setTimeout(() => document.addEventListener("click", closeMenu, {once:true}), 0);
+}
+function closeMenu() { document.querySelectorAll(".action-dropdown").forEach(d=>d.remove()); }
+
+// User actions
+function doGift(uid, email) {
+  Modal.giftCredits(email, uid, async (amount, reason) => {
+    try {
+      await apiPost("/admin/api/gift-credits", { userId:uid, amount, reason });
+      toast(`&#127873; Gifted ${amount} credits to ${email}`);
+      // Update row inline
+      const u = cache.users.find(u=>u.id===uid);
+      if (u) { u.credits_balance += amount; renderUsersPage(); }
+      triggerAlert("gift", `Gifted ${amount}cr to ${email}`);
+    } catch(e) { toast("Error: "+e.message,"error"); }
+  });
+}
+function doDeduct(uid, email) {
+  Modal.deductCredits(email, uid, async (amount, reason) => {
+    try {
+      const d = await apiPost("/admin/api/deduct-credits", { userId:uid, amount, reason });
+      toast(`Deducted ${amount} credits from ${email}`);
+      const u = cache.users.find(u=>u.id===uid);
+      if (u) { u.credits_balance = d.new_balance; renderUsersPage(); }
+    } catch(e) { toast("Error: "+e.message,"error"); }
+  });
+}
+function doBan(uid, email) {
+  Modal.banUser(email, uid, false, async () => {
+    try {
+      await apiPost("/admin/api/ban-user", { userId:uid });
+      toast(`Banned ${email}`, "warning");
+      const u = cache.users.find(u=>u.id===uid);
+      if (u) { u.is_banned = true; renderUsersPage(); }
+      triggerAlert("ban", `Banned user: ${email}`);
+    } catch(e) { toast("Error: "+e.message,"error"); }
+  });
+}
+function doUnban(uid, email) {
+  Modal.banUser(email, uid, true, async () => {
+    try {
+      await apiPost("/admin/api/unban-user", { userId:uid });
+      toast(`Unbanned ${email}`, "success");
+      const u = cache.users.find(u=>u.id===uid);
+      if (u) { u.is_banned = false; renderUsersPage(); }
+    } catch(e) { toast("Error: "+e.message,"error"); }
+  });
+}
+
+// Bulk actions
+async function doBulkGift() {
+  if (!selectedUsers.size) return;
+  Modal.confirm("Gift 10 Credits", `Gift 10 credits to ${selectedUsers.size} selected user(s)?`, async () => {
+    let ok=0, fail=0;
+    for (const uid of selectedUsers) {
+      try {
+        await apiPost("/admin/api/gift-credits", { userId:uid, amount:10, reason:"bulk gift" });
+        const u = cache.users.find(u=>u.id===uid);
+        if (u) u.credits_balance += 10;
+        ok++;
+      } catch { fail++; }
+    }
+    toast(`Gifted 10 credits to ${ok} users${fail?`, ${fail} failed`:""}`, fail?"warning":"success");
+    clearSelection(); renderUsersPage();
+  });
+}
+async function doBulkBan() {
+  if (!selectedUsers.size) return;
+  Modal.confirm("Ban Users", `Ban ${selectedUsers.size} selected user(s)? They will lose access immediately.`, async () => {
+    let ok=0;
+    for (const uid of selectedUsers) {
+      try {
+        await apiPost("/admin/api/ban-user", { userId:uid });
+        const u = cache.users.find(u=>u.id===uid);
+        if (u) u.is_banned = true;
+        ok++;
+      } catch(_) {}
+    }
+    toast(`Banned ${ok} users`, "warning");
+    clearSelection(); renderUsersPage();
+  });
+}
+function doExportCSV() {
+  const header = ["Email","Name","Credits","Credits Purchased","Credits Used","Joined","Last Seen","Status"];
+  const rows = usersFiltered.map(u => [
+    u.email, u.name, u.credits_balance, u.credits_purchased,
+    u.credits_used, fmtDate(u.created_at), relTime(u.last_seen_at),
+    u.is_banned ? "Banned" : "Active"
+  ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(","));
+  const csv = [header.join(","), ...rows].join("\n");
+  const a = document.createElement("a");
+  a.href = "data:text/csv;charset=utf-8," + encodeURIComponent(csv);
+  a.download = `tzurah-users-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  toast("CSV exported");
+}
+
+// ══════════════════════════════════════════════════════════════════
+// REVENUE
+// ══════════════════════════════════════════════════════════════════
+async function loadRevenuePurchases() {
+  document.getElementById("rev-chart-wrap").innerHTML = `<div class="loading-cell"><div class="spinner spinner-lg"></div></div>`;
+  try {
+    const d = await api("/admin/api/purchases?limit=1000");
+    cache.allPurchases = d.purchases || [];
+    renderRevenue();
+  } catch(e) {
+    document.getElementById("rev-chart-wrap").innerHTML = `<div class="loading-cell" style="color:var(--danger)">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function setTimeRange(days) {
+  revDays = days;
+  document.querySelectorAll(".time-pill").forEach(p => p.classList.toggle("on", parseInt(p.dataset.days)===days));
+  renderRevenue();
+}
+
+function renderRevenue() {
+  const now     = Date.now();
+  const cutoff  = revDays > 0 ? now - revDays * 86400000 : 0;
+  const prev    = revDays > 0 ? now - revDays * 2 * 86400000 : 0;
+  const filtered = cache.allPurchases.filter(p => cutoff===0 || new Date(p.created_at).getTime() >= cutoff);
+  const prevPeriod = revDays > 0
+    ? cache.allPurchases.filter(p => {
+        const t = new Date(p.created_at).getTime();
+        return t >= prev && t < cutoff;
+      })
+    : [];
+
+  const totalRev  = filtered.reduce((s,p) => s+(p.amount_usd||0), 0);
+  const prevRev   = prevPeriod.reduce((s,p) => s+(p.amount_usd||0), 0);
+  const paidOnly  = filtered.filter(p => (p.amount_usd||0) > 0);
+  const aov       = paidOnly.length ? totalRev / paidOnly.length : 0;
+  const pct       = prevRev > 0 ? ((totalRev-prevRev)/prevRev*100).toFixed(1) : "—";
+  const pctLabel  = pct !== "—" ? (parseFloat(pct)>=0?"+":"")+pct+"%" : "—";
+
+  // Top spender
+  const byUser = {};
+  filtered.forEach(p => { if (p.amount_usd>0) byUser[p.user_email||p.user_id] = (byUser[p.user_email||p.user_id]||0)+(p.amount_usd||0); });
+  const topEntry = Object.entries(byUser).sort((a,b)=>b[1]-a[1])[0];
+  const topLabel = topEntry ? `${topEntry[0].split("@")[0]} (${fmt$(topEntry[1])})` : "—";
+
+  document.getElementById("rv-period").textContent  = fmt$(totalRev);
+  document.getElementById("rv-change").textContent  = pctLabel;
+  document.getElementById("rv-change").style.color  = pct!=="—" && parseFloat(pct)>=0 ? "var(--success)" : "var(--danger)";
+  document.getElementById("rv-aov").textContent     = fmt$(aov);
+  document.getElementById("rv-top").textContent     = topLabel;
+
+  // Build chart grouped by day
+  const days = revDays > 0 ? revDays : 90;
+  const byDay = {};
+  for (let i=days-1; i>=0; i--) {
+    const key = new Date(now - i*86400000).toISOString().split("T")[0];
+    byDay[key] = 0;
+  }
+  filtered.forEach(p => {
+    const key = (p.created_at||"").split("T")[0];
+    if (key in byDay) byDay[key] = Number((byDay[key]+(p.amount_usd||0)).toFixed(2));
+  });
+  document.getElementById("rev-chart-wrap").innerHTML = renderRevenueChart(byDay);
+
+  // Pack breakdown
+  const packs = {};
+  filtered.filter(p=>p.amount_usd>0).forEach(p => {
+    const n = p.pack_name||"Unknown";
+    if (!packs[n]) packs[n] = { count:0, revenue:0 };
+    packs[n].count++;
+    packs[n].revenue = Number((packs[n].revenue+(p.amount_usd||0)).toFixed(2));
+  });
+  const totalR = Object.values(packs).reduce((s,p)=>s+p.revenue,0)||1;
+  const daysN  = revDays||90;
+  document.getElementById("pack-tbody").innerHTML = Object.entries(packs)
+    .sort((a,b)=>b[1].revenue-a[1].revenue)
+    .map(([name,p])=>`
+      <tr>
+        <td><strong>${esc(name)}</strong></td>
+        <td>${p.count}</td>
+        <td>${fmt$(p.revenue)}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:6px">
+            <div style="flex:1;height:5px;background:var(--surface2);border-radius:3px;overflow:hidden">
+              <div style="width:${(p.revenue/totalR*100).toFixed(1)}%;height:100%;background:var(--accent);border-radius:3px"></div>
+            </div>
+            <span style="font-size:11px;color:var(--muted)">${(p.revenue/totalR*100).toFixed(1)}%</span>
+          </div>
+        </td>
+        <td>${fmt$(p.revenue/daysN)}</td>
+      </tr>`).join("") ||
+    `<tr><td colspan="5"><div class="empty">No paid sales in this period</div></td></tr>`;
+}
+
+function renderRevenueChart(data) {
+  const vals   = Object.values(data);
+  const maxVal = Math.max(...vals, 0.01);
+  const bars   = Object.entries(data).map(([date, amount]) => {
+    const pct = maxVal > 0 ? (amount / maxVal * 100) : 0;
+    return `
+      <div class="chart-col">
+        <div class="chart-bar-wrap">
+          <div class="chart-bar" style="height:${pct}%" title="${date}: ${fmt$(amount)}">
+            <span class="chart-val">${amount > 0 ? "$"+amount.toFixed(0) : ""}</span>
+          </div>
+        </div>
+        <div class="chart-label">${date.slice(5)}</div>
+      </div>`;
+  }).join("");
+  return `<div class="chart-container">${bars}</div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// PURCHASES
+// ══════════════════════════════════════════════════════════════════
+async function loadPurchasesData() {
+  try {
+    const d = await api("/admin/api/purchases?limit=500");
+    allPurchases = d.purchases || [];
+    filterPurchases();
+  } catch(e) {
+    document.getElementById("purch-tbody").innerHTML =
+      `<tr><td colspan="6" class="loading-cell" style="color:var(--danger)">Error: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+function filterPurchases() {
+  const search = (document.getElementById("purch-search")?.value||"").toLowerCase().trim();
+  const filter = document.getElementById("purch-filter")?.value || "all";
+  let list = [...allPurchases];
+  if (search) list = list.filter(p =>
+    (p.user_email||"").toLowerCase().includes(search) ||
+    (p.stripe_session_id||"").toLowerCase().includes(search)
+  );
+  if (filter==="paid")   list = list.filter(p => (p.amount_usd||0)>0 && !(p.stripe_session_id||"").startsWith("gift_"));
+  if (filter==="gifted") list = list.filter(p => (p.stripe_session_id||"").startsWith("gift_"));
+  purchFiltered = list;
+  purchPage = 1;
+  renderPurchPage();
+}
+
+function renderPurchPage() {
+  const total = purchFiltered.length;
+  const pages = Math.max(1, Math.ceil(total / PURCH_PER_PAGE));
+  purchPage = Math.max(1, Math.min(purchPage, pages));
+  const slice = purchFiltered.slice((purchPage-1)*PURCH_PER_PAGE, purchPage*PURCH_PER_PAGE);
+
+  document.getElementById("purch-info").textContent = `${fmtN(total)} purchase${total!==1?"s":""}`;
+  document.getElementById("purch-page-lbl").textContent = `Page ${purchPage} / ${pages}`;
+  document.getElementById("purch-prev").disabled = purchPage<=1;
+  document.getElementById("purch-next").disabled = purchPage>=pages;
+
+  if (!slice.length) {
+    document.getElementById("purch-tbody").innerHTML =
+      `<tr><td colspan="6"><div class="empty"><div class="eicon">&#129534;</div>No purchases match</div></td></tr>`;
+    return;
+  }
+  document.getElementById("purch-tbody").innerHTML = slice.map(p => {
+    const isGift = (p.stripe_session_id||"").startsWith("gift_") || (p.amount_usd||0)===0;
+    return `<tr>
+      <td>${fmtDateTime(p.created_at)}</td>
+      <td class="td-email">${esc(p.user_email||"—")}</td>
+      <td><span class="badge badge-accent">${esc(p.pack_name||"—")}</span></td>
+      <td>${fmt$(p.amount_usd)}</td>
+      <td class="td-mono">${esc((p.stripe_session_id||"—").slice(0,26))}${(p.stripe_session_id||"").length>26?"…":""}</td>
+      <td><span class="badge ${isGift?"badge-amber":"badge-green"}">${isGift?"Gifted":"Paid"}</span></td>
+    </tr>`;
+  }).join("");
+}
+
+// ══════════════════════════════════════════════════════════════════
+// ALERTS
+// ══════════════════════════════════════════════════════════════════
+function loadAlertRules() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("tzurah_alert_rules")||"{}");
+    if (saved.decartEnabled    !== undefined) document.getElementById("ar-decart").checked = saved.decartEnabled;
+    if (saved.decartVal        !== undefined) document.getElementById("ar-decart-val").value = saved.decartVal;
+    if (saved.sessionEnabled   !== undefined) document.getElementById("ar-session").checked = saved.sessionEnabled;
+    if (saved.sessionVal       !== undefined) document.getElementById("ar-session-val").value = saved.sessionVal;
+    if (saved.signupEnabled    !== undefined) document.getElementById("ar-signup").checked = saved.signupEnabled;
+    if (saved.signupVal        !== undefined) document.getElementById("ar-signup-val").value = saved.signupVal;
+    if (saved.paymentEnabled   !== undefined) document.getElementById("ar-payment").checked = saved.paymentEnabled;
+    if (saved.banEnabled       !== undefined) document.getElementById("ar-ban").checked = saved.banEnabled;
+  } catch(_) {}
+  renderAlertHistory();
+}
+function saveAlertRules() {
+  const rules = {
+    decartEnabled:  document.getElementById("ar-decart").checked,
+    decartVal:      parseInt(document.getElementById("ar-decart-val").value)||5000,
+    sessionEnabled: document.getElementById("ar-session").checked,
+    sessionVal:     parseInt(document.getElementById("ar-session-val").value)||100,
+    signupEnabled:  document.getElementById("ar-signup").checked,
+    signupVal:      parseInt(document.getElementById("ar-signup-val").value)||10,
+    paymentEnabled: document.getElementById("ar-payment").checked,
+    banEnabled:     document.getElementById("ar-ban").checked,
+  };
+  localStorage.setItem("tzurah_alert_rules", JSON.stringify(rules));
+  toast("Alert rules saved");
+}
+function triggerAlert(type, detail) {
+  const hist = JSON.parse(localStorage.getItem("tzurah_alert_hist")||"[]");
+  hist.unshift({ type, detail, ts: new Date().toISOString() });
+  localStorage.setItem("tzurah_alert_hist", JSON.stringify(hist.slice(0,50)));
+  renderAlertHistory();
+}
+function renderAlertHistory() {
+  const hist = JSON.parse(localStorage.getItem("tzurah_alert_hist")||"[]");
+  const wrap = document.getElementById("alert-hist-wrap");
+  if (!hist.length) {
+    wrap.innerHTML = `<div class="empty"><div class="eicon">&#128276;</div>No alerts triggered yet</div>`;
+    return;
+  }
+  const icons = { ban:"&#128683;", gift:"&#127873;", decart:"&#9888;", email:"&#128231;", test:"&#129514;" };
+  wrap.innerHTML = hist.slice(0,20).map(h=>`
+    <div class="alert-hist-item">
+      <span style="font-size:14px">${icons[h.type]||"&#8226;"}</span>
+      <span style="flex:1;font-size:12px;color:var(--text2)">${esc(h.detail)}</span>
+      <span style="font-size:10px;color:var(--muted)">${relTime(h.ts)}</span>
+    </div>`).join("");
+}
+function clearAlertHistory() {
+  Modal.confirm("Clear History","Clear all alert history?", ()=>{
+    localStorage.removeItem("tzurah_alert_hist");
+    renderAlertHistory();
+    toast("Alert history cleared");
+  });
+}
+function testEmailAlert() {
+  toast("&#128231; Email alert would be sent to: " + (document.getElementById("ar-decart-val") ? "admin@tzurah.ai" : ""), "info");
+  triggerAlert("test", "Manual test email alert triggered");
+}
+function testLowBalanceAlert() {
+  const bal = parseInt(localStorage.getItem("tzurah_decart_balance")||"0",10);
+  const threshold = parseInt(document.getElementById("ar-decart-val")?.value||"5000",10);
+  if (bal < threshold && bal > 0) {
+    toast(`&#9888; LOW BALANCE: ${fmtN(bal)} cr < ${fmtN(threshold)} cr threshold`, "warning");
+    triggerAlert("decart", `Low Decart balance: ${fmtN(bal)} cr (threshold: ${fmtN(threshold)} cr)`);
+  } else {
+    toast("Balance is above threshold (or not set)", "info");
+    triggerAlert("test", "Low balance test triggered");
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════════════
+function init() {
+  initDecartBalance();
+  loadStats();
+  loadLiveSessions();
+  loadActivity();
+  startAutoRefresh();
+}
+init();
 </script>
 </body>
 </html>
