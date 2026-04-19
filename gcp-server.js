@@ -387,11 +387,12 @@ app.get("/admin/api/stream", adminAuth, (req, res) => {
       console.log("[SSE] All sessions in table:", JSON.stringify(allSessions));
       console.log("[SSE] Querying active sessions, cutoff:", fiveMinAgo);
 
-      const [sessionsRes, profilesRes, purchasesRes, usageRes] = await Promise.all([
+      const [sessionsRes, profilesRes, purchasesRes, usageRes, sessionsTodayRes] = await Promise.all([
         supabaseAdmin.from("sessions").select("*").eq("is_active", true).gte("last_ping", fiveMinAgo),
         supabaseAdmin.from("profiles").select("id, credits, total_credits_used, last_seen, created_at"),
         supabaseAdmin.from("purchases").select("price_usd, created_at"),
         supabaseAdmin.from("usage").select("session_seconds, credits_used"),
+        supabaseAdmin.from("sessions").select("user_id").gte("last_ping", oneDayAgo),
       ]);
 
       const sessions  = sessionsRes.data  || [];
@@ -400,8 +401,12 @@ app.get("/admin/api/stream", adminAuth, (req, res) => {
       const purchases = purchasesRes.data || [];
       const usage     = usageRes.data     || [];
 
-      const totalRevenue     = purchases.reduce((s, p) => s + (p.price_usd || 0), 0);
-      const activeToday      = profiles.filter(u => u.last_seen  && u.last_seen  > oneDayAgo).length;
+      const sessionUserIdsToday = new Set((sessionsTodayRes.data || []).map(s => s.user_id));
+      const totalRevenue = purchases.reduce((s, p) => s + (p.price_usd || 0), 0);
+      const activeToday  = Math.max(
+        profiles.filter(u => u.last_seen && u.last_seen > oneDayAgo).length,
+        sessionUserIdsToday.size
+      );
       const newThisWeek      = profiles.filter(u => u.created_at && u.created_at > oneWeekAgo).length;
       const totalCreditsUsed = usage.reduce((s, u) => s + (u.credits_used || 0), 0);
       const totalSecondsUsed = usage.reduce((s, u) => s + (u.session_seconds || 0), 0);
@@ -483,17 +488,22 @@ app.get("/admin/api/stats", adminAuth, async (_req, res) => {
   const MONTH = 30 * DAY;
 
   try {
-    const [{ merged, profiles }, purchasesRes, usageRes] = await Promise.all([
+    const [{ merged, profiles }, purchasesRes, usageRes, sessionsTodayRes] = await Promise.all([
       fetchAllUsersData(),
       supabaseAdmin.from("purchases").select("price_usd, credits_added, pack_name, created_at"),
       supabaseAdmin.from("usage").select("credits_used, session_seconds, created_at"),
+      supabaseAdmin.from("sessions").select("user_id").gte("last_ping", new Date(now - DAY).toISOString()),
     ]);
 
     const purchases = purchasesRes.data || [];
     const usages    = usageRes.data     || [];
 
-    const totalUsers   = merged.length;
-    const activeToday  = merged.filter(u => u.last_seen_at && (now - new Date(u.last_seen_at).getTime()) < DAY).length;
+    const sessionUserIdsToday = new Set((sessionsTodayRes.data || []).map(s => s.user_id));
+    const totalUsers  = merged.length;
+    const activeToday = Math.max(
+      merged.filter(u => u.last_seen_at && (now - new Date(u.last_seen_at).getTime()) < DAY).length,
+      sessionUserIdsToday.size
+    );
     const newThisWeek  = profiles.filter(p => p.created_at && (now - new Date(p.created_at).getTime()) < WEEK).length;
     const revenueTotal = purchases.reduce((s, p) => s + (p.price_usd || 0), 0);
     const revenueMonth = purchases.filter(p => (now - new Date(p.created_at).getTime()) < MONTH)
@@ -780,30 +790,43 @@ app.post("/admin/api/unban-user", adminAuth, async (req, res) => {
 // POST /session/ping — Electron app calls every 10 s during active stream
 // No JWT required — user_id comes from body (Electron local session)
 // started_at is only set on INSERT so duration is calculated correctly.
+// Requires `kill_signal BOOLEAN DEFAULT false` column on sessions table:
+//   ALTER TABLE public.sessions ADD COLUMN IF NOT EXISTS kill_signal BOOLEAN DEFAULT false;
 app.post("/session/ping", async (req, res) => {
   const { user_id, email, credits_used } = req.body || {};
   console.log("[PING]", user_id, email || "no-email", new Date().toISOString());
   if (!user_id) return res.status(400).json({ error: "user_id required" });
   try {
+    // Query WITHOUT is_active filter — find any existing row, most recent first
     const { data: existing, error: selErr } = await supabaseAdmin
       .from("sessions")
-      .select("id, started_at")
+      .select("id, started_at, kill_signal")
       .eq("user_id", user_id)
-      .eq("is_active", true)
+      .order("started_at", { ascending: false })
+      .limit(1)
       .single();
 
     if (selErr && selErr.code !== "PGRST116") {
-      // PGRST116 = no rows found — that's fine, treat as new session
       console.warn("[PING] select error:", selErr.message);
     }
 
     if (existing) {
+      // Check kill signal before updating
+      if (existing.kill_signal) {
+        console.log("[PING] KILL SIGNAL for user:", user_id);
+        await supabaseAdmin.from("sessions").update({
+          kill_signal: false,
+          is_active:   false,
+        }).eq("id", existing.id);
+        return res.json({ ok: true, kill: true });
+      }
+
       console.log("[PING] UPDATE existing row id:", existing.id);
       await supabaseAdmin.from("sessions").update({
         last_ping:    new Date().toISOString(),
         credits_used: Number(credits_used) || 0,
         email:        email || "unknown",
-        is_active:    true,   // re-assert in case a stale /session/end cleared it
+        is_active:    true,
       }).eq("id", existing.id);
     } else {
       console.log("[PING] INSERT new session for user:", user_id);
@@ -867,14 +890,14 @@ app.get("/admin/api/live-sessions", adminAuth, async (_req, res) => {
   }
 });
 
-// POST /admin/api/end-session — force-end a user's active session
+// POST /admin/api/end-session — force-end a user's active session via kill signal
 app.post("/admin/api/end-session", adminAuth, async (req, res) => {
   const body   = req.body || {};
   const userId = body.userId || body.user_id;
   if (!userId) return res.status(400).json({ error: "userId required" });
   try {
     await supabaseAdmin.from("sessions")
-      .update({ is_active: false })
+      .update({ is_active: false, kill_signal: true })
       .eq("user_id", userId);
     res.json({ ok: true });
   } catch (err) {

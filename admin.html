@@ -1027,6 +1027,19 @@ let liveInt     = null;
 let cdValue     = 30;
 let cdInterval  = null;
 
+const sessionStartTimes = {};
+let durationTickInterval = null;
+
+function tickDurations() {
+  for (const [userId, startedAt] of Object.entries(sessionStartTimes)) {
+    const el = document.getElementById("duration-" + userId);
+    if (el) {
+      const secs = Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
+      el.textContent = fmtSecs(secs);
+    }
+  }
+}
+
 // ── Formatters ────────────────────────────────────────────────────
 function esc(s) {
   return String(s == null ? "" : s)
@@ -2200,19 +2213,30 @@ function updateLiveSessions(sessions) {
   if (!n) {
     tbody.innerHTML = `<tr><td colspan="4" class="loading-cell" style="color:var(--muted)">No active sessions</td></tr>`;
     if (burnEl) burnEl.textContent = "Total burning: 0 cr/min";
+    Object.keys(sessionStartTimes).forEach(k => delete sessionStartTimes[k]);
+    if (durationTickInterval) { clearInterval(durationTickInterval); durationTickInterval = null; }
     return;
   }
+
+  // Track start times for real-time counter; remove stale entries
+  const activeIds = new Set(sessions.map(s => s.user_id));
+  Object.keys(sessionStartTimes).forEach(k => { if (!activeIds.has(k)) delete sessionStartTimes[k]; });
+  sessions.forEach(s => { sessionStartTimes[s.user_id] = s.started_at; });
 
   tbody.innerHTML = sessions.map(s => `
     <tr>
       <td class="td-email">${esc(s.email || (s.user_id||"").slice(0,8) || "—")}</td>
-      <td>${fmtSecs(s.duration_secs || 0)}</td>
+      <td><span id="duration-${esc(s.user_id)}">${fmtSecs(s.duration_secs || 0)}</span></td>
       <td>${(s.credits_per_min || 130.8).toFixed(1)}</td>
       <td><button class="btn btn-red btn-xs" onclick="endSession('${esc(s.user_id)}','${esc(s.email||"")}')">End</button></td>
     </tr>`).join("");
 
   const totalBurn = (n * 130.8).toFixed(1);
   if (burnEl) burnEl.textContent = `Total credits burning: ${totalBurn} cr/min`;
+
+  if (!durationTickInterval) {
+    durationTickInterval = setInterval(tickDurations, 1000);
+  }
 }
 
 function connectSSE() {
