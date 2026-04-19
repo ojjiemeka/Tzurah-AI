@@ -378,18 +378,24 @@ app.get("/admin/api/stream", adminAuth, (req, res) => {
 
   const statsInterval = setInterval(async () => {
     try {
-      const twoMinAgo  = new Date(Date.now() - 2  * 60 * 1000).toISOString();
+      const fiveMinAgo = new Date(Date.now() - 5  * 60 * 1000).toISOString();
       const oneDayAgo  = new Date(Date.now() - 86_400_000).toISOString();
       const oneWeekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
 
+      // Debug: log all sessions in the table regardless of filters
+      const { data: allSessions } = await supabaseAdmin.from("sessions").select("user_id, email, is_active, last_ping");
+      console.log("[SSE] All sessions in table:", JSON.stringify(allSessions));
+      console.log("[SSE] Querying active sessions, cutoff:", fiveMinAgo);
+
       const [sessionsRes, profilesRes, purchasesRes, usageRes] = await Promise.all([
-        supabaseAdmin.from("sessions").select("*").eq("is_active", true).gte("last_ping", twoMinAgo),
+        supabaseAdmin.from("sessions").select("*").eq("is_active", true).gte("last_ping", fiveMinAgo),
         supabaseAdmin.from("profiles").select("id, credits, total_credits_used, last_seen, created_at"),
         supabaseAdmin.from("purchases").select("price_usd, created_at"),
         supabaseAdmin.from("usage").select("session_seconds, credits_used"),
       ]);
 
       const sessions  = sessionsRes.data  || [];
+      console.log("[SSE] Active sessions found:", sessions.length);
       const profiles  = profilesRes.data  || [];
       const purchases = purchasesRes.data || [];
       const usage     = usageRes.data     || [];
@@ -776,22 +782,31 @@ app.post("/admin/api/unban-user", adminAuth, async (req, res) => {
 // started_at is only set on INSERT so duration is calculated correctly.
 app.post("/session/ping", async (req, res) => {
   const { user_id, email, credits_used } = req.body || {};
+  console.log("[PING]", user_id, email || "no-email", new Date().toISOString());
   if (!user_id) return res.status(400).json({ error: "user_id required" });
   try {
-    const { data: existing } = await supabaseAdmin
+    const { data: existing, error: selErr } = await supabaseAdmin
       .from("sessions")
       .select("id, started_at")
       .eq("user_id", user_id)
       .eq("is_active", true)
       .single();
 
+    if (selErr && selErr.code !== "PGRST116") {
+      // PGRST116 = no rows found — that's fine, treat as new session
+      console.warn("[PING] select error:", selErr.message);
+    }
+
     if (existing) {
+      console.log("[PING] UPDATE existing row id:", existing.id);
       await supabaseAdmin.from("sessions").update({
         last_ping:    new Date().toISOString(),
         credits_used: Number(credits_used) || 0,
         email:        email || "unknown",
+        is_active:    true,   // re-assert in case a stale /session/end cleared it
       }).eq("id", existing.id);
     } else {
+      console.log("[PING] INSERT new session for user:", user_id);
       const now = new Date().toISOString();
       await supabaseAdmin.from("sessions").insert({
         user_id,
@@ -804,6 +819,7 @@ app.post("/session/ping", async (req, res) => {
     }
     res.json({ ok: true });
   } catch (err) {
+    console.error("[PING] error:", err.message);
     res.json({ ok: true, warn: err.message });
   }
 });
