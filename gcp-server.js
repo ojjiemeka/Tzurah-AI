@@ -801,7 +801,7 @@ app.post("/session/ping", async (req, res) => {
     // Query WITHOUT is_active filter — find any existing row, most recent first
     const { data: existing, error: selErr } = await supabaseAdmin
       .from("sessions")
-      .select("id, started_at, kill_signal")
+      .select("id, started_at, last_ping, kill_signal")
       .eq("user_id", user_id)
       .order("started_at", { ascending: false })
       .limit(1)
@@ -822,12 +822,20 @@ app.post("/session/ping", async (req, res) => {
         return res.json({ ok: true, kill: true });
       }
 
-      console.log("[PING] UPDATE existing row id:", existing.id);
+      // If last_ping is older than 5 minutes, this is a new stream session —
+      // reset started_at so the duration counter starts fresh.
+      const now          = new Date().toISOString();
+      const lastPing     = new Date(existing.last_ping || 0);
+      const fiveMinAgo   = new Date(Date.now() - 5 * 60 * 1000);
+      const isNewSession = lastPing < fiveMinAgo;
+
+      console.log("[PING]", isNewSession ? "NEW session (reset started_at)" : "UPDATE", user_id);
       await supabaseAdmin.from("sessions").update({
-        last_ping:    new Date().toISOString(),
+        last_ping:    now,
         credits_used: Number(credits_used) || 0,
         email:        email || "unknown",
         is_active:    true,
+        started_at:   isNewSession ? now : existing.started_at,
       }).eq("id", existing.id);
     } else {
       console.log("[PING] INSERT new session for user:", user_id);
@@ -1156,6 +1164,71 @@ app.post("/admin/api/settings/restart", adminAuth, (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// DATABASE MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════
+
+// GET /admin/api/db/stats — row counts for each table
+app.get("/admin/api/db/stats", adminAuth, async (_req, res) => {
+  try {
+    const [sessAll, sessActive, profiles, usage, purchases] = await Promise.all([
+      supabaseAdmin.from("sessions").select("id", { count: "exact", head: true }),
+      supabaseAdmin.from("sessions").select("id", { count: "exact", head: true }).eq("is_active", true),
+      supabaseAdmin.from("profiles").select("id", { count: "exact", head: true }),
+      supabaseAdmin.from("usage").select("id",    { count: "exact", head: true }),
+      supabaseAdmin.from("purchases").select("id", { count: "exact", head: true }),
+    ]);
+    res.json({
+      sessions:        sessAll.count    || 0,
+      active_sessions: sessActive.count || 0,
+      users:           profiles.count   || 0,
+      usage:           usage.count      || 0,
+      purchases:       purchases.count  || 0,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /admin/api/db/action — execute a named destructive action
+app.post("/admin/api/db/action", adminAuth, async (req, res) => {
+  const { action } = req.body || {};
+  const SENTINEL = "00000000-0000-0000-0000-000000000000"; // never matches real UUID
+
+  const actions = {
+    clear_all_sessions:       () => supabaseAdmin.from("sessions").delete().neq("id", SENTINEL),
+    clear_stale_sessions:     () => supabaseAdmin.from("sessions").delete()
+                                      .lt("last_ping", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
+    reset_active_flags:       () => supabaseAdmin.from("sessions")
+                                      .update({ is_active: false, kill_signal: false })
+                                      .eq("is_active", true),
+    clear_usage_logs:         () => supabaseAdmin.from("usage").delete().neq("id", SENTINEL),
+    clear_purchases:          () => supabaseAdmin.from("purchases").delete().neq("id", SENTINEL),
+    clear_test_users_sessions: async () => {
+      const { data: authRes } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
+      const testIds = (authRes?.users || [])
+        .filter(u => u.email && (u.email.includes("@test.com") || u.email.includes("testviewer")))
+        .map(u => u.id);
+      if (!testIds.length) return { data: null, error: null };
+      return supabaseAdmin.from("sessions").delete().in("user_id", testIds);
+    },
+  };
+
+  if (!actions[action]) {
+    return res.status(400).json({ error: "Unknown action: " + action });
+  }
+
+  try {
+    const result = await actions[action]();
+    if (result && result.error) throw result.error;
+    console.log(`[DB] Action executed: ${action}`);
+    res.json({ success: true, action });
+  } catch (err) {
+    console.error(`[DB] Action failed (${action}):`, err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // START
 // ═══════════════════════════════════════════════════════════════════
 
@@ -1182,6 +1255,8 @@ app.listen(PORT, () => {
   console.log("  GET  /admin/api/settings       → Admin settings (masked)");
   console.log("  POST /admin/api/settings/update-key → Update .env key");
   console.log("  POST /admin/api/settings/restart    → Restart server");
+  console.log("  GET  /admin/api/db/stats           → DB row counts");
+  console.log("  POST /admin/api/db/action          → Execute DB action");
   console.log("  GET  /admin/api/email/recipients → Email recipient groups");
   console.log("  POST /admin/api/email/send     → Send email to users");
   console.log("  GET  /admin/api/email/sent     → Sent email log");

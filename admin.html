@@ -607,6 +607,25 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 }
 .server-info-val { font-size: 15px; font-weight: 700; color: var(--text); font-family: monospace; }
 
+/* ── DB management ─────────────────────────────────────────────── */
+.db-btn {
+  padding: 7px 14px; font-size: 12px; font-weight: 600;
+  font-family: inherit; border-radius: 6px; cursor: pointer;
+  transition: all .15s; border: 1px solid;
+}
+.db-btn-danger  { background:rgba(239,68,68,.1);  border-color:rgba(239,68,68,.3);  color:var(--danger);  }
+.db-btn-danger:hover  { background:rgba(239,68,68,.2);  border-color:var(--danger);  }
+.db-btn-warning { background:rgba(245,158,11,.1); border-color:rgba(245,158,11,.3); color:var(--warning); }
+.db-btn-warning:hover { background:rgba(245,158,11,.2); border-color:var(--warning); }
+.db-btn-safe    { background:rgba(99,102,241,.1); border-color:rgba(99,102,241,.3); color:var(--accent);  }
+.db-btn-safe:hover    { background:rgba(99,102,241,.2); border-color:var(--accent);  }
+.db-stat-row {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:5px 10px; background:var(--bg); border-radius:5px; border:1px solid var(--border);
+}
+.db-stat-label { font-size:11px; color:var(--muted); }
+.db-stat-val   { font-size:12px; font-weight:700; color:var(--text); font-family:monospace; }
+
 /* ── SSE live session rows ─────────────────────────────────────── */
 .sse-session-row {
   display: grid;
@@ -1153,6 +1172,52 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
     </div>
   </div>
 
+  <!-- Database Management -->
+  <div class="settings-section">
+    <div class="settings-section-title">Database Management</div>
+    <div class="panel-card">
+
+      <!-- Danger banner -->
+      <div style="padding:9px 14px;background:rgba(239,68,68,.07);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
+        <span style="font-size:14px">⚠️</span>
+        <span style="font-size:11px;color:var(--danger);font-weight:600">Danger Zone — these actions cannot be undone</span>
+      </div>
+
+      <!-- Session Management -->
+      <div style="padding:12px 14px;border-bottom:1px solid var(--border)">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px">Session Management</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="db-btn db-btn-danger"  onclick="executeDbAction('clear_all_sessions',   'Clear All Sessions')">Clear All Sessions</button>
+          <button class="db-btn db-btn-warning" onclick="executeDbAction('clear_stale_sessions', 'Clear Stale Sessions')">Clear Stale Sessions</button>
+          <button class="db-btn db-btn-warning" onclick="executeDbAction('reset_active_flags',   'Reset Active Flags')">Reset Active Flags</button>
+        </div>
+      </div>
+
+      <!-- User Data -->
+      <div style="padding:12px 14px;border-bottom:1px solid var(--border)">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px">User Data</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="db-btn db-btn-danger" onclick="executeDbAction('clear_usage_logs',          'Clear Usage Logs')">Clear Usage Logs</button>
+          <button class="db-btn db-btn-danger" onclick="executeDbAction('clear_test_users_sessions', 'Clear Test User Sessions')">Clear Test Users</button>
+          <button class="db-btn db-btn-danger" onclick="executeDbAction('clear_purchases',           'Clear Purchases')">Clear Purchases</button>
+        </div>
+      </div>
+
+      <!-- Database Info -->
+      <div style="padding:12px 14px">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px">Database Info</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-bottom:12px">
+          <div class="db-stat-row"><span class="db-stat-label">Sessions</span><span class="db-stat-val" id="db-sessions">—</span></div>
+          <div class="db-stat-row"><span class="db-stat-label">Users</span><span class="db-stat-val" id="db-users">—</span></div>
+          <div class="db-stat-row"><span class="db-stat-label">Usage logs</span><span class="db-stat-val" id="db-usage">—</span></div>
+          <div class="db-stat-row"><span class="db-stat-label">Purchases</span><span class="db-stat-val" id="db-purchases">—</span></div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="loadDbStats()">↻ Refresh Stats</button>
+      </div>
+
+    </div>
+  </div>
+
 </div>
 
 </main>
@@ -1509,11 +1574,42 @@ async function loadLiveSessions() {
 
 async function endSession(userId, email) {
   Modal.confirm("End Session", `Force-end session for <strong>${esc(email)}</strong>?`, async () => {
+    const btn = document.querySelector(`[data-end-session="${userId}"]`);
+    if (btn) { btn.textContent = "Ending…"; btn.disabled = true; }
+
     try {
       await apiPost("/admin/api/end-session", { userId });
-      toast(`Ended session for ${email}`);
-      loadLiveSessions();
-    } catch(e) { toast("Error: " + e.message, "error"); }
+      toast(`Ended session for ${esc(email)}`);
+
+      // Immediately remove row — don't wait for SSE
+      const row = document.getElementById("session-row-" + userId);
+      if (row) row.remove();
+      delete sessionStartTimes[userId];
+
+      // Recount remaining live rows
+      const remaining = document.querySelectorAll("#live-tbody tr[id^='session-row-']").length;
+      const dot      = document.getElementById("live-dot");
+      const sdot     = document.getElementById("sessions-dot");
+      const countEl  = document.getElementById("live-count");
+      const sCountEl = document.getElementById("sessions-count-lbl");
+      const burnEl   = document.getElementById("live-burn");
+
+      if (countEl)  countEl.textContent  = remaining;
+      if (sCountEl) sCountEl.textContent = `${remaining} active`;
+      [dot, sdot].forEach(el => el && el.classList.toggle("none", remaining === 0));
+
+      if (remaining === 0) {
+        document.getElementById("live-tbody").innerHTML =
+          `<tr><td colspan="4" class="loading-cell" style="color:var(--muted)">No active sessions</td></tr>`;
+        if (burnEl) burnEl.textContent = "Total burning: 0 cr/min";
+        if (durationTickInterval) { clearInterval(durationTickInterval); durationTickInterval = null; }
+      } else {
+        if (burnEl) burnEl.textContent = `Total credits burning: ${(remaining * 130.8).toFixed(1)} cr/min`;
+      }
+    } catch(e) {
+      toast("Error: " + e.message, "error");
+      if (btn) { btn.textContent = "End"; btn.disabled = false; }
+    }
   });
 }
 
@@ -2384,11 +2480,12 @@ function updateLiveSessions(sessions) {
   sessions.forEach(s => { sessionStartTimes[s.user_id] = s.started_at; });
 
   tbody.innerHTML = sessions.map(s => `
-    <tr>
+    <tr id="session-row-${esc(s.user_id)}">
       <td class="td-email">${esc(s.email || (s.user_id||"").slice(0,8) || "—")}</td>
       <td><span id="duration-${esc(s.user_id)}">${fmtSecs(s.duration_secs || 0)}</span></td>
       <td>${(s.credits_per_min || 130.8).toFixed(1)}</td>
-      <td><button class="btn btn-red btn-xs" onclick="endSession('${esc(s.user_id)}','${esc(s.email||"")}')">End</button></td>
+      <td><button class="btn btn-red btn-xs" data-end-session="${esc(s.user_id)}"
+            onclick="endSession('${esc(s.user_id)}','${esc(s.email||"")}')">End</button></td>
     </tr>`).join("");
 
   const totalBurn = (n * 130.8).toFixed(1);
@@ -2455,6 +2552,34 @@ async function loadSettings() {
 
     renderServerInfo(d);
   } catch(e) { console.error("loadSettings:", e.message); toast("Failed to load settings", "error"); }
+
+  loadDbStats();
+}
+
+// ── Database management ───────────────────────────────────────────
+async function loadDbStats() {
+  try {
+    const d = await api("/admin/api/db/stats");
+    if (!d) return;
+    document.getElementById("db-sessions").textContent  = `${fmtN(d.sessions)} (${fmtN(d.active_sessions)} active)`;
+    document.getElementById("db-users").textContent     = fmtN(d.users);
+    document.getElementById("db-usage").textContent     = fmtN(d.usage);
+    document.getElementById("db-purchases").textContent = fmtN(d.purchases);
+  } catch(e) { console.error("loadDbStats:", e.message); }
+}
+
+async function executeDbAction(action, label) {
+  Modal.confirm(
+    label,
+    `Are you sure you want to <strong>${esc(label.toLowerCase())}</strong>?<br>This cannot be undone.`,
+    async () => {
+      try {
+        await apiPost("/admin/api/db/action", { action });
+        toast(`✓ ${label} complete`, "success");
+        loadDbStats();
+      } catch(e) { toast(`✗ ${label} failed: ${e.message}`, "error"); }
+    }
+  );
 }
 
 function renderServerInfo(d) {
