@@ -277,6 +277,19 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   background:none; border:none; color:var(--text2);
   padding:7px 10px; border-radius:5px; font-size:12px; text-align:left;
 }
+
+/* ── End-session reason picker ─────────────────────────────────── */
+.reason-options { display:flex; flex-direction:column; gap:6px; }
+.reason-opt {
+  display:flex; align-items:center; gap:10px;
+  padding:8px 12px; border-radius:7px; border:1px solid var(--border);
+  cursor:pointer; transition:border-color .15s, background .15s;
+  font-size:12px; color:var(--text2);
+}
+.reason-opt:hover { border-color:var(--accent); color:var(--text); background:rgba(99,102,241,.06); }
+.reason-opt input[type="radio"] { accent-color:var(--danger); }
+.reason-opt:has(input:checked) { border-color:var(--danger); background:rgba(239,68,68,.08); color:var(--text); }
+.reason-icon { font-size:15px; line-height:1; }
 .action-dropdown button:hover { background:var(--surface); color:var(--text); }
 .action-dropdown .sep { height:1px; background:var(--border); margin:3px 0; }
 .action-dropdown .item-red { color:var(--danger); }
@@ -1562,7 +1575,7 @@ async function loadLiveSessions() {
         <td class="td-email">${esc(s.email)}</td>
         <td>${fmtSecs(s.duration_secs)}</td>
         <td>${(s.credits_per_min||130.8).toFixed(1)}</td>
-        <td><button class="btn btn-red btn-xs" onclick="endSession('${esc(s.user_id)}','${esc(s.email)}')">End</button></td>
+        <td><button class="btn btn-red btn-xs" onclick="showEndSessionModal('${esc(s.user_id)}','${esc(s.email)}')">End</button></td>
       </tr>`).join("");
 
     const totalBurn = (sessions.length * 130.8).toFixed(1);
@@ -1572,13 +1585,75 @@ async function loadLiveSessions() {
   }
 }
 
-async function endSession(userId, email) {
-  Modal.confirm("End Session", `Force-end session for <strong>${esc(email)}</strong>?`, async () => {
+const END_SESSION_REASONS = [
+  { value: "policy_violation",  label: "Policy Violation",       icon: "🚫" },
+  { value: "suspicious_usage",  label: "Suspicious Usage",       icon: "⚠️" },
+  { value: "credit_abuse",      label: "Credit Abuse",           icon: "💳" },
+  { value: "technical_issue",   label: "Technical Issue",        icon: "🔧" },
+  { value: "admin_maintenance", label: "Admin / Maintenance",    icon: "🛠️" },
+  { value: "other",             label: "Other",                  icon: "📝" },
+];
+
+function showEndSessionModal(userId, email) {
+  const ov = document.createElement("div");
+  ov.className = "admin-modal-overlay";
+  ov.innerHTML = `
+    <div class="admin-modal-card" style="max-width:420px">
+      <div class="modal-header">⛔ End Session</div>
+      <div class="modal-body">
+        <p class="modal-subtitle" style="margin-bottom:14px">
+          Ending session for <strong>${esc(email)}</strong>.<br>
+          <span style="color:var(--muted);font-size:11px">Select a reason — the user will be notified.</span>
+        </p>
+        <div class="reason-options">
+          ${END_SESSION_REASONS.map(r => `
+            <label class="reason-opt">
+              <input type="radio" name="kill-reason" value="${r.value}">
+              <span class="reason-icon">${r.icon}</span>
+              <span>${r.label}</span>
+            </label>`).join("")}
+        </div>
+        <div id="reason-other-wrap" style="display:none;margin-top:10px">
+          <input type="text" id="reason-other-text" class="modal-input" placeholder="Describe reason…" style="width:100%">
+        </div>
+        <textarea id="kill-admin-note" class="modal-input"
+          placeholder="Internal admin note (optional, not shown to user)…"
+          style="width:100%;margin-top:10px;height:64px;resize:vertical"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn-cancel">Cancel</button>
+        <button class="modal-btn-confirm" style="background:var(--danger)">End Session</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+
+  const radios = ov.querySelectorAll("input[name='kill-reason']");
+  radios.forEach(r => r.addEventListener("change", () => {
+    ov.querySelector("#reason-other-wrap").style.display = r.value === "other" ? "block" : "none";
+  }));
+  ov.querySelector(".modal-btn-cancel").addEventListener("click", () => ov.remove());
+  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+
+  ov.querySelector(".modal-btn-confirm").addEventListener("click", async () => {
+    const selected = ov.querySelector("input[name='kill-reason']:checked");
+    if (!selected) { toast("Please select a reason", "error"); return; }
+    let reason = selected.value;
+    if (reason === "other") {
+      const custom = ov.querySelector("#reason-other-text").value.trim();
+      reason = custom || "other";
+    }
+    const adminNote = ov.querySelector("#kill-admin-note").value.trim();
+    ov.remove();
+    await _doEndSession(userId, email, reason, adminNote);
+  });
+}
+
+async function _doEndSession(userId, email, reason, adminNote) {
     const btn = document.querySelector(`[data-end-session="${userId}"]`);
     if (btn) { btn.textContent = "Ending…"; btn.disabled = true; }
 
     try {
-      await apiPost("/admin/api/end-session", { userId });
+      await apiPost("/admin/api/end-session", { userId, reason, admin_note: adminNote });
       toast(`Ended session for ${esc(email)}`);
 
       // Immediately remove row — don't wait for SSE
@@ -1610,7 +1685,6 @@ async function endSession(userId, email) {
       toast("Error: " + e.message, "error");
       if (btn) { btn.textContent = "End"; btn.disabled = false; }
     }
-  });
 }
 
 async function loadActivity() {

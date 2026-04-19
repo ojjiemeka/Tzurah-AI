@@ -801,7 +801,7 @@ app.post("/session/ping", async (req, res) => {
     // Query WITHOUT is_active filter — find any existing row, most recent first
     const { data: existing, error: selErr } = await supabaseAdmin
       .from("sessions")
-      .select("id, started_at, last_ping, kill_signal")
+      .select("id, started_at, last_ping, kill_signal, kill_reason")
       .eq("user_id", user_id)
       .order("started_at", { ascending: false })
       .limit(1)
@@ -814,12 +814,12 @@ app.post("/session/ping", async (req, res) => {
     if (existing) {
       // Check kill signal before updating
       if (existing.kill_signal) {
-        console.log("[PING] KILL SIGNAL for user:", user_id);
+        console.log("[PING] KILL SIGNAL for user:", user_id, "reason:", existing.kill_reason);
         await supabaseAdmin.from("sessions").update({
           kill_signal: false,
           is_active:   false,
         }).eq("id", existing.id);
-        return res.json({ ok: true, kill: true });
+        return res.json({ ok: true, kill: true, reason: existing.kill_reason || null });
       }
 
       // If last_ping is older than 5 minutes, this is a new stream session —
@@ -901,12 +901,14 @@ app.get("/admin/api/live-sessions", adminAuth, async (_req, res) => {
 
 // POST /admin/api/end-session — force-end a user's active session via kill signal
 app.post("/admin/api/end-session", adminAuth, async (req, res) => {
-  const body   = req.body || {};
-  const userId = body.userId || body.user_id;
+  const body       = req.body || {};
+  const userId     = body.userId || body.user_id;
+  const reason     = body.reason     || null;
+  const adminNote  = body.admin_note || null;
   if (!userId) return res.status(400).json({ error: "userId required" });
   try {
     await supabaseAdmin.from("sessions")
-      .update({ is_active: false, kill_signal: true })
+      .update({ is_active: false, kill_signal: true, kill_reason: reason, kill_note: adminNote })
       .eq("user_id", userId);
     res.json({ ok: true });
   } catch (err) {
