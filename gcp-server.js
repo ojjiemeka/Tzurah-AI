@@ -773,17 +773,35 @@ app.post("/admin/api/unban-user", adminAuth, async (req, res) => {
 
 // POST /session/ping — Electron app calls every 10 s during active stream
 // No JWT required — user_id comes from body (Electron local session)
+// started_at is only set on INSERT so duration is calculated correctly.
 app.post("/session/ping", async (req, res) => {
   const { user_id, email, credits_used } = req.body || {};
   if (!user_id) return res.status(400).json({ error: "user_id required" });
   try {
-    await supabaseAdmin.from("sessions").upsert({
-      user_id,
-      email:        email || "unknown",
-      last_ping:    new Date().toISOString(),
-      credits_used: Number(credits_used) || 0,
-      is_active:    true,
-    }, { onConflict: "user_id" });
+    const { data: existing } = await supabaseAdmin
+      .from("sessions")
+      .select("id, started_at")
+      .eq("user_id", user_id)
+      .eq("is_active", true)
+      .single();
+
+    if (existing) {
+      await supabaseAdmin.from("sessions").update({
+        last_ping:    new Date().toISOString(),
+        credits_used: Number(credits_used) || 0,
+        email:        email || "unknown",
+      }).eq("id", existing.id);
+    } else {
+      const now = new Date().toISOString();
+      await supabaseAdmin.from("sessions").insert({
+        user_id,
+        email:        email || "unknown",
+        started_at:   now,
+        last_ping:    now,
+        credits_used: Number(credits_used) || 0,
+        is_active:    true,
+      });
+    }
     res.json({ ok: true });
   } catch (err) {
     res.json({ ok: true, warn: err.message });
@@ -793,12 +811,12 @@ app.post("/session/ping", async (req, res) => {
 // POST /session/end — Electron calls when stream stops
 app.post("/session/end", async (req, res) => {
   const { user_id } = req.body || {};
-  const uid = user_id;
-  if (!uid) return res.status(400).json({ error: "user_id required" });
+  if (!user_id) return res.status(400).json({ error: "user_id required" });
   try {
     await supabaseAdmin.from("sessions")
       .update({ is_active: false })
-      .eq("user_id", uid);
+      .eq("user_id", user_id)
+      .eq("is_active", true);
     res.json({ ok: true });
   } catch (err) {
     res.json({ ok: true, warn: err.message });
