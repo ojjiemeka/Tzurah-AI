@@ -561,6 +561,52 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 /* ── Last updated ──────────────────────────────────────────────── */
 .last-updated { font-size: 11px; color: var(--muted); }
 
+/* ── Settings tab ──────────────────────────────────────────────── */
+.settings-section { margin-bottom: 20px; }
+.settings-section-title {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .8px;
+  color: var(--muted); font-weight: 700; margin-bottom: 10px;
+  padding-bottom: 6px; border-bottom: 1px solid var(--border);
+}
+.settings-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; border-bottom: 1px solid var(--border);
+}
+.settings-row:last-child { border-bottom: none; }
+.settings-row-label-wrap { min-width: 200px; flex-shrink: 0; }
+.settings-row-label { font-size: 12px; font-weight: 600; color: var(--text); }
+.settings-row-meta  { font-size: 10px; color: var(--muted); margin-top: 2px; }
+.settings-row-value {
+  flex: 1; min-width: 0;
+  font-family: monospace; font-size: 12px; color: var(--electric);
+  background: var(--bg); border: 1px solid var(--border); border-radius: 5px;
+  padding: 5px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  user-select: all;
+}
+.settings-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.pricing-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
+}
+.pricing-row:last-child { border-bottom: none; }
+.pricing-label { flex: 1; font-size: 12px; color: var(--text2); }
+.pricing-input {
+  width: 100px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 5px; padding: 5px 8px; color: var(--text); font-size: 12px;
+  outline: none; text-align: right; font-family: monospace;
+}
+.pricing-input:focus { border-color: var(--accent); }
+.pricing-unit { font-size: 11px; color: var(--muted); min-width: 36px; }
+.server-info-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 14px; padding: 14px;
+}
+.server-info-label {
+  font-size: 10px; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .6px; margin-bottom: 3px;
+}
+.server-info-val { font-size: 15px; font-weight: 700; color: var(--text); font-family: monospace; }
+
 /* ── SSE live session rows ─────────────────────────────────────── */
 .sse-session-row {
   display: grid;
@@ -631,6 +677,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   <button class="tab-btn" data-tab="purchases">Purchases</button>
   <button class="tab-btn" data-tab="alerts">Alerts</button>
   <button class="tab-btn" data-tab="email">✉ Email</button>
+  <button class="tab-btn" data-tab="settings">⚙ Settings</button>
 </div>
 
 <!-- Toast container -->
@@ -996,6 +1043,118 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   </div>
 </div>
 
+<!-- ══ SETTINGS ══════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-settings">
+
+  <!-- API Keys -->
+  <div class="settings-section">
+    <div class="settings-section-title">API Keys</div>
+    <div class="panel-card">
+      <div class="settings-row">
+        <div class="settings-row-label-wrap">
+          <div class="settings-row-label">Decart API Key</div>
+          <div class="settings-row-meta">Controls face-swap model access</div>
+        </div>
+        <code class="settings-row-value" id="decart-key-display">loading…</code>
+        <div class="settings-row-actions">
+          <button class="btn btn-ghost btn-sm" onclick="toggleSettingsMask('decart-key-display','DECART_API_KEY')">Show</button>
+          <button class="btn btn-accent btn-sm" onclick="openUpdateKeyModal('DECART_API_KEY','Decart API Key')">Update</button>
+        </div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-label-wrap">
+          <div class="settings-row-label">Supabase Service Role Key</div>
+          <div class="settings-row-meta">Full DB access — keep secret</div>
+        </div>
+        <code class="settings-row-value" id="supabase-key-display">loading…</code>
+        <div class="settings-row-actions">
+          <button class="btn btn-ghost btn-sm" onclick="toggleSettingsMask('supabase-key-display','SUPABASE_SERVICE_ROLE_KEY')">Show</button>
+          <button class="btn btn-accent btn-sm" onclick="openUpdateKeyModal('SUPABASE_SERVICE_ROLE_KEY','Supabase Service Role Key')">Update</button>
+        </div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-label-wrap">
+          <div class="settings-row-label">Supabase URL</div>
+          <div class="settings-row-meta">Project API endpoint (read-only)</div>
+        </div>
+        <code class="settings-row-value" id="supabase-url-display">loading…</code>
+      </div>
+    </div>
+  </div>
+
+  <!-- Admin Credentials -->
+  <div class="settings-section">
+    <div class="settings-section-title">Admin Credentials</div>
+    <div class="panel-card">
+      <div class="settings-row">
+        <div class="settings-row-label-wrap">
+          <div class="settings-row-label">Admin Email</div>
+          <div class="settings-row-meta">Used for dashboard login</div>
+        </div>
+        <code class="settings-row-value" id="admin-email-display">loading…</code>
+        <div class="settings-row-actions">
+          <button class="btn btn-accent btn-sm" onclick="openUpdateKeyModal('ADMIN_EMAIL','Admin Email')">Update</button>
+        </div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-label-wrap">
+          <div class="settings-row-label">Admin Password</div>
+          <div class="settings-row-meta">Dashboard login password</div>
+        </div>
+        <code class="settings-row-value" style="color:var(--muted)">••••••••••••••••</code>
+        <div class="settings-row-actions">
+          <button class="btn btn-accent btn-sm" onclick="openChangePasswordModal()">Change</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pricing Config -->
+  <div class="settings-section">
+    <div class="settings-section-title">Pricing Config</div>
+    <div class="panel-card">
+      <div class="pricing-row">
+        <span class="pricing-label">Credits burned per second (user-facing)</span>
+        <input id="setting-credits-per-sec" class="pricing-input" type="number" step="0.01" min="0.001" value="0.1" oninput="updateCostPerSec()">
+        <span class="pricing-unit">cr/s</span>
+      </div>
+      <div class="pricing-row">
+        <span class="pricing-label">Cost per Decart credit</span>
+        <input id="setting-cost-per-credit" class="pricing-input" type="number" step="0.000001" min="0" value="0.00625" oninput="updateCostPerSec()">
+        <span class="pricing-unit">$/cr</span>
+      </div>
+      <div class="pricing-row">
+        <span class="pricing-label" style="color:var(--muted);font-size:11px">
+          Decart burns 2.18 cr/s · Effective cost per session second:
+          <strong id="cost-per-sec-display" style="color:var(--warning)">$0.0136</strong>
+        </span>
+        <button class="btn btn-accent btn-sm" onclick="savePricingConfig()">Save Pricing</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Server Info -->
+  <div class="settings-section">
+    <div class="settings-section-title">Server Info</div>
+    <div class="panel-card">
+      <div class="server-info-grid" id="server-info-grid">
+        <div><div class="server-info-label">Node Version</div><div class="server-info-val" id="server-node">—</div></div>
+        <div><div class="server-info-label">Uptime</div><div class="server-info-val" id="server-uptime">—</div></div>
+        <div><div class="server-info-label">Memory (heap)</div><div class="server-info-val" id="server-memory">—</div></div>
+        <div><div class="server-info-label">PID</div><div class="server-info-val" id="server-pid">—</div></div>
+        <div><div class="server-info-label">Environment</div><div class="server-info-val" id="server-env">—</div></div>
+        <div><div class="server-info-label">Server IP</div><div class="server-info-val">34.39.83.195</div></div>
+      </div>
+      <div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px">
+        <button class="btn btn-ghost btn-sm" onclick="refreshServerInfo()">↻ Refresh</button>
+        <button class="btn btn-red btn-sm"   onclick="confirmRestartServer()">⚡ Restart Server</button>
+        <span id="restart-countdown" style="font-size:11px;color:var(--warning)"></span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
 </main>
 
 <script>
@@ -1236,6 +1395,7 @@ function switchTab(id) {
   if (id==="purchases" && !allPurchases.length)       loadPurchasesData();
   if (id==="alerts")   loadAlertRules();
   if (id==="email")    loadEmailTab();
+  if (id==="settings") loadSettings();
 }
 
 // ── Logout ────────────────────────────────────────────────────────
@@ -2267,6 +2427,200 @@ function connectSSE() {
   };
 
   return evtSource;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SETTINGS
+// ══════════════════════════════════════════════════════════════════
+
+const settingsMasked     = {};  // elId → masked string shown on load
+const settingsRevealCache = {}; // keyName → revealed value (cached after first Show)
+
+async function loadSettings() {
+  try {
+    const d = await api("/admin/api/settings");
+    if (!d) return;
+
+    settingsMasked["decart-key-display"]   = d.decart_key;
+    settingsMasked["supabase-key-display"] = d.supabase_key;
+
+    document.getElementById("decart-key-display").textContent   = d.decart_key;
+    document.getElementById("supabase-key-display").textContent = d.supabase_key;
+    document.getElementById("supabase-url-display").textContent = d.supabase_url;
+    document.getElementById("admin-email-display").textContent  = d.admin_email;
+
+    document.getElementById("setting-credits-per-sec").value = d.pricing.credits_per_second;
+    document.getElementById("setting-cost-per-credit").value = d.pricing.cost_per_credit;
+    updateCostPerSec();
+
+    renderServerInfo(d);
+  } catch(e) { console.error("loadSettings:", e.message); toast("Failed to load settings", "error"); }
+}
+
+function renderServerInfo(d) {
+  document.getElementById("server-node").textContent   = d.node_version    || "—";
+  document.getElementById("server-uptime").textContent = formatUptime(d.uptime_seconds || d.uptime || 0);
+  document.getElementById("server-memory").textContent = (d.memory_mb || 0) + " MB";
+  document.getElementById("server-pid").textContent    = d.pid             || "—";
+  document.getElementById("server-env").textContent    = d.env             || "—";
+}
+
+function formatUptime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function updateCostPerSec() {
+  const cpc = parseFloat(document.getElementById("setting-cost-per-credit")?.value || "0.00625");
+  const el  = document.getElementById("cost-per-sec-display");
+  if (el) el.textContent = "$" + (2.18 * cpc).toFixed(4);
+}
+
+async function refreshServerInfo() {
+  try {
+    const d = await api("/admin/api/settings/server-info");
+    if (d) renderServerInfo(d);
+    toast("Server info refreshed", "info");
+  } catch(e) { toast("Error: " + e.message, "error"); }
+}
+
+// Toggle an API key display between masked and revealed
+async function toggleSettingsMask(elId, keyName) {
+  const el  = document.getElementById(elId);
+  if (!el) return;
+  const btn = el.closest(".settings-row")?.querySelector(".btn-ghost");
+
+  if (el.dataset.revealed === "true") {
+    el.textContent        = settingsMasked[elId] || "••••••••••••••••••••••••••••••••";
+    el.dataset.revealed   = "false";
+    if (btn) btn.textContent = "Show";
+    return;
+  }
+
+  // Fetch from server on first reveal; cache for subsequent toggles
+  if (!settingsRevealCache[keyName]) {
+    try {
+      const d = await apiPost("/admin/api/settings/reveal-key", { key_name: keyName });
+      settingsRevealCache[keyName] = d?.value || "not set";
+    } catch(e) { toast("Cannot reveal: " + e.message, "error"); return; }
+  }
+  el.textContent      = settingsRevealCache[keyName];
+  el.dataset.revealed = "true";
+  if (btn) btn.textContent = "Hide";
+}
+
+// Open modal to update any allowed .env key
+function openUpdateKeyModal(keyName, label) {
+  showModal(`
+    <div class="modal-header">Update ${esc(label)}</div>
+    <div class="modal-body">
+      <div class="modal-field">
+        <label>New value</label>
+        <input class="modal-input" type="text" placeholder="Paste new value…" autocomplete="off" spellcheck="false">
+      </div>
+      <p style="font-size:11px;color:var(--muted);margin-top:6px">Applied immediately in memory and persisted to .env on disk.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="modal-btn-cancel">Cancel</button>
+      <button class="modal-btn-confirm btn-green">Save &amp; Apply</button>
+    </div>`, {
+    type: "input",
+    onSubmit: async (val) => {
+      if (!val || !val.trim()) { toast("Value cannot be empty", "error"); return; }
+      try {
+        await apiPost("/admin/api/settings/update-key", { key_name: keyName, value: val.trim() });
+        // Clear reveal cache so next Show fetches fresh value
+        delete settingsRevealCache[keyName];
+        toast(`${label} updated ✓`, "success");
+        loadSettings();
+      } catch(e) { toast("Error: " + e.message, "error"); }
+    },
+  });
+}
+
+// Change admin password with confirm flow (all in a single custom modal)
+function openChangePasswordModal() {
+  const ov = document.createElement("div");
+  ov.className = "admin-modal-overlay";
+  ov.innerHTML = `
+    <div class="admin-modal-card">
+      <div class="modal-header">Change Admin Password</div>
+      <div class="modal-body">
+        <div class="modal-field">
+          <label>Current password</label>
+          <input class="modal-input" id="cpwd-current" type="password" placeholder="Current password" autocomplete="current-password">
+        </div>
+        <div class="modal-field">
+          <label>New password</label>
+          <input class="modal-input" id="cpwd-new" type="password" placeholder="Min 8 characters" autocomplete="new-password">
+        </div>
+        <div class="modal-field">
+          <label>Confirm new password</label>
+          <input class="modal-input" id="cpwd-confirm" type="password" placeholder="Repeat new password" autocomplete="new-password">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn-cancel">Cancel</button>
+        <button class="modal-btn-confirm btn-green" id="cpwd-submit">Update Password</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  ov.querySelector(".modal-btn-cancel").addEventListener("click", () => ov.remove());
+  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+  ov.querySelector("#cpwd-submit").addEventListener("click", async () => {
+    const current = ov.querySelector("#cpwd-current").value;
+    const newPwd  = ov.querySelector("#cpwd-new").value;
+    const confirm = ov.querySelector("#cpwd-confirm").value;
+    if (!current || !newPwd) { toast("All fields required", "error"); return; }
+    if (newPwd !== confirm)  { toast("Passwords do not match", "error"); return; }
+    if (newPwd.length < 8)   { toast("Password must be at least 8 characters", "error"); return; }
+    try {
+      await apiPost("/admin/api/settings/update-key", { key_name: "ADMIN_PASSWORD", value: newPwd });
+      ov.remove();
+      toast("Admin password updated ✓", "success");
+    } catch(e) { toast("Error: " + e.message, "error"); }
+  });
+  setTimeout(() => ov.querySelector("#cpwd-current")?.focus(), 80);
+}
+
+async function savePricingConfig() {
+  const cps = parseFloat(document.getElementById("setting-credits-per-sec")?.value || "");
+  const cpc = parseFloat(document.getElementById("setting-cost-per-credit")?.value  || "");
+  if (!cps || cps <= 0) { toast("Invalid credits per second", "error"); return; }
+  if (!cpc || cpc <= 0) { toast("Invalid cost per credit",    "error"); return; }
+  try {
+    await Promise.all([
+      apiPost("/admin/api/settings/update-key", { key_name: "CREDITS_PER_SECOND", value: String(cps) }),
+      apiPost("/admin/api/settings/update-key", { key_name: "COST_PER_CREDIT",    value: String(cpc) }),
+    ]);
+    toast("Pricing config saved ✓", "success");
+    updateCostPerSec();
+  } catch(e) { toast("Error: " + e.message, "error"); }
+}
+
+function confirmRestartServer() {
+  Modal.confirm(
+    "Restart Server",
+    "Restart the server process? PM2 will bring it back online in ~5 seconds. You will be redirected automatically.",
+    async () => {
+      const countdown = document.getElementById("restart-countdown");
+      try {
+        await apiPost("/admin/api/settings/restart", {});
+      } catch(_) { /* expected — server drops the connection */ }
+      toast("Server restarting…", "warning");
+      let t = 7;
+      if (countdown) countdown.textContent = `Restarting… reloading in ${t}s`;
+      const tick = setInterval(() => {
+        t--;
+        if (t <= 0) { clearInterval(tick); window.location.reload(); }
+        else if (countdown) countdown.textContent = `Restarting… reloading in ${t}s`;
+      }, 1000);
+    }
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════

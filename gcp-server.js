@@ -18,7 +18,8 @@ require("dotenv").config();
 const express = require("express");
 const session = require("express-session");
 const cors    = require("cors");
-const path      = require("path");
+const path    = require("path");
+const fs      = require("fs");
 const { createClient } = require("@supabase/supabase-js");
 
 // ── Nodemailer ─────────────────────────────────────────────────────
@@ -1067,6 +1068,94 @@ app.post("/admin/api/email/send", adminAuth, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// ADMIN SETTINGS
+// ═══════════════════════════════════════════════════════════════════
+
+const SETTINGS_ALLOWED_KEYS = [
+  "DECART_API_KEY", "SUPABASE_SERVICE_ROLE_KEY",
+  "ADMIN_EMAIL", "ADMIN_PASSWORD",
+  "CREDITS_PER_SECOND", "COST_PER_CREDIT",
+];
+
+// Returns masked current values + server info
+app.get("/admin/api/settings", adminAuth, (req, res) => {
+  const mask = (val) => val
+    ? val.slice(0, 6) + "•".repeat(22) + val.slice(-4)
+    : "not set";
+  res.json({
+    decart_key:   mask(process.env.DECART_API_KEY),
+    supabase_url: process.env.SUPABASE_URL || "not set",
+    supabase_key: mask(process.env.SUPABASE_SERVICE_ROLE_KEY),
+    admin_email:  process.env.ADMIN_EMAIL  || "not set",
+    node_version: process.version,
+    uptime:       Math.floor(process.uptime()),
+    memory_mb:    Math.floor(process.memoryUsage().heapUsed / 1024 / 1024),
+    pid:          process.pid,
+    env:          process.env.NODE_ENV || "development",
+    pricing: {
+      credits_per_second: parseFloat(process.env.CREDITS_PER_SECOND || "0.1"),
+      cost_per_credit:    parseFloat(process.env.COST_PER_CREDIT    || "0.00625"),
+    },
+  });
+});
+
+// Reveals the actual (unmasked) value of a specific env key
+app.post("/admin/api/settings/reveal-key", adminAuth, (req, res) => {
+  const { key_name } = req.body || {};
+  const revealable = ["DECART_API_KEY", "SUPABASE_SERVICE_ROLE_KEY", "ADMIN_EMAIL"];
+  if (!revealable.includes(key_name)) {
+    return res.status(400).json({ error: "Key not revealable" });
+  }
+  res.json({ value: process.env[key_name] || "not set" });
+});
+
+// Updates a single env key in .env + live process.env
+app.post("/admin/api/settings/update-key", adminAuth, (req, res) => {
+  const { key_name, value } = req.body || {};
+  if (!SETTINGS_ALLOWED_KEYS.includes(key_name)) {
+    return res.status(400).json({ error: "Key not allowed" });
+  }
+  if (!value || !value.trim()) {
+    return res.status(400).json({ error: "Value cannot be empty" });
+  }
+  try {
+    const envPath = path.join(__dirname, ".env");
+    let envContent = "";
+    try { envContent = fs.readFileSync(envPath, "utf8"); } catch (_) {}
+    const regex = new RegExp(`^${key_name}=.*$`, "m");
+    if (regex.test(envContent)) {
+      envContent = envContent.replace(regex, `${key_name}=${value.trim()}`);
+    } else {
+      envContent += (envContent.endsWith("\n") ? "" : "\n") + `${key_name}=${value.trim()}\n`;
+    }
+    fs.writeFileSync(envPath, envContent);
+    process.env[key_name] = value.trim();
+    console.log(`[SETTINGS] Updated ${key_name}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[SETTINGS] update-key error:", err.message);
+    res.status(500).json({ error: "Failed to write .env: " + err.message });
+  }
+});
+
+// Live server info (uptime, memory)
+app.get("/admin/api/settings/server-info", adminAuth, (req, res) => {
+  res.json({
+    node_version:   process.version,
+    uptime_seconds: Math.floor(process.uptime()),
+    memory_mb:      Math.floor(process.memoryUsage().heapUsed / 1024 / 1024),
+    pid:            process.pid,
+    env:            process.env.NODE_ENV || "development",
+  });
+});
+
+// Graceful exit — PM2 restarts the process automatically
+app.post("/admin/api/settings/restart", adminAuth, (req, res) => {
+  res.json({ success: true });
+  setTimeout(() => process.exit(0), 500);
+});
+
+// ═══════════════════════════════════════════════════════════════════
 // START
 // ═══════════════════════════════════════════════════════════════════
 
@@ -1090,6 +1179,9 @@ app.listen(PORT, () => {
   console.log("  GET  /admin/api/stream         → SSE real-time updates");
   console.log("  GET  /admin/api/live-sessions  → Live sessions");
   console.log("  GET  /admin/api/activity       → Recent activity feed");
+  console.log("  GET  /admin/api/settings       → Admin settings (masked)");
+  console.log("  POST /admin/api/settings/update-key → Update .env key");
+  console.log("  POST /admin/api/settings/restart    → Restart server");
   console.log("  GET  /admin/api/email/recipients → Email recipient groups");
   console.log("  POST /admin/api/email/send     → Send email to users");
   console.log("  GET  /admin/api/email/sent     → Sent email log");
