@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tzurah Admin — Sign In</title>
+  <style>
+    :root {
+      --bg:       #0a0a0f;
+      --surface:  #111118;
+      --surface2: #1a1a2e;
+      --border:   #2a2a4a;
+      --accent:   #6366f1;
+      --electric: #06b6d4;
+      --text:     #ffffff;
+      --muted:    #888899;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+    }
+    /* Animated grid background */
+    body::before {
+      content: "";
+      position: fixed; inset: 0;
+      background-image:
+        linear-gradient(rgba(99,102,241,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(99,102,241,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+    }
+    .login-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 40px;
+      width: 100%;
+      max-width: 420px;
+      position: relative;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+    .login-logo {
+      text-align: center;
+      margin-bottom: 8px;
+      font-size: 28px;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+    }
+    .logo-tz   { color: #6366f1; }
+    .logo-urah { color: #fff; }
+    .logo-live {
+      font-size: 11px; font-weight: 700; letter-spacing: 3px;
+      color: #06b6d4; border: 1px solid #06b6d4;
+      padding: 1px 5px; border-radius: 3px;
+      margin-left: 6px; vertical-align: middle;
+    }
+    .admin-badge {
+      display: block;
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .admin-badge span {
+      display: inline-block;
+      background: rgba(99,102,241,0.15);
+      border: 1px solid rgba(99,102,241,0.3);
+      color: #a5b4fc;
+      font-size: 0.7rem; font-weight: 700;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      padding: 3px 10px; border-radius: 20px;
+    }
+    .error-msg {
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.25);
+      color: #f87171; border-radius: 6px;
+      padding: 10px 14px; font-size: 0.8rem;
+      margin-bottom: 16px; display: none;
+    }
+    .field { margin-bottom: 16px; }
+    .field label {
+      display: block; font-size: 0.72rem;
+      font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.05em;
+      margin-bottom: 6px;
+    }
+    .field input {
+      width: 100%; padding: 10px 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text);
+      font-size: 0.9rem; font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .field input:focus { border-color: var(--accent); }
+    .btn-login {
+      width: 100%; padding: 12px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      border: none; border-radius: 8px;
+      color: #fff; font-size: 0.9rem; font-weight: 700;
+      font-family: inherit; cursor: pointer;
+      margin-top: 8px;
+      transition: filter 0.15s;
+    }
+    .btn-login:hover { filter: brightness(1.1); }
+    .btn-login:disabled { opacity: 0.6; cursor: not-allowed; filter: none; }
+    .dev-hint {
+      margin-top: 20px;
+      background: rgba(245,158,11,0.06);
+      border: 1px solid rgba(245,158,11,0.2);
+      border-radius: 8px; padding: 12px;
+    }
+    .dev-hint p {
+      font-size: 0.72rem; color: #f59e0b;
+      font-weight: 700; margin-bottom: 6px;
+    }
+    .dev-hint code {
+      display: block; font-size: 0.72rem;
+      color: var(--muted); font-family: monospace;
+      line-height: 1.8;
+    }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="login-logo">
+      <span class="logo-tz">Tz</span><span class="logo-urah">urah</span>
+      <span class="logo-live">LIVE</span>
+    </div>
+    <div class="admin-badge"><span>Admin Panel</span></div>
+
+    <div class="error-msg" id="error-msg"></div>
+
+    <div class="field">
+      <label>Email</label>
+      <input type="email" id="email" placeholder="admin@tzurah.ai" autocomplete="email">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="password" placeholder="Enter password" autocomplete="current-password">
+    </div>
+    <button class="btn-login" id="btn-login">Sign In to Admin</button>
+
+    <div class="dev-hint">
+      <p>⚠ Dev Mode Credentials</p>
+      <code>
+        Email: admin@tzurah.ai<br>
+        Password: TzurahAdmin2025!
+      </code>
+    </div>
+  </div>
+
+  <script>
+    const emailEl = document.getElementById("email");
+    const passEl  = document.getElementById("password");
+    const btnEl   = document.getElementById("btn-login");
+    const errEl   = document.getElementById("error-msg");
+
+    async function doLogin() {
+      const email    = emailEl.value.trim();
+      const password = passEl.value;
+      if (!email || !password) { showError("Please enter email and password"); return; }
+
+      btnEl.disabled    = true;
+      btnEl.textContent = "Signing in…";
+      errEl.style.display = "none";
+
+      try {
+        const res  = await fetch("/admin/login", {
+          method:      "POST",
+          headers:     { "Content-Type": "application/json" },
+          body:        JSON.stringify({ email, password }),
+          credentials: "include",
+        });
+        const data = await res.json();
+        if (data.success) {
+          window.location.href = "/admin";
+        } else {
+          showError(data.error || "Invalid credentials");
+        }
+      } catch {
+        showError("Connection error — try again");
+      } finally {
+        btnEl.disabled    = false;
+        btnEl.textContent = "Sign In to Admin";
+      }
+    }
+
+    function showError(msg) {
+      errEl.textContent   = msg;
+      errEl.style.display = "block";
+    }
+
+    btnEl.addEventListener("click", doLogin);
+    passEl.addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+  </script>
+</body>
+</html>
