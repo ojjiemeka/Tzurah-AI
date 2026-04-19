@@ -15,9 +15,9 @@
 
 require("dotenv").config();
 
-const express   = require("express");
-const basicAuth = require("express-basic-auth");
-const cors      = require("cors");
+const express = require("express");
+const session = require("express-session");
+const cors    = require("cors");
 const path      = require("path");
 const { createClient } = require("@supabase/supabase-js");
 
@@ -61,19 +61,12 @@ const PACKS = {
   max:      { name: "Max",      price: 500, credits: 1200, minutes: 200, priceId: process.env.STRIPE_PRICE_MAX      },
 };
 
-// ── Admin auth (express-basic-auth) ───────────────────────────────
-const adminAuth = basicAuth({
-  authorizer: (username, password) => {
-    const adminEmail = process.env.ADMIN_EMAIL    || "admin@tzurah.ai";
-    const adminPass  = process.env.ADMIN_PASSWORD || "TzurahAdmin2025!";
-    // Constant-time compare to prevent timing attacks
-    const userOk = basicAuth.safeCompare(username, adminEmail);
-    const passOk = basicAuth.safeCompare(password, adminPass);
-    return userOk & passOk;
-  },
-  challenge:  true,
-  realm:      "Tzurah Admin",
-});
+// ── Admin session auth ─────────────────────────────────────────────
+function adminAuth(req, res, next) {
+  if (req.session?.isAdmin) return next();
+  if (req.path.startsWith("/admin/api/")) return res.status(401).json({ error: "Unauthorized" });
+  res.redirect("/admin/login");
+}
 
 // ── User auth middleware (Supabase JWT) ────────────────────────────
 async function requireAuth(req, res, next) {
@@ -100,6 +93,12 @@ app.use(cors());
 // Raw body for Stripe webhook signature verification (must come before express.json)
 app.use("/stripe/webhook", express.raw({ type: "application/json" }));
 app.use(express.json());
+app.use(session({
+  secret:            process.env.ADMIN_SECRET || "tzurah_admin_secret",
+  resave:            false,
+  saveUninitialized: false,
+  cookie:            { secure: false, maxAge: 24 * 60 * 60 * 1000 },
+}));
 
 // ═══════════════════════════════════════════════════════════════════
 // PUBLIC ROUTES
@@ -341,6 +340,94 @@ app.post("/stripe/webhook", (req, res) => {
 // Serve admin HTML dashboard
 app.get("/admin", adminAuth, (_req, res) => {
   res.sendFile(path.join(__dirname, "admin.html"));
+});
+
+// Admin login page
+app.get("/admin/login", (req, res) => {
+  if (req.session?.isAdmin) return res.redirect("/admin");
+  res.sendFile(path.join(__dirname, "admin-login.html"));
+});
+
+// Admin login POST
+app.post("/admin/login", (req, res) => {
+  const { email, password } = req.body || {};
+  const adminEmail = process.env.ADMIN_EMAIL    || "admin@tzurah.ai";
+  const adminPass  = process.env.ADMIN_PASSWORD || "TzurahAdmin2025!";
+  if (email === adminEmail && password === adminPass) {
+    req.session.isAdmin     = true;
+    req.session.adminEmail  = email;
+    return res.json({ success: true });
+  }
+  res.status(401).json({ error: "Invalid credentials" });
+});
+
+// Admin logout
+app.post("/admin/logout", (req, res) => {
+  req.session.destroy(() => {});
+  res.json({ success: true });
+});
+
+// GET /admin/api/stream — SSE for real-time dashboard updates
+app.get("/admin/api/stream", adminAuth, (req, res) => {
+  res.setHeader("Content-Type",  "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection",    "keep-alive");
+  res.flushHeaders();
+
+  res.write('data: {"type":"connected"}\n\n');
+
+  const statsInterval = setInterval(async () => {
+    try {
+      const twoMinAgo  = new Date(Date.now() - 2  * 60 * 1000).toISOString();
+      const oneDayAgo  = new Date(Date.now() - 86_400_000).toISOString();
+      const oneWeekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+
+      const [sessionsRes, profilesRes, purchasesRes, usageRes] = await Promise.all([
+        supabaseAdmin.from("sessions").select("*").eq("is_active", true).gte("last_ping", twoMinAgo),
+        supabaseAdmin.from("profiles").select("id, credits, total_credits_used, last_seen, created_at"),
+        supabaseAdmin.from("purchases").select("price_usd, created_at"),
+        supabaseAdmin.from("usage").select("session_seconds, credits_used"),
+      ]);
+
+      const sessions  = sessionsRes.data  || [];
+      const profiles  = profilesRes.data  || [];
+      const purchases = purchasesRes.data || [];
+      const usage     = usageRes.data     || [];
+
+      const totalRevenue     = purchases.reduce((s, p) => s + (p.price_usd || 0), 0);
+      const activeToday      = profiles.filter(u => u.last_seen  && u.last_seen  > oneDayAgo).length;
+      const newThisWeek      = profiles.filter(u => u.created_at && u.created_at > oneWeekAgo).length;
+      const totalCreditsUsed = usage.reduce((s, u) => s + (u.credits_used || 0), 0);
+      const totalSecondsUsed = usage.reduce((s, u) => s + (u.session_seconds || 0), 0);
+
+      const enrichedSessions = sessions.map(s => ({
+        ...s,
+        duration_secs:   Math.max(0, Math.floor((Date.now() - new Date(s.started_at).getTime()) / 1000)),
+        credits_per_min: 130.8,
+      }));
+
+      const payload = {
+        type:      "update",
+        timestamp: Date.now(),
+        stats: {
+          totalUsers:       profiles.length,
+          activeToday,
+          newThisWeek,
+          totalRevenue:     totalRevenue.toFixed(2),
+          totalCreditsUsed: Math.round(totalCreditsUsed),
+          estDecartCost:    (totalSecondsUsed * 2.18 * 0.00625).toFixed(2),
+        },
+        liveSessions: enrichedSessions,
+        liveCount:    enrichedSessions.length,
+      };
+
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    } catch (err) {
+      res.write(`data: {"type":"error","msg":${JSON.stringify(err.message)}}\n\n`);
+    }
+  }, 5000);
+
+  req.on("close", () => clearInterval(statsInterval));
 });
 
 // ── Admin helper: merge auth users + profiles ─────────────────────
@@ -939,7 +1026,11 @@ app.listen(PORT, () => {
   console.log("  POST /session/end              → End session");
   console.log("  POST /stripe/create-checkout   → Stripe checkout");
   console.log("  POST /stripe/webhook           → Stripe fulfillment");
-  console.log("  GET  /admin                    → Admin dashboard (Basic Auth)");
+  console.log("  GET  /admin                    → Admin dashboard (session auth)");
+  console.log("  GET  /admin/login              → Admin login page");
+  console.log("  POST /admin/login              → Admin login");
+  console.log("  POST /admin/logout             → Admin logout");
+  console.log("  GET  /admin/api/stream         → SSE real-time updates");
   console.log("  GET  /admin/api/live-sessions  → Live sessions");
   console.log("  GET  /admin/api/activity       → Recent activity feed");
   console.log("  GET  /admin/api/email/recipients → Email recipient groups");

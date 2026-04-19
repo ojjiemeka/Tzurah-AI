@@ -11,7 +11,7 @@
     "@supabase/supabase-js": "^2.0.0",
     "@decartai/sdk": "^0.0.60",
     "express": "^4.21.0",
-    "express-basic-auth": "^1.2.1",
+    "express-session": "^1.18.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "stripe": "^17.0.0",

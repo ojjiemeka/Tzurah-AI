@@ -560,6 +560,43 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 
 /* ── Last updated ──────────────────────────────────────────────── */
 .last-updated { font-size: 11px; color: var(--muted); }
+
+/* ── SSE live session rows ─────────────────────────────────────── */
+.sse-session-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.2s;
+  font-size: 12px;
+}
+.sse-session-row:hover { background: rgba(99,102,241,0.05); }
+.session-user { display: flex; align-items: center; gap: 8px; }
+.session-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 6px rgba(34,197,94,0.6);
+  animation: pulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.session-duration {
+  font-family: monospace; font-size: 12px;
+  color: var(--text2); min-width: 46px; text-align: right;
+}
+.session-rate {
+  font-size: 11px; color: var(--warning);
+  min-width: 76px; text-align: right;
+}
+.session-end-btn {
+  padding: 3px 10px; font-size: 11px;
+  background: rgba(239,68,68,0.1);
+  border: 1px solid rgba(239,68,68,0.25);
+  color: var(--danger); border-radius: 4px;
+  cursor: pointer; font-family: inherit;
+}
+.session-end-btn:hover { background: rgba(239,68,68,0.2); border-color: var(--danger); }
 </style>
 </head>
 <body>
@@ -1023,14 +1060,19 @@ function fmtDateTime(ts) {
 
 // ── API helpers ───────────────────────────────────────────────────
 async function api(path) {
-  const r = await fetch(path);
+  const r = await fetch(path, { credentials: "include" });
+  if (r.status === 401) { window.location.href = "/admin/login"; return null; }
   if (!r.ok) throw new Error("HTTP " + r.status);
   return r.json();
 }
 async function apiPost(path, body) {
   const r = await fetch(path, {
-    method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    credentials: "include",
   });
+  if (r.status === 401) { window.location.href = "/admin/login"; return null; }
   if (!r.ok) { let e={}; try{e=await r.json()}catch(_){} throw new Error(e.error||"HTTP "+r.status); }
   return r.json();
 }
@@ -1183,23 +1225,24 @@ function switchTab(id) {
   if (id==="email")    loadEmailTab();
 }
 
-// ── Logout (clears Basic Auth) ────────────────────────────────────
+// ── Logout ────────────────────────────────────────────────────────
 function logout() {
-  const x = new XMLHttpRequest();
-  x.open("GET", window.location.href, true, "logout", "logout");
-  x.send();
-  x.onload = x.onerror = () => window.location.reload();
+  fetch("/admin/logout", { method: "POST", credentials: "include" })
+    .finally(() => { window.location.href = "/admin/login"; });
 }
 
 // ── Auto-refresh ──────────────────────────────────────────────────
+// SSE handles stats + live sessions in real time.
+// Polling only needed for: activity feed, fallback live sessions.
 function startAutoRefresh() {
   clearIntervals();
-  overviewInt = setInterval(() => { loadStats(); loadActivity(); cdValue=30; }, 30000);
-  liveInt     = setInterval(() => loadLiveSessions(), 10000);
+  overviewInt = setInterval(() => { loadActivity(); }, 30000);
+  liveInt     = setInterval(() => loadLiveSessions(), 30000); // fallback if SSE drops
   cdInterval  = setInterval(() => {
     if (!autoOn) return;
-    cdValue = Math.max(0, cdValue - 1);
-    document.getElementById("refresh-cd").textContent = cdValue + "s";
+    const secs = Math.floor((Date.now() - lastRefreshTime) / 1000);
+    document.getElementById("refresh-cd").textContent =
+      secs < 60 ? `SSE ${secs}s` : `SSE ${Math.floor(secs/60)}m`;
   }, 1000);
 }
 function clearIntervals() {
@@ -1212,7 +1255,7 @@ function toggleAuto() {
   else        { clearIntervals(); btn.textContent = "⏸ Paused"; btn.classList.remove("btn-ghost"); btn.classList.add("btn-amber");
                 document.getElementById("refresh-cd").textContent = ""; }
 }
-function manualRefresh() { loadStats(); loadLiveSessions(); loadActivity(); cdValue=30; }
+function manualRefresh() { loadStats(); loadLiveSessions(); loadActivity(); }
 
 // ══════════════════════════════════════════════════════════════════
 // OVERVIEW
@@ -1226,18 +1269,18 @@ async function loadStats() {
     const estDecartCr      = Math.round(totalSecsUsed * DECART_CR_PER_SEC);
     const estDecartCost    = d.estimatedDecartCost || 0;
 
-    // Stats cards
+    // Stats cards — IDs on sval divs allow SSE to update values in place
     document.getElementById("stats-grid").innerHTML = [
-      { label:"Total Users",     val:fmtN(d.totalUsers),      sub:"All accounts",                  hi:true },
-      { label:"Active Today",    val:fmtN(d.activeToday),     sub:"Sessions today",                click:"openActiveToday" },
-      { label:"New This Week",   val:fmtN(d.newThisWeek),     sub:"Last 7 days",                   click:"openNewThisWeek" },
-      { label:"Total Revenue",   val:fmt$(d.revenueTotal),    sub:`${fmt$(d.revenueMonth)} this month · ${fmt$(d.revenueToday)} today`, hi:true, click:"openRevenue" },
-      { label:"Credits Used",    val:fmtN(d.creditsUsed),     sub:"Across all users" },
-      { label:"Est. Decart Cost",val:fmt$(estDecartCost),     sub:`~${fmtN(estDecartCr)} Decart cr consumed`, warn:estDecartCost>400 },
+      { label:"Total Users",     val:fmtN(d.totalUsers),      sub:"All accounts",                  hi:true,  id:"sval-total-users" },
+      { label:"Active Today",    val:fmtN(d.activeToday),     sub:"Sessions today",                click:"openActiveToday",  id:"sval-active-today" },
+      { label:"New This Week",   val:fmtN(d.newThisWeek),     sub:"Last 7 days",                   click:"openNewThisWeek", id:"sval-new-week" },
+      { label:"Total Revenue",   val:fmt$(d.revenueTotal),    sub:`${fmt$(d.revenueMonth)} this month · ${fmt$(d.revenueToday)} today`, hi:true, click:"openRevenue", id:"sval-revenue" },
+      { label:"Credits Used",    val:fmtN(d.creditsUsed),     sub:"Across all users",              id:"sval-credits-used" },
+      { label:"Est. Decart Cost",val:fmt$(estDecartCost),     sub:`~${fmtN(estDecartCr)} Decart cr consumed`, warn:estDecartCost>400, id:"sval-decart-cost" },
     ].map(c=>`
       <div class="stat-card ${c.hi?"hi":c.warn?"warn":""}${c.click?" clickable":""}" ${c.click?`onclick="${c.click}()"`:""}>
         <div class="slabel">${c.label}</div>
-        <div class="sval">${c.val}</div>
+        <div class="sval" id="${c.id}">${c.val}</div>
         <div class="ssub">${c.sub}</div>
       </div>`).join("");
 
@@ -2128,14 +2171,89 @@ async function loadActivityWithTimer() {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// SSE — real-time updates
+// ══════════════════════════════════════════════════════════════════
+function updateStatCard(id, value) {
+  const el = document.getElementById(id);
+  if (!el || el.textContent === String(value)) return;
+  el.style.transition = "color 0.3s";
+  el.style.color = "var(--accent)";
+  el.textContent = value;
+  setTimeout(() => { el.style.color = ""; }, 500);
+}
+
+function updateLiveSessions(sessions) {
+  const dot      = document.getElementById("live-dot");
+  const sdot     = document.getElementById("sessions-dot");
+  const countEl  = document.getElementById("live-count");
+  const sCountEl = document.getElementById("sessions-count-lbl");
+  const tbody    = document.getElementById("live-tbody");
+  const burnEl   = document.getElementById("live-burn");
+
+  if (!tbody) return;
+
+  const n = sessions.length;
+  if (countEl)  countEl.textContent  = n;
+  if (sCountEl) sCountEl.textContent = `${n} active`;
+  [dot, sdot].forEach(el => el && el.classList.toggle("none", n === 0));
+
+  if (!n) {
+    tbody.innerHTML = `<tr><td colspan="4" class="loading-cell" style="color:var(--muted)">No active sessions</td></tr>`;
+    if (burnEl) burnEl.textContent = "Total burning: 0 cr/min";
+    return;
+  }
+
+  tbody.innerHTML = sessions.map(s => `
+    <tr>
+      <td class="td-email">${esc(s.email || (s.user_id||"").slice(0,8) || "—")}</td>
+      <td>${fmtSecs(s.duration_secs || 0)}</td>
+      <td>${(s.credits_per_min || 130.8).toFixed(1)}</td>
+      <td><button class="btn btn-red btn-xs" onclick="endSession('${esc(s.user_id)}','${esc(s.email||"")}')">End</button></td>
+    </tr>`).join("");
+
+  const totalBurn = (n * 130.8).toFixed(1);
+  if (burnEl) burnEl.textContent = `Total credits burning: ${totalBurn} cr/min`;
+}
+
+function connectSSE() {
+  const evtSource = new EventSource("/admin/api/stream", { withCredentials: true });
+
+  evtSource.onmessage = (e) => {
+    let data;
+    try { data = JSON.parse(e.data); } catch { return; }
+    if (data.type !== "update") return;
+
+    const s = data.stats;
+    updateStatCard("sval-total-users",  fmtN(s.totalUsers));
+    updateStatCard("sval-active-today", fmtN(s.activeToday));
+    updateStatCard("sval-new-week",     fmtN(s.newThisWeek));
+    updateStatCard("sval-revenue",      fmt$(s.totalRevenue));
+    updateStatCard("sval-credits-used", fmtN(s.totalCreditsUsed));
+    updateStatCard("sval-decart-cost",  fmt$(s.estDecartCost));
+
+    updateLiveSessions(data.liveSessions || []);
+
+    lastRefreshTime = Date.now();
+  };
+
+  evtSource.onerror = () => {
+    console.warn("SSE disconnected — reconnecting in 5s…");
+    evtSource.close();
+    setTimeout(connectSSE, 5000);
+  };
+
+  return evtSource;
+}
+
+// ══════════════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════════════
 function init() {
   initDecartBalance();
-  loadStats();
-  loadLiveSessions();
+  loadStats();       // initial full render (sets sval IDs for SSE to update)
   loadActivity();
-  startAutoRefresh();
+  connectSSE();      // real-time stats + live sessions every 5s
+  startAutoRefresh(); // activity feed + fallback polling
   checkHealth();
   setInterval(checkHealth, 30000);
   setInterval(checkAlerts, 60000);
