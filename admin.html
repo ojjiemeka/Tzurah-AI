@@ -864,6 +864,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
       </div>
       <div id="notif-list"><div class="notif-empty">No notifications</div></div>
     </div>
+    <span id="admin-name" style="font-size:11px;color:var(--muted)"></span>
     <button class="btn btn-ghost" onclick="logout()">Logout</button>
   </div>
 </header>
@@ -4126,7 +4127,18 @@ async function updateFlag(key, enabled) {
 // ══════════════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════════════
-function init() {
+async function init() {
+  // C9: fetch current admin identity + apply role-based tab visibility
+  try {
+    const meRes = await adminFetch('/admin/api/me');
+    if (meRes?.ok) {
+      const me = await meRes.json();
+      applyRoleVisibility(me.role || 'super_admin');
+      const nameEl = document.getElementById('admin-name');
+      if (nameEl) nameEl.textContent = me.name || me.email || 'Admin';
+    }
+  } catch (_) {}
+
   initDecartBalance();
   loadStats();       // initial full render (sets sval IDs for SSE to update)
   loadActivity();

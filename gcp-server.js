@@ -419,15 +419,34 @@ app.get("/admin/login", (req, res) => {
 });
 
 // Admin login POST
-app.post("/admin/login", (req, res) => {
+app.post("/admin/login", async (req, res) => {
   const { email, password } = req.body || {};
   const adminEmail = process.env.ADMIN_EMAIL    || "admin@tzurah.ai";
   const adminPass  = process.env.ADMIN_PASSWORD || "TzurahAdmin2025!";
   if (email === adminEmail && password === adminPass) {
     req.session.isAdmin     = true;
     req.session.adminEmail  = email;
+    req.session.adminRole   = "super_admin";
+    req.session.adminName   = "Super Admin";
     return res.json({ success: true });
   }
+  // Try sub-admin login
+  try {
+    const { data: admins } = await supabaseAdmin.from("admin_users")
+      .select("id, email, name, role, is_active, password_hash").eq("email", email).eq("is_active", true).maybeSingle();
+    if (admins?.password_hash) {
+      const bcrypt = require("bcryptjs");
+      const ok = await bcrypt.compare(password, admins.password_hash);
+      if (ok) {
+        req.session.isAdmin    = true;
+        req.session.adminEmail = admins.email;
+        req.session.adminRole  = admins.role;
+        req.session.adminName  = admins.name;
+        await supabaseAdmin.from("admin_users").update({ last_login: new Date().toISOString() }).eq("id", admins.id);
+        return res.json({ success: true });
+      }
+    }
+  } catch (_) {}
   res.status(401).json({ error: "Invalid credentials" });
 });
 
@@ -435,6 +454,15 @@ app.post("/admin/login", (req, res) => {
 app.post("/admin/logout", (req, res) => {
   req.session.destroy(() => {});
   res.json({ success: true });
+});
+
+// GET /admin/api/me — return current admin's identity + role
+app.get("/admin/api/me", adminAuth, (req, res) => {
+  res.json({
+    email: req.session.adminEmail || "",
+    role:  req.session.adminRole  || "super_admin",
+    name:  req.session.adminName  || "Admin",
+  });
 });
 
 // GET /admin/api/stream — SSE for real-time dashboard updates
