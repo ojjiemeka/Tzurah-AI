@@ -1492,9 +1492,9 @@ app.get("/admin/api/announcements", adminAuth, async (_req, res) => {
 });
 
 app.post("/admin/api/announcements", adminAuth, async (req, res) => {
-  const { title, message, type, expires_at } = req.body || {};
+  const { title, message, type, scheduled_at, expires_at } = req.body || {};
   if (!title || !message) return res.status(400).json({ error: "title and message required" });
-  const { data, error } = await supabaseAdmin.from("announcements").insert({ title, message, type: type || "info", expires_at: expires_at || null, is_active: true, created_by: req.session.adminEmail }).select("*").single();
+  const { data, error } = await supabaseAdmin.from("announcements").insert({ title, message, type: type || "info", scheduled_at: scheduled_at || null, expires_at: expires_at || null, is_active: true }).select("*").single();
   if (error) return res.status(400).json({ error: error.message });
   res.json({ announcement: data });
 });
@@ -2003,7 +2003,7 @@ app.post("/admin/api/tests/run", adminAuth, async (req, res) => {
       // Test 4: pack CRUD
       try {
         const { data: newPack, error: insertErr } = await supabaseAdmin.from("credit_packs")
-          .insert({ name: "Test Pack", price_usd: 1, credits: 1, is_active: false, sort_order: 999 })
+          .insert({ name: "Test Pack", slug: "test-pack-" + Date.now(), price_usd: 1, credits: 1, is_active: false, sort_order: 999 })
           .select().single();
         if (insertErr) throw insertErr;
         await supabaseAdmin.from("credit_packs").delete().eq("id", newPack.id);
