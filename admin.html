@@ -3071,23 +3071,44 @@ async function runSuite(suiteId) {
 
   try {
     const data = await apiPost("/admin/api/tests/run", { suite: suiteId });
-    applyTestResults(suiteId, data.results || []);
 
-    const { passed, total } = data.summary || { passed: 0, total: 0 };
+    // Server returns results as { testName: { ok, error } } — normalize to array
+    let results = [];
+    if (Array.isArray(data.results)) {
+      results = data.results;
+    } else if (data.results && typeof data.results === "object") {
+      results = Object.entries(data.results).map(([name, r]) => ({
+        name,
+        passed: r.ok === true,
+        detail: r.error || "",
+      }));
+    }
+
+    applyTestResults(suiteId, results);
+
+    const passed = results.filter(r => r.passed).length;
+    const total  = results.length;
+
+    results.forEach(r => {
+      addTestLog(
+        `${r.passed ? "✅" : "❌"} ${r.name}${r.detail ? ": " + r.detail : ""}`,
+        r.passed ? "success" : "error"
+      );
+    });
+
     addTestLog(`─── ${suite?.name}: ${passed}/${total} passed ───`,
       passed === total ? "success" : "warning");
 
     if (btn) {
-      btn.textContent   = `▶ Run (${passed}/${total})`;
-      btn.disabled      = false;
-      btn.style.background   = passed === total ? "rgba(34,197,94,.15)"  : "rgba(239,68,68,.15)";
+      btn.textContent        = `▶ Run (${passed}/${total})`;
+      btn.disabled           = false;
+      btn.style.background   = passed === total ? "rgba(34,197,94,.15)" : "rgba(239,68,68,.15)";
       btn.style.borderColor  = passed === total ? "#22c55e" : "#ef4444";
       btn.style.color        = passed === total ? "#22c55e" : "#ef4444";
     }
   } catch(e) {
     addTestLog(`❌ Suite failed: ${e.message}`, "error");
     if (btn) { btn.textContent = "▶ Run"; btn.disabled = false; }
-    // Mark remaining ⏳ as ❌
     suite?.tests.forEach(t => {
       const el = document.getElementById(testItemId(suiteId, t));
       if (el && el.querySelector(".test-status").textContent === "⏳") {
