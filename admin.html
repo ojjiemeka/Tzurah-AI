@@ -300,23 +300,28 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 .pager .info { font-size:11px; color:var(--muted); }
 .pager .btns { display:flex; gap:6px; }
 
-/* ── Revenue chart (from spec) ─────────────────────────────────── */
+/* ── Revenue chart ─────────────────────────────────────────────── */
 .chart-container {
-  display:flex; align-items:flex-end; gap:4px; height:180px; padding:16px 0 0;
+  display:flex; align-items:flex-end; gap:3px;
+  height:160px; padding:0 0 8px;
+  border-bottom:1px solid var(--border);
 }
-.chart-col { flex:1; display:flex; flex-direction:column; align-items:center; height:100%; }
-.chart-bar-wrap { flex:1; display:flex; align-items:flex-end; width:100%; }
+.chart-col { flex:1; display:flex; flex-direction:column; align-items:center; height:100%; min-width:0; }
+.chart-bar-wrap { flex:1; width:100%; display:flex; align-items:flex-end; }
 .chart-bar {
   width:100%; min-height:2px;
   background:linear-gradient(to top,#6366f1,#8b5cf6);
-  border-radius:3px 3px 0 0; position:relative; transition:height .3s ease; cursor:pointer;
+  border-radius:2px 2px 0 0; position:relative; transition:height .3s ease; cursor:pointer;
 }
 .chart-bar:hover { background:linear-gradient(to top,#818cf8,#a78bfa); }
-.chart-val {
-  position:absolute; top:-18px; left:50%; transform:translateX(-50%);
-  font-size:9px; color:var(--muted); white-space:nowrap;
+.chart-bar-tooltip {
+  position:absolute; bottom:100%; left:50%; transform:translateX(-50%);
+  background:#1a1a2e; border:1px solid #2a2a4a;
+  padding:4px 8px; border-radius:4px; font-size:0.7rem;
+  white-space:nowrap; display:none; z-index:100;
 }
-.chart-label { font-size:9px; color:var(--muted); margin-top:4px; white-space:nowrap; }
+.chart-bar:hover .chart-bar-tooltip { display:block; }
+.chart-label { font-size:8px; color:var(--muted); margin-top:4px; transform:rotate(-45deg); white-space:nowrap; }
 
 /* ── Time range pills ──────────────────────────────────────────── */
 .time-range { display:flex; gap:6px; margin-bottom:16px; }
@@ -675,6 +680,47 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   cursor: pointer; font-family: inherit;
 }
 .session-end-btn:hover { background: rgba(239,68,68,0.2); border-color: var(--danger); }
+
+/* ── Launch checklist ──────────────────────────────────────────── */
+.checklist-item {
+  display:flex; align-items:center; gap:10px;
+  padding:9px 14px; border-bottom:1px solid var(--border); font-size:12px;
+}
+.checklist-item:last-child { border-bottom:none; }
+.checklist-icon { font-size:15px; width:20px; text-align:center; flex-shrink:0; }
+.checklist-label { flex:1; color:var(--text2); }
+.checklist-badge {
+  font-size:10px; font-weight:700; padding:2px 8px; border-radius:20px;
+}
+.checklist-badge.pass { background:rgba(34,197,94,.15); color:#4ade80; }
+.checklist-badge.fail { background:rgba(239,68,68,.15); color:#f87171; }
+.checklist-badge.warn { background:rgba(245,158,11,.15); color:#fbbf24; }
+
+/* ── User profile slide-over ───────────────────────────────────── */
+.up-avatar {
+  width:48px; height:48px; border-radius:50%;
+  background:linear-gradient(135deg,#6366f1,#8b5cf6);
+  display:flex; align-items:center; justify-content:center;
+  font-size:20px; font-weight:700; color:#fff; flex-shrink:0;
+  overflow:hidden;
+}
+.up-avatar img { width:100%; height:100%; object-fit:cover; border-radius:50%; }
+.up-stat-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px; }
+.up-stat-card {
+  background:var(--bg); border:1px solid var(--border);
+  border-radius:8px; padding:10px 12px;
+}
+.up-stat-label { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+.up-stat-val   { font-size:15px; font-weight:700; color:var(--text); margin-top:2px; }
+.up-section-title {
+  font-size:10px; text-transform:uppercase; letter-spacing:.7px;
+  color:var(--muted); font-weight:700; margin-bottom:8px;
+}
+.up-hist-table { width:100%; border-collapse:collapse; font-size:11px; }
+.up-hist-table th { color:var(--muted); font-weight:600; padding:5px 8px; text-align:left; border-bottom:1px solid var(--border); }
+.up-hist-table td { padding:6px 8px; border-bottom:1px solid rgba(42,42,74,.5); color:var(--text2); }
+.up-hist-table tr:last-child td { border-bottom:none; }
+.up-actions { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
 </style>
 </head>
 <body>
@@ -738,6 +784,17 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
     <button class="slide-over-close" onclick="closeSlideOver()">✕</button>
   </div>
   <div class="slide-over-body" id="so-new-body">
+    <div class="loading-cell"><div class="spinner"></div></div>
+  </div>
+</div>
+
+<!-- Slide-over: User Profile -->
+<div class="slide-over" id="so-user-profile" style="width:480px;right:-480px">
+  <div class="slide-over-header">
+    <span class="slide-over-title" id="so-profile-title">User Profile</span>
+    <button class="slide-over-close" onclick="closeSlideOver()">✕</button>
+  </div>
+  <div class="slide-over-body" id="so-profile-body">
     <div class="loading-cell"><div class="spinner"></div></div>
   </div>
 </div>
@@ -924,6 +981,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
       <option value="paid">Paid</option>
       <option value="gifted">Gifted</option>
     </select>
+    <button class="btn btn-ghost" onclick="exportPurchasesCSV()">&#128196; Export CSV</button>
   </div>
   <div class="table-wrap">
     <table>
@@ -1228,6 +1286,17 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
         <button class="btn btn-ghost btn-sm" onclick="loadDbStats()">↻ Refresh Stats</button>
       </div>
 
+    </div>
+  </div>
+
+  <!-- Launch Checklist -->
+  <div class="settings-section">
+    <div class="settings-section-title">
+      Launch Checklist
+      <button class="btn btn-ghost btn-sm" onclick="loadChecklist()" style="margin-left:10px;text-transform:none;letter-spacing:0">↻ Refresh</button>
+    </div>
+    <div class="panel-card" id="checklist-panel">
+      <div class="loading-cell"><div class="spinner"></div></div>
     </div>
   </div>
 
@@ -1818,7 +1887,7 @@ function renderUsersPage() {
     const minsLeft = ((u.credits_balance||0) * 10 / 60).toFixed(0);
     return `<tr data-uid="${esc(u.id)}" data-email="${esc(u.email)}" data-banned="${u.is_banned}">
       <td><input type="checkbox" class="row-check" data-id="${esc(u.id)}" onchange="toggleRowSelect(this)"></td>
-      <td class="td-email" title="${esc(u.email)}">${esc(u.email)}</td>
+      <td class="td-email" title="${esc(u.email)}" style="cursor:pointer;color:var(--accent)" onclick="openUserProfile('${esc(u.id)}','${esc(u.email)}')">${esc(u.email)}</td>
       <td>${esc(u.name||"—")}</td>
       <td><strong>${fmtN(u.credits_balance)}</strong></td>
       <td style="color:var(--muted)">&approx;${minsLeft}m</td>
@@ -2076,18 +2145,20 @@ function renderRevenue() {
 }
 
 function renderRevenueChart(data) {
-  const vals   = Object.values(data);
-  const maxVal = Math.max(...vals, 0.01);
-  const bars   = Object.entries(data).map(([date, amount]) => {
-    const pct = maxVal > 0 ? (amount / maxVal * 100) : 0;
+  const entries = Object.entries(data);
+  if (!entries.length) return `<div class="chart-container"><div style="color:var(--muted);font-size:12px;margin:auto">No revenue data yet</div></div>`;
+  const maxVal = Math.max(...entries.map(([,v]) => v), 1);
+  const bars = entries.map(([date, amount]) => {
+    const pct   = amount > 0 ? Math.max((amount / maxVal * 100), 2) : 0;
+    const label = date.slice(5);
     return `
       <div class="chart-col">
         <div class="chart-bar-wrap">
-          <div class="chart-bar" style="height:${pct}%" title="${date}: ${fmt$(amount)}">
-            <span class="chart-val">${amount > 0 ? "$"+amount.toFixed(0) : ""}</span>
+          <div class="chart-bar" style="height:${pct}%">
+            <div class="chart-bar-tooltip">${date}: ${fmt$(amount)}</div>
           </div>
         </div>
-        <div class="chart-label">${date.slice(5)}</div>
+        <div class="chart-label">${label}</div>
       </div>`;
   }).join("");
   return `<div class="chart-container">${bars}</div>`;
@@ -2241,25 +2312,28 @@ function closeSlideOver() {
 
 function openRevenue() { switchTab("revenue"); }
 
-function openActiveToday() {
+async function openActiveToday() {
   openSlideOver("so-active");
   const body = document.getElementById("so-active-body");
-  const now = Date.now();
-  const DAY = 86400000;
-  const activeUsers = cache.users.filter(u => u.last_seen_at && (now - new Date(u.last_seen_at).getTime()) < DAY);
-  if (!activeUsers.length) {
-    body.innerHTML = `<div class="empty"><div class="eicon">😴</div>No users active today</div>`;
-    return;
+  body.innerHTML = `<div class="loading-cell"><div class="spinner"></div></div>`;
+  try {
+    const d = await api("/admin/api/users/active-today");
+    const users = d.users || [];
+    if (!users.length) {
+      body.innerHTML = `<div class="empty"><div class="eicon">😴</div>No users active today</div>`;
+      return;
+    }
+    body.innerHTML = users.map(u => `
+      <div class="so-user-row" onclick="openUserProfile('${esc(u.user_id)}','${esc(u.email)}')">
+        <div style="flex:1">
+          <div class="so-user-email">${esc(u.email)}</div>
+          <div class="so-user-meta">${u.sessions} session${u.sessions!==1?"s":""} · ${Math.round(u.credits)} cr used · ${fmtSecs(u.seconds)}</div>
+        </div>
+        <span style="font-size:11px;color:var(--muted)">→</span>
+      </div>`).join("");
+  } catch(e) {
+    body.innerHTML = `<div class="empty"><div class="eicon">⚠️</div>${esc(e.message)}</div>`;
   }
-  body.innerHTML = activeUsers
-    .sort((a,b) => new Date(b.last_seen_at) - new Date(a.last_seen_at))
-    .map(u => `
-    <div class="so-user-row" onclick="closeSlideOver();switchTab('users');document.getElementById('user-search').value='${esc(u.email)}';applyUserFilters()">
-      <div>
-        <div class="so-user-email">${esc(u.email)}</div>
-        <div class="so-user-meta">Last seen: ${relTime(u.last_seen_at)} · ${fmtN(u.credits_balance)} cr</div>
-      </div>
-    </div>`).join("");
 }
 
 function openNewThisWeek() {
@@ -2275,12 +2349,130 @@ function openNewThisWeek() {
   body.innerHTML = newUsers
     .sort((a,b) => new Date(b.created_at) - new Date(a.created_at))
     .map(u => `
-    <div class="so-user-row" onclick="closeSlideOver();switchTab('users');document.getElementById('user-search').value='${esc(u.email)}';applyUserFilters()">
-      <div>
+    <div class="so-user-row" onclick="openUserProfile('${esc(u.id)}','${esc(u.email)}')">
+      <div style="flex:1">
         <div class="so-user-email">${esc(u.email)}</div>
         <div class="so-user-meta">Joined: ${relTime(u.created_at)} · ${fmtN(u.credits_balance)} cr remaining</div>
       </div>
+      <span style="font-size:11px;color:var(--muted)">→</span>
     </div>`).join("");
+}
+
+// ══════════════════════════════════════════════════════════════════
+// USER PROFILE SLIDE-OVER
+// ══════════════════════════════════════════════════════════════════
+async function openUserProfile(userId, emailHint) {
+  document.getElementById("so-profile-title").textContent = emailHint || "User Profile";
+  document.getElementById("so-profile-body").innerHTML = `<div class="loading-cell"><div class="spinner"></div></div>`;
+  openSlideOver("so-user-profile");
+
+  try {
+    const d = await api(`/admin/api/users/${userId}`);
+    const u = d.user;
+    const sessions  = d.sessions  || [];
+    const purchases = d.purchases || [];
+
+    const initials  = (u.name || u.email || "?").slice(0, 2).toUpperCase();
+    const minsLeft  = ((u.credits || 0) * 10 / 60).toFixed(0);
+    const totalHrs  = (u.total_session_seconds / 3600).toFixed(1);
+
+    document.getElementById("so-profile-title").textContent = u.email;
+
+    document.getElementById("so-profile-body").innerHTML = `
+      <!-- Header -->
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:20px">
+        <div class="up-avatar">
+          ${u.avatar_url
+            ? `<img src="${esc(u.avatar_url)}" alt="">`
+            : initials}
+        </div>
+        <div>
+          <div style="font-size:14px;font-weight:700;color:var(--text)">${esc(u.name||u.email)}</div>
+          <div style="font-size:11px;color:var(--muted)">${esc(u.email)}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">
+            Joined ${relTime(u.created_at)}
+            ${u.last_sign_in_at ? ` · Last seen ${relTime(u.last_sign_in_at)}` : ""}
+          </div>
+        </div>
+        ${u.is_banned ? `<span class="badge badge-red" style="margin-left:auto">Banned</span>` : ""}
+      </div>
+
+      <!-- Credits stats -->
+      <div class="up-section-title">Credits</div>
+      <div class="up-stat-grid" style="margin-bottom:16px">
+        <div class="up-stat-card">
+          <div class="up-stat-label">Current Balance</div>
+          <div class="up-stat-val">${fmtN(u.credits)} cr</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">≈ ${minsLeft}m remaining</div>
+        </div>
+        <div class="up-stat-card">
+          <div class="up-stat-label">Total Purchased</div>
+          <div class="up-stat-val">${fmtN(u.total_credits_purchased)} cr</div>
+        </div>
+        <div class="up-stat-card">
+          <div class="up-stat-label">Total Used</div>
+          <div class="up-stat-val">${fmtN(Math.round(u.total_credits_used))} cr</div>
+        </div>
+        <div class="up-stat-card">
+          <div class="up-stat-label">Session Time</div>
+          <div class="up-stat-val">${totalHrs}h</div>
+        </div>
+      </div>
+
+      <!-- Quick actions -->
+      <div class="up-section-title">Quick Actions</div>
+      <div class="up-actions">
+        <button class="btn btn-green btn-sm" onclick="Modal.giftCredits('${esc(u.email)}','${esc(u.id)}', (amt,rsn)=>apiPost('/admin/api/gift-credits',{userId:'${esc(u.id)}',amount:amt,reason:rsn}).then(()=>{toast('Gifted '+amt+' credits');openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
+          &#127873; Gift Credits
+        </button>
+        <button class="btn btn-amber btn-sm" onclick="Modal.deductCredits('${esc(u.email)}','${esc(u.id)}', (amt,rsn)=>apiPost('/admin/api/deduct-credits',{userId:'${esc(u.id)}',amount:amt,reason:rsn}).then(()=>{toast('Deducted '+amt+' credits');openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
+          &#10134; Deduct
+        </button>
+        <button class="btn btn-red btn-sm" onclick="Modal.banUser('${esc(u.email)}','${esc(u.id)}',${u.is_banned},(isBanned)=>apiPost('/admin/api/ban-user',{userId:'${esc(u.id)}',ban:!isBanned}).then(()=>{toast(isBanned?'Unbanned':'Banned');openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
+          ${u.is_banned ? "&#9989; Unban" : "&#128683; Ban"}
+        </button>
+      </div>
+
+      <!-- Session history -->
+      <div class="up-section-title">Session History (last ${sessions.length})</div>
+      ${sessions.length ? `
+      <table class="up-hist-table" style="margin-bottom:16px">
+        <thead><tr><th>Date</th><th>Duration</th><th>Credits</th><th>Status</th></tr></thead>
+        <tbody>
+          ${sessions.map(s => `
+            <tr>
+              <td>${relTime(s.started_at)}</td>
+              <td>${fmtSecs(s.duration_secs)}</td>
+              <td>${(s.credits_used||0).toFixed(1)}</td>
+              <td>${s.is_active
+                ? '<span class="badge badge-green" style="font-size:9px">Live</span>'
+                : '<span class="badge badge-muted" style="font-size:9px">Ended</span>'}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>` : `<div style="color:var(--muted);font-size:12px;margin-bottom:16px">No sessions yet</div>`}
+
+      <!-- Purchase history -->
+      <div class="up-section-title">Purchase History (last ${purchases.length})</div>
+      ${purchases.length ? `
+      <table class="up-hist-table">
+        <thead><tr><th>Date</th><th>Pack</th><th>Amount</th><th>Type</th></tr></thead>
+        <tbody>
+          ${purchases.map(p => {
+            const isGift = (p.stripe_payment_id||"").startsWith("gift_") || (p.price_usd||0)===0;
+            return `<tr>
+              <td>${relTime(p.created_at)}</td>
+              <td>${esc(p.pack_name||"—")}</td>
+              <td>${fmt$(p.price_usd||0)}</td>
+              <td><span class="badge ${isGift?"badge-amber":"badge-green"}" style="font-size:9px">${isGift?"Gift":"Paid"}</span></td>
+            </tr>`;
+          }).join("")}
+        </tbody>
+      </table>` : `<div style="color:var(--muted);font-size:12px">No purchases yet</div>`}
+    `;
+  } catch(e) {
+    document.getElementById("so-profile-body").innerHTML =
+      `<div class="empty"><div class="eicon">⚠️</div>${esc(e.message)}</div>`;
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -2473,8 +2665,47 @@ async function checkHealth() {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// ALERTS — auto-check
+// ALERTS — auto-check + SSE-driven checks
 // ══════════════════════════════════════════════════════════════════
+function checkAlertsAgainstData(data) {
+  const rules = JSON.parse(localStorage.getItem("tzurah_alert_rules") || "{}");
+  const alerts = [];
+
+  // High usage sessions
+  const sessionThreshold = rules.sessionVal || 100;
+  if (rules.sessionEnabled !== false) {
+    (data.liveSessions || []).forEach(s => {
+      if ((s.credits_used || 0) > sessionThreshold) {
+        alerts.push({ type: "error", title: "High Session Usage",
+          detail: `${s.email} used ${Math.round(s.credits_used)} cr this session` });
+      }
+    });
+  }
+
+  // Low Decart balance
+  const balance   = parseInt(localStorage.getItem("tzurah_decart_balance") || "0", 10);
+  const threshold = rules.decartVal || 5000;
+  if (rules.decartEnabled !== false && balance > 0 && balance < threshold) {
+    alerts.push({ type: "warning", title: "Low Decart Balance",
+      detail: `Balance: ${fmtN(balance)} cr (threshold: ${fmtN(threshold)})` });
+  }
+
+  if (!alerts.length) return;
+
+  alerts.forEach(a => triggerAlert(a.type === "error" ? "session" : "decart", `${a.title}: ${a.detail}`));
+
+  // Badge on Alerts tab
+  const alertsTab = document.querySelector('[data-tab="alerts"]');
+  if (alertsTab && !alertsTab.querySelector(".alert-badge")) {
+    const badge = document.createElement("span");
+    badge.className = "alert-badge";
+    badge.style.cssText = "background:#ef4444;color:#fff;border-radius:20px;padding:1px 6px;font-size:9px;font-weight:700;margin-left:5px";
+    badge.textContent = alerts.length;
+    alertsTab.appendChild(badge);
+    setTimeout(() => badge.remove(), 30000);
+  }
+}
+
 async function checkAlerts() {
   const rules = JSON.parse(localStorage.getItem("tzurah_alert_rules") || "{}");
 
@@ -2587,6 +2818,7 @@ function connectSSE() {
     updateStatCard("sval-decart-cost",  fmt$(s.estDecartCost));
 
     updateLiveSessions(data.liveSessions || []);
+    checkAlertsAgainstData(data);
 
     lastRefreshTime = Date.now();
   };
@@ -2606,6 +2838,66 @@ function connectSSE() {
 
 const settingsMasked     = {};  // elId → masked string shown on load
 const settingsRevealCache = {}; // keyName → revealed value (cached after first Show)
+
+// ── Export purchases to CSV ────────────────────────────────────────
+function exportPurchasesCSV() {
+  if (!purchFiltered.length) { toast("No purchases to export", "error"); return; }
+  const header = ["Date", "Email", "Pack", "Amount USD", "Credits Added", "Type", "Payment ID"];
+  const rows = purchFiltered.map(p => {
+    const isGift = (p.stripe_session_id||"").startsWith("gift_") || (p.amount_usd||0)===0;
+    return [
+      p.created_at ? new Date(p.created_at).toISOString().slice(0,10) : "",
+      p.user_email || "",
+      p.pack_name  || "",
+      (p.amount_usd||0).toFixed(2),
+      p.credits_added || "",
+      isGift ? "Gift" : "Paid",
+      p.stripe_session_id || "",
+    ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(",");
+  });
+  const csv  = [header.join(","), ...rows].join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = `purchases-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+  toast(`Exported ${purchFiltered.length} purchases`);
+}
+
+// ── Launch checklist ──────────────────────────────────────────────
+async function loadChecklist() {
+  const panel = document.getElementById("checklist-panel");
+  if (!panel) return;
+  panel.innerHTML = `<div class="loading-cell"><div class="spinner"></div></div>`;
+  try {
+    const d = await api("/admin/api/checklist");
+    const items = [
+      { key: "decart_key",             label: "Decart API key configured",           required: true  },
+      { key: "supabase",               label: "Supabase connected",                  required: true  },
+      { key: "admin_password_changed", label: "Admin password changed from default", required: true  },
+      { key: "stripe_configured",      label: "Stripe keys configured",              required: false },
+      { key: "webhook_secret",         label: "Stripe webhook secret set",           required: false },
+      { key: "email_configured",       label: "Email (nodemailer) configured",       required: false },
+      { key: "domain_configured",      label: "Domain configured",                   required: false },
+      { key: "https_enabled",          label: "HTTPS / SSL enabled",                 required: false },
+      { key: "rate_limiting",          label: "Rate limiting enabled",               required: false },
+      { key: "node_env_production",    label: "NODE_ENV = production",               required: false },
+    ];
+    panel.innerHTML = items.map(item => {
+      const pass  = d[item.key] === true;
+      const icon  = pass ? "✅" : item.required ? "❌" : "⚠️";
+      const badge = pass ? "pass" : item.required ? "fail" : "warn";
+      const text  = pass ? "OK" : item.required ? "Required" : "Optional";
+      return `<div class="checklist-item">
+        <span class="checklist-icon">${icon}</span>
+        <span class="checklist-label">${item.label}</span>
+        <span class="checklist-badge ${badge}">${text}</span>
+      </div>`;
+    }).join("");
+  } catch(e) {
+    panel.innerHTML = `<div class="loading-cell" style="color:var(--danger)">Error: ${esc(e.message)}</div>`;
+  }
+}
 
 async function loadSettings() {
   try {
@@ -2628,6 +2920,7 @@ async function loadSettings() {
   } catch(e) { console.error("loadSettings:", e.message); toast("Failed to load settings", "error"); }
 
   loadDbStats();
+  loadChecklist();
 }
 
 // ── Database management ───────────────────────────────────────────

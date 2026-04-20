@@ -607,6 +607,90 @@ app.get("/admin/api/users", adminAuth, async (req, res) => {
   }
 });
 
+// ── Admin: users active today (with session stats) ────────────────
+app.get("/admin/api/users/active-today", adminAuth, async (_req, res) => {
+  const oneDayAgo = new Date(Date.now() - 86400000).toISOString();
+  try {
+    const { data: rows } = await supabaseAdmin
+      .from("usage")
+      .select("user_id, credits_used, session_seconds")
+      .gte("created_at", oneDayAgo);
+
+    const byUser = {};
+    (rows || []).forEach(u => {
+      if (!byUser[u.user_id]) byUser[u.user_id] = { sessions: 0, credits: 0, seconds: 0 };
+      byUser[u.user_id].sessions++;
+      byUser[u.user_id].credits  += u.credits_used    || 0;
+      byUser[u.user_id].seconds  += u.session_seconds || 0;
+    });
+
+    const enriched = await Promise.all(
+      Object.entries(byUser).map(async ([userId, stats]) => {
+        const { data: au } = await supabaseAdmin.auth.admin.getUserById(userId);
+        return { user_id: userId, email: au?.user?.email || "unknown", ...stats };
+      })
+    );
+
+    enriched.sort((a, b) => b.credits - a.credits);
+    res.json({ ok: true, users: enriched });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Admin: user profile (must come after /active-today to avoid route match) ──
+app.get("/admin/api/users/:id", adminAuth, async (req, res) => {
+  const userId = req.params.id;
+  try {
+    const [authRes, profileRes, sessionsRes, purchasesRes, usageRes] = await Promise.all([
+      supabaseAdmin.auth.admin.getUserById(userId),
+      supabaseAdmin.from("profiles").select("*").eq("id", userId).single(),
+      supabaseAdmin.from("sessions").select("id, started_at, last_ping, is_active, credits_used")
+        .eq("user_id", userId).order("started_at", { ascending: false }).limit(10),
+      supabaseAdmin.from("purchases").select("*").eq("user_id", userId)
+        .order("created_at", { ascending: false }).limit(5),
+      supabaseAdmin.from("usage").select("credits_used, session_seconds")
+        .eq("user_id", userId),
+    ]);
+
+    const authUser = authRes.data?.user;
+    const profile  = profileRes.data;
+
+    const totalCreditsUsed = (usageRes.data || []).reduce((s, u) => s + (u.credits_used || 0), 0);
+    const totalSeconds     = (usageRes.data || []).reduce((s, u) => s + (u.session_seconds || 0), 0);
+
+    res.json({
+      ok: true,
+      user: {
+        id:                    userId,
+        email:                 authUser?.email || "unknown",
+        name:                  authUser?.user_metadata?.full_name || authUser?.user_metadata?.name || "",
+        avatar_url:            authUser?.user_metadata?.avatar_url || null,
+        created_at:            authUser?.created_at,
+        last_sign_in_at:       authUser?.last_sign_in_at,
+        is_banned:             authUser?.banned_until ? new Date(authUser.banned_until) > new Date() : false,
+        credits:               profile?.credits || 0,
+        total_credits_purchased: profile?.total_credits_purchased || 0,
+        total_credits_used:    totalCreditsUsed,
+        total_session_seconds: totalSeconds,
+      },
+      sessions:  (sessionsRes.data || []).map(s => ({
+        id:           s.id,
+        started_at:   s.started_at,
+        last_ping:    s.last_ping,
+        is_active:    s.is_active,
+        credits_used: s.credits_used || 0,
+        duration_secs: s.last_ping && s.started_at
+          ? Math.max(0, Math.round((new Date(s.last_ping) - new Date(s.started_at)) / 1000))
+          : 0,
+      })),
+      purchases: purchasesRes.data || [],
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Admin: revenue chart (last 30 days) ───────────────────────────
 // Kept for backward compat — /admin/api/stats now also embeds revenueChart
 app.get("/admin/api/revenue-chart", adminAuth, async (_req, res) => {
@@ -1247,6 +1331,23 @@ app.post("/admin/api/db/action", adminAuth, async (req, res) => {
     console.error(`[DB] Action failed (${action}):`, err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── Admin: launch checklist ────────────────────────────────────────
+app.get("/admin/api/checklist", adminAuth, (req, res) => {
+  const env = process.env;
+  res.json({
+    decart_key:              !!env.DECART_API_KEY && env.DECART_API_KEY !== "your_decart_key_here",
+    supabase:                !!env.SUPABASE_URL && !!env.SUPABASE_SERVICE_ROLE_KEY,
+    admin_password_changed:  !!env.ADMIN_PASSWORD && env.ADMIN_PASSWORD !== "TzurahAdmin2025!",
+    stripe_configured:       !!env.STRIPE_SECRET_KEY && env.STRIPE_SECRET_KEY !== "your_stripe_key",
+    email_configured:        !!env.EMAIL_FROM,
+    domain_configured:       !!env.DOMAIN && env.DOMAIN !== "localhost",
+    https_enabled:           env.NODE_ENV === "production" && !!env.SSL_CERT,
+    rate_limiting:           !!env.RATE_LIMIT_ENABLED,
+    webhook_secret:          !!env.STRIPE_WEBHOOK_SECRET,
+    node_env_production:     env.NODE_ENV === "production",
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════
