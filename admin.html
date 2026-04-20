@@ -1264,8 +1264,15 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 <!-- ══ TESTS ═══════════════════════════════════════════════════ -->
 <div class="tab-panel" id="tab-tests">
 
+  <!-- Manual checklist -->
+  <div class="panel-card" style="margin-bottom:16px">
+    <div class="panel-body" id="manual-checklist">
+      <div class="loading-cell"><div class="spinner"></div></div>
+    </div>
+  </div>
+
   <div class="tests-header">
-    <h2>🧪 Testing &amp; Diagnostics</h2>
+    <h2>🧪 Automated Tests</h2>
     <button id="btn-run-all" onclick="runAllTests()">▶ Run All Tests</button>
   </div>
 
@@ -3158,6 +3165,48 @@ const TEST_SUITES = [
     description: "DB connectivity, flags, packs, sessions",
     tests: ["Supabase response time", "Feature flags table", "Credit packs table", "Sessions table healthy"],
   },
+  {
+    id: "feature_flags",
+    name: "Feature Flags",
+    icon: "🚩",
+    description: "Flag existence, toggle, maintenance mode",
+    tests: ["All feature flags exist", "Feature flag toggle works", "Maintenance mode is OFF", "New signups enabled"],
+  },
+  {
+    id: "credit_packs",
+    name: "Credit Packs",
+    icon: "📦",
+    description: "Pack existence, prices, popular badge, CRUD",
+    tests: ["Active credit packs exist", "All pack prices valid", "Popular pack configured", "Pack CRUD works"],
+  },
+  {
+    id: "announcements",
+    name: "Announcements",
+    icon: "📣",
+    description: "Create, publish, deactivate announcements",
+    tests: ["Create announcement", "Announcement visible in API", "Deactivate announcement", "Announcement cleanup"],
+  },
+  {
+    id: "business_logic",
+    name: "Business Logic",
+    icon: "💼",
+    description: "Credits, billing, usage logging",
+    tests: ["New user gets 6 free credits", "Business logic test cleanup", "Credits cannot go below 0", "Burn rate configured", "Usage logging works"],
+  },
+  {
+    id: "ip_blocking",
+    name: "IP Blocking",
+    icon: "🚫",
+    description: "Block, verify, remove IP blocks",
+    tests: ["IP block creation", "IP block removal", "IP blocks table healthy"],
+  },
+  {
+    id: "sub_admins",
+    name: "Sub-Admins",
+    icon: "👮",
+    description: "Create, verify, cleanup sub-admins",
+    tests: ["Create sub-admin", "Sub-admin password hashed correctly", "Must change password flag set", "Sub-admin cleanup", "Admin account exists"],
+  },
 ];
 
 let testsTabInited = false;
@@ -3165,6 +3214,7 @@ let testsTabInited = false;
 function initTestsTab() {
   if (testsTabInited) return;
   testsTabInited = true;
+  renderManualChecklist();
   renderTestSuites();
 }
 
@@ -3314,15 +3364,161 @@ async function runSuite(suiteId) {
 async function runAllTests() {
   const btn = document.getElementById("btn-run-all");
   if (btn) { btn.textContent = "⏳ Running all…"; btn.disabled = true; }
-  addTestLog("═══ Running ALL test suites ═══", "info");
+  addTestLog("═══ Running ALL automated test suites ═══", "info");
 
   for (const suite of TEST_SUITES) {
     await runSuite(suite.id);
-    await new Promise(r => setTimeout(r, 400));
+    await new Promise(r => setTimeout(r, 300));
   }
 
   if (btn) { btn.textContent = "▶ Run All Tests"; btn.disabled = false; }
   addTestLog("═══ All suites complete ═══", "info");
+}
+
+// ══════════════════════════════════════════════════════════════════
+// MANUAL TEST CHECKLIST
+// ══════════════════════════════════════════════════════════════════
+const MANUAL_TESTS = [
+  {
+    category: "App Core",
+    tests: [
+      { id: "mt1",  label: "Face swap works (start session, see transformation)" },
+      { id: "mt2",  label: "Identity slots persist after app restart" },
+      { id: "mt3",  label: "Camera and mic selectors populated correctly" },
+      { id: "mt4",  label: "Keyboard shortcut Space starts/stops session" },
+      { id: "mt5",  label: "Keys 1–5 switch identity slots" },
+      { id: "mt6",  label: "Shift+? shows keyboard shortcuts modal" },
+    ],
+  },
+  {
+    category: "Recording",
+    tests: [
+      { id: "mt7",  label: "Record button appears after session starts" },
+      { id: "mt8",  label: "Recording runs 30+ seconds without stopping" },
+      { id: "mt9",  label: "Save dialog appears when stopping recording" },
+      { id: "mt10", label: "Saved .webm file has video and audio" },
+    ],
+  },
+  {
+    category: "Modes",
+    tests: [
+      { id: "mt11", label: "Background mode: presets change to NYC/Beach/Space etc" },
+      { id: "mt12", label: "Background mode: prompt changes background in output" },
+      { id: "mt13", label: "Style mode: presets change to Cartoon/Cinematic etc" },
+      { id: "mt14", label: "Intensity slider at 20%: subtle effect" },
+      { id: "mt15", label: "Intensity slider at 100%: full transformation" },
+    ],
+  },
+  {
+    category: "Audio",
+    tests: [
+      { id: "mt16", label: "Mic IN level meter animates when speaking" },
+      { id: "mt17", label: "dB reading shows correct level" },
+      { id: "mt18", label: "MIC OUT speaker selector populated" },
+      { id: "mt19", label: "Volume slider affects output video audio" },
+      { id: "mt20", label: "Monitor ON: hear mic through speakers" },
+    ],
+  },
+  {
+    category: "Credits & Billing",
+    tests: [
+      { id: "mt21", label: "Credits reduce during active session" },
+      { id: "mt22", label: "Credits persist correct value after app restart" },
+      { id: "mt23", label: "Credits remaining shows in header correctly" },
+      { id: "mt24", label: "Topup screen appears when credits hit 0" },
+      { id: "mt25", label: "Buy Credits opens topup/payment screen" },
+    ],
+  },
+  {
+    category: "Admin → App Integration",
+    tests: [
+      { id: "mt26", label: "Create announcement → appears as banner in app" },
+      { id: "mt27", label: "Toggle maintenance_mode ON → banner shows in app" },
+      { id: "mt28", label: "Toggle enable_recording OFF → Record button disappears" },
+      { id: "mt29", label: "End session from admin → user sees kill modal with reason" },
+      { id: "mt30", label: "Gift credits from admin → balance updates in app" },
+    ],
+  },
+  {
+    category: "User Flow",
+    tests: [
+      { id: "mt31", label: "New account signup → 6 credits assigned → can stream" },
+      { id: "mt32", label: "Login with existing account → credits show correctly" },
+      { id: "mt33", label: "Onboarding shows on first login, not on subsequent" },
+      { id: "mt34", label: "Portrait mode centers videos correctly" },
+      { id: "mt35", label: "OBS button → browser source URL works" },
+    ],
+  },
+  {
+    category: "Florence-2 Auto-describe",
+    tests: [
+      { id: "mt36", label: "Auto-describe button visible below identity name" },
+      { id: "mt37", label: "Click Auto-describe → Florence download starts (first time)" },
+      { id: "mt38", label: "After download → prompt auto-fills from reference image" },
+      { id: "mt39", label: "Generated prompt makes sense for uploaded face" },
+    ],
+  },
+];
+
+function renderManualChecklist() {
+  const container = document.getElementById("manual-checklist");
+  if (!container) return;
+
+  const saved       = JSON.parse(localStorage.getItem("manual-test-state") || "{}");
+  const totalTests  = MANUAL_TESTS.reduce((sum, cat) => sum + cat.tests.length, 0);
+  const passedTests = Object.values(saved).filter(v => v === "pass").length;
+  const failedTests = Object.values(saved).filter(v => v === "fail").length;
+
+  container.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div>
+        <div style="font-weight:700;font-size:0.95rem">📋 Manual Test Checklist</div>
+        <div style="font-size:0.75rem;color:var(--muted);margin-top:2px">Tests that require a human to verify</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <div style="font-size:0.82rem">
+          <span style="color:#22c55e">✅ ${passedTests}</span>
+          <span style="color:#444;margin:0 4px">/</span>
+          <span style="color:var(--muted)">${totalTests}</span>
+          ${failedTests > 0 ? `<span style="color:#ef4444;margin-left:8px">❌ ${failedTests} failed</span>` : ""}
+        </div>
+        <button class="btn btn-xs btn-ghost" onclick="resetManualTests()" style="color:var(--muted)">Reset All</button>
+      </div>
+    </div>
+    ${MANUAL_TESTS.map(cat => `
+      <div style="margin-bottom:16px">
+        <div style="font-size:0.65rem;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:6px">${cat.category}</div>
+        ${cat.tests.map(test => {
+          const state = saved[test.id] || "pending";
+          const bgColor    = state === "pass" ? "rgba(34,197,94,0.06)"  : state === "fail" ? "rgba(239,68,68,0.06)"  : "var(--surface2)";
+          const bdColor    = state === "pass" ? "rgba(34,197,94,0.2)"   : state === "fail" ? "rgba(239,68,68,0.2)"   : "var(--border)";
+          const textColor  = state === "pending" ? "var(--muted)" : "var(--text)";
+          const icon       = state === "pass" ? "✅" : state === "fail" ? "❌" : "⬜";
+          return `<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:6px;margin-bottom:3px;font-size:0.8rem;background:${bgColor};border:1px solid ${bdColor}">
+            <span style="font-size:1rem;width:20px;text-align:center">${icon}</span>
+            <span style="flex:1;color:${textColor}">${test.label}</span>
+            <div style="display:flex;gap:4px;flex-shrink:0">
+              <button onclick="setManualTest('${test.id}','pass')" style="padding:2px 8px;font-size:0.68rem;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);color:#22c55e;border-radius:4px;cursor:pointer;font-family:inherit;${state==='pass'?'opacity:0.5':''}">Pass</button>
+              <button onclick="setManualTest('${test.id}','fail')" style="padding:2px 8px;font-size:0.68rem;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#ef4444;border-radius:4px;cursor:pointer;font-family:inherit;${state==='fail'?'opacity:0.5':''}">Fail</button>
+            </div>
+          </div>`;
+        }).join("")}
+      </div>
+    `).join("")}
+  `;
+}
+
+function setManualTest(id, state) {
+  const saved = JSON.parse(localStorage.getItem("manual-test-state") || "{}");
+  saved[id] = saved[id] === state ? "pending" : state;
+  localStorage.setItem("manual-test-state", JSON.stringify(saved));
+  renderManualChecklist();
+}
+
+function resetManualTests() {
+  if (!confirm("Reset all manual test results?")) return;
+  localStorage.removeItem("manual-test-state");
+  renderManualChecklist();
 }
 
 const testLogs = [];

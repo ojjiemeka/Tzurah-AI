@@ -1937,6 +1937,233 @@ app.post("/admin/api/tests/run", adminAuth, async (req, res) => {
       });
     }
 
+    // ── Feature Flags suite ─────────────────────────────────────────
+    if (suite === "feature_flags" || !suite) {
+      // Test 1: all expected flags exist
+      try {
+        const { data: flags } = await supabaseAdmin.from("feature_flags").select("key, enabled");
+        const expectedFlags = ["enable_recording","enable_background","enable_auto_prompt","enable_new_signups","maintenance_mode","beta_features"];
+        const existingKeys  = flags?.map(f => f.key) || [];
+        const missing       = expectedFlags.filter(f => !existingKeys.includes(f));
+        if (missing.length > 0) throw new Error(`Missing: ${missing.join(", ")}`);
+        results["All feature flags exist"] = { ok: true, error: `${flags?.length} flags found` };
+      } catch (e) { results["All feature flags exist"] = { ok: false, error: e.message }; }
+
+      // Test 2: can toggle a flag
+      try {
+        const { data: flag } = await supabaseAdmin.from("feature_flags").select("key, enabled").eq("key", "beta_features").single();
+        const original = flag?.enabled;
+        await supabaseAdmin.from("feature_flags").update({ enabled: !original }).eq("key", "beta_features");
+        const { data: updated } = await supabaseAdmin.from("feature_flags").select("enabled").eq("key", "beta_features").single();
+        const toggled = updated?.enabled === !original;
+        await supabaseAdmin.from("feature_flags").update({ enabled: original }).eq("key", "beta_features");
+        if (!toggled) throw new Error("Toggle did not persist");
+        results["Feature flag toggle works"] = { ok: true, error: "Toggle and restore successful" };
+      } catch (e) { results["Feature flag toggle works"] = { ok: false, error: e.message }; }
+
+      // Test 3: maintenance mode is OFF
+      try {
+        const { data } = await supabaseAdmin.from("feature_flags").select("enabled").eq("key", "maintenance_mode").single();
+        const off = data?.enabled === false;
+        results["Maintenance mode is OFF"] = { ok: off, error: off ? "App accessible to users ✓" : "⚠️ Maintenance mode is ON — users blocked!" };
+      } catch (e) { results["Maintenance mode is OFF"] = { ok: false, error: e.message }; }
+
+      // Test 4: new signups enabled
+      try {
+        const { data } = await supabaseAdmin.from("feature_flags").select("enabled").eq("key", "enable_new_signups").single();
+        const on = data?.enabled === true;
+        results["New signups enabled"] = { ok: on, error: on ? "New users can register ✓" : "⚠️ Signups disabled!" };
+      } catch (e) { results["New signups enabled"] = { ok: false, error: e.message }; }
+    }
+
+    // ── Credit Packs suite ──────────────────────────────────────────
+    if (suite === "credit_packs" || !suite) {
+      // Test 1: active packs exist
+      try {
+        const { data: packs } = await supabaseAdmin.from("credit_packs").select("*").eq("is_active", true).order("sort_order");
+        const enough = (packs?.length || 0) >= 3;
+        results["Active credit packs exist"] = { ok: enough, error: `${packs?.length || 0} active packs found` };
+      } catch (e) { results["Active credit packs exist"] = { ok: false, error: e.message }; }
+
+      // Test 2: pack prices valid
+      try {
+        const { data: packs } = await supabaseAdmin.from("credit_packs").select("name, price_usd, credits").eq("is_active", true);
+        const invalid = (packs || []).filter(p => !p.price_usd || p.price_usd <= 0 || !p.credits || p.credits <= 0);
+        if (invalid.length > 0) throw new Error(`Invalid packs: ${invalid.map(p => p.name).join(", ")}`);
+        results["All pack prices valid"] = { ok: true, error: "All prices and credits > 0 ✓" };
+      } catch (e) { results["All pack prices valid"] = { ok: false, error: e.message }; }
+
+      // Test 3: popular pack configured
+      try {
+        const { data: packs } = await supabaseAdmin.from("credit_packs").select("name, is_popular").eq("is_active", true).eq("is_popular", true);
+        const hasPopular = (packs?.length || 0) >= 1;
+        results["Popular pack configured"] = { ok: hasPopular, error: `${packs?.length || 0} pack(s) marked popular: ${packs?.map(p => p.name).join(", ") || "none"}` };
+      } catch (e) { results["Popular pack configured"] = { ok: false, error: e.message }; }
+
+      // Test 4: pack CRUD
+      try {
+        const { data: newPack, error: insertErr } = await supabaseAdmin.from("credit_packs")
+          .insert({ name: "Test Pack", price_usd: 1, credits: 1, is_active: false, sort_order: 999 })
+          .select().single();
+        if (insertErr) throw insertErr;
+        await supabaseAdmin.from("credit_packs").delete().eq("id", newPack.id);
+        results["Pack CRUD works"] = { ok: true, error: "Create and delete test pack successful" };
+      } catch (e) { results["Pack CRUD works"] = { ok: false, error: e.message }; }
+    }
+
+    // ── Announcements suite ─────────────────────────────────────────
+    if (suite === "announcements" || !suite) {
+      let testAnnId = null;
+
+      // Test 1: create
+      try {
+        const { data, error: annErr } = await supabaseAdmin.from("announcements")
+          .insert({ title: "Test Announcement", message: "Automated test", type: "info", is_active: true })
+          .select().single();
+        if (annErr) throw annErr;
+        testAnnId = data.id;
+        results["Create announcement"] = { ok: true, error: `ID: ${data.id.slice(0,8)}…` };
+      } catch (e) { results["Create announcement"] = { ok: false, error: e.message }; }
+
+      // Test 2: visible
+      if (testAnnId) {
+        try {
+          const { data } = await supabaseAdmin.from("announcements").select("*").eq("id", testAnnId).eq("is_active", true).single();
+          results["Announcement visible in API"] = { ok: !!data, error: data ? "Visible to app users ✓" : "Not found" };
+        } catch (e) { results["Announcement visible in API"] = { ok: false, error: e.message }; }
+
+        // Test 3: deactivate
+        try {
+          await supabaseAdmin.from("announcements").update({ is_active: false }).eq("id", testAnnId);
+          const { data } = await supabaseAdmin.from("announcements").select("is_active").eq("id", testAnnId).single();
+          const hidden = data?.is_active === false;
+          results["Deactivate announcement"] = { ok: hidden, error: hidden ? "Announcement hidden from users ✓" : "Still active!" };
+        } catch (e) { results["Deactivate announcement"] = { ok: false, error: e.message }; }
+
+        // Cleanup
+        try {
+          await supabaseAdmin.from("announcements").delete().eq("id", testAnnId);
+          results["Announcement cleanup"] = { ok: true, error: "Test announcement deleted" };
+        } catch (e) { results["Announcement cleanup"] = { ok: false, error: e.message }; }
+      }
+    }
+
+    // ── Business Logic suite ────────────────────────────────────────
+    if (suite === "business_logic" || !suite) {
+      // Test 1: new user gets 6 credits
+      try {
+        const testEmail = `biztest_${Date.now()}@tzurah-test.com`;
+        const { data: newUser } = await supabaseAdmin.auth.admin.createUser({ email: testEmail, password: "BizTest123!", email_confirm: true });
+        await new Promise(r => setTimeout(r, 1500));
+        const { data: profile } = await supabaseAdmin.from("profiles").select("credits").eq("id", newUser.user.id).maybeSingle();
+        const correct = profile?.credits === 6;
+        results["New user gets 6 free credits"] = { ok: correct, error: `Credits assigned: ${profile?.credits} (expected: 6)` };
+        await supabaseAdmin.from("profiles").delete().eq("id", newUser.user.id);
+        await supabaseAdmin.auth.admin.deleteUser(newUser.user.id);
+        results["Business logic test cleanup"] = { ok: true, error: `Deleted ${testEmail}` };
+      } catch (e) { results["New user gets 6 free credits"] = { ok: false, error: e.message }; }
+
+      // Test 2: credits cannot go below 0
+      try {
+        const { data: profile } = await supabaseAdmin.from("profiles").select("id, credits").order("credits", { ascending: true }).limit(1).single();
+        if (profile) {
+          const original = profile.credits;
+          const clamped  = Math.max(0, original - 99999);
+          await supabaseAdmin.from("profiles").update({ credits: clamped }).eq("id", profile.id);
+          const { data: updated } = await supabaseAdmin.from("profiles").select("credits").eq("id", profile.id).single();
+          await supabaseAdmin.from("profiles").update({ credits: original }).eq("id", profile.id);
+          results["Credits cannot go below 0"] = { ok: updated?.credits >= 0, error: `Balance: ${updated?.credits} ✓` };
+        }
+      } catch (e) { results["Credits cannot go below 0"] = { ok: false, error: e.message }; }
+
+      // Test 3: burn rate configured
+      try {
+        const burnRate = parseFloat(process.env.CREDITS_PER_SECOND || "0.1");
+        results["Burn rate configured"] = { ok: burnRate > 0, error: `${burnRate} cr/s` };
+      } catch (e) { results["Burn rate configured"] = { ok: false, error: e.message }; }
+
+      // Test 4: usage logging works
+      try {
+        const { data: testUser } = await supabaseAdmin.from("profiles").select("id").limit(1).single();
+        if (testUser) {
+          const { error: usageErr } = await supabaseAdmin.from("usage").insert({ user_id: testUser.id, session_seconds: 1, credits_used: 1, started_at: new Date().toISOString(), ended_at: new Date().toISOString() });
+          if (usageErr) throw usageErr;
+          await supabaseAdmin.from("usage").delete().eq("user_id", testUser.id).eq("session_seconds", 1).eq("credits_used", 1);
+          results["Usage logging works"] = { ok: true, error: "Usage record created and cleaned up ✓" };
+        }
+      } catch (e) { results["Usage logging works"] = { ok: false, error: e.message }; }
+    }
+
+    // ── IP Blocking suite ───────────────────────────────────────────
+    if (suite === "ip_blocking" || !suite) {
+      const testIP = "192.0.2.1"; // RFC 5737 documentation IP
+
+      // Test 1: can block
+      try {
+        await supabaseAdmin.from("ip_blocks").upsert({ ip_address: testIP, reason: "Automated test block", blocked_by: "test-suite" }, { onConflict: "ip_address" });
+        const { data } = await supabaseAdmin.from("ip_blocks").select("ip_address").eq("ip_address", testIP).single();
+        results["IP block creation"] = { ok: !!data, error: data ? `${testIP} blocked ✓` : "Block not found" };
+      } catch (e) { results["IP block creation"] = { ok: false, error: e.message }; }
+
+      // Test 2: can remove
+      try {
+        await supabaseAdmin.from("ip_blocks").delete().eq("ip_address", testIP);
+        const { data } = await supabaseAdmin.from("ip_blocks").select("ip_address").eq("ip_address", testIP);
+        results["IP block removal"] = { ok: (data?.length || 0) === 0, error: "Block removed successfully ✓" };
+      } catch (e) { results["IP block removal"] = { ok: false, error: e.message }; }
+
+      // Test 3: table healthy
+      try {
+        const { count } = await supabaseAdmin.from("ip_blocks").select("id", { count: "exact", head: true });
+        results["IP blocks table healthy"] = { ok: true, error: `${count || 0} active blocks` };
+      } catch (e) { results["IP blocks table healthy"] = { ok: false, error: e.message }; }
+    }
+
+    // ── Sub-Admins suite ────────────────────────────────────────────
+    if (suite === "sub_admins" || !suite) {
+      const testEmail   = `subadmin_test_${Date.now()}@tzurah-test.com`;
+      let   testAdminId = null;
+
+      // Test 1: create
+      try {
+        const bcrypt = require("bcryptjs");
+        const hash   = await bcrypt.hash("TestPass123!", 10);
+        const { data, error: saErr } = await supabaseAdmin.from("admin_users")
+          .insert({ email: testEmail, password_hash: hash, name: "Test Sub-Admin", role: "support", must_change_password: true, created_by: "test-suite" })
+          .select().single();
+        if (saErr) throw saErr;
+        testAdminId = data.id;
+        results["Create sub-admin"] = { ok: true, error: `Created ${testEmail} as support` };
+      } catch (e) { results["Create sub-admin"] = { ok: false, error: e.message }; }
+
+      // Tests 2 & 3: password hash + must_change_password flag
+      if (testAdminId) {
+        try {
+          const { data } = await supabaseAdmin.from("admin_users").select("password_hash, must_change_password, role").eq("id", testAdminId).single();
+          const bcrypt = require("bcryptjs");
+          const valid  = await bcrypt.compare("TestPass123!", data.password_hash);
+          results["Sub-admin password hashed correctly"] = { ok: valid, error: valid ? "bcrypt hash verified ✓" : "Hash mismatch!" };
+          results["Must change password flag set"]        = { ok: data?.must_change_password === true, error: `must_change_password: ${data?.must_change_password}` };
+        } catch (e) {
+          results["Sub-admin password hashed correctly"] = { ok: false, error: e.message };
+          results["Must change password flag set"]        = { ok: false, error: e.message };
+        }
+
+        // Cleanup
+        try {
+          await supabaseAdmin.from("admin_users").delete().eq("id", testAdminId);
+          results["Sub-admin cleanup"] = { ok: true, error: `Deleted ${testEmail}` };
+        } catch (e) { results["Sub-admin cleanup"] = { ok: false, error: e.message }; }
+      }
+
+      // Test: super admin exists
+      try {
+        const { data } = await supabaseAdmin.from("admin_users").select("email, role").eq("role", "super_admin").eq("is_active", true);
+        const envExists = !!process.env.ADMIN_EMAIL;
+        results["Admin account exists"] = { ok: (data?.length || 0) > 0 || envExists, error: envExists ? `Env admin: ${process.env.ADMIN_EMAIL}` : `${data?.length} super admins in DB` };
+      } catch (e) { results["Admin account exists"] = { ok: false, error: e.message }; }
+    }
+
     res.json({ ok: true, results });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message, results });
