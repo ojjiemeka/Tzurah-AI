@@ -2669,7 +2669,7 @@ async function openUserProfile(userId, emailHint) {
         <button class="btn btn-amber btn-sm" onclick="Modal.deductCredits('${esc(u.email)}','${esc(u.id)}', (amt,rsn)=>apiPost('/admin/api/deduct-credits',{userId:'${esc(u.id)}',amount:amt,reason:rsn}).then(()=>{toast('Deducted '+amt+' credits');openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
           &#10134; Deduct
         </button>
-        <button class="btn btn-red btn-sm" onclick="Modal.banUser('${esc(u.email)}','${esc(u.id)}',${u.is_banned},(isBanned)=>apiPost('/admin/api/ban-user',{userId:'${esc(u.id)}',ban:!isBanned}).then(()=>{toast(isBanned?'Unbanned':'Banned');openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
+        <button class="btn btn-red btn-sm" onclick="Modal.banUser('${esc(u.email)}','${esc(u.id)}',${u.is_banned},()=>apiPost('${u.is_banned ? '/admin/api/unban-user' : '/admin/api/ban-user'}',{userId:'${esc(u.id)}'}).then(()=>{toast('${u.is_banned ? 'Unbanned' : 'Banned'}');openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
           ${u.is_banned ? "&#9989; Unban" : "&#128683; Ban"}
         </button>
       </div>
