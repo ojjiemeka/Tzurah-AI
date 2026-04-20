@@ -15,11 +15,12 @@
 
 require("dotenv").config();
 
-const express = require("express");
-const session = require("express-session");
-const cors    = require("cors");
-const path    = require("path");
-const fs      = require("fs");
+const express    = require("express");
+const session    = require("express-session");
+const cors       = require("cors");
+const rateLimit  = require("express-rate-limit");
+const path       = require("path");
+const fs         = require("fs");
 const { createClient } = require("@supabase/supabase-js");
 
 // ── Nodemailer ─────────────────────────────────────────────────────
@@ -87,9 +88,51 @@ async function requireAuth(req, res, next) {
   }
 }
 
+// ── Rate limiters ──────────────────────────────────────────────────
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false,
+  message: { error: "Too many requests, please try again later" },
+});
+const tokenLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 10,
+  message: { error: "Too many token requests" },
+});
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 20,
+  message: { error: "Too many auth attempts" },
+});
+
+// ── UUID validation ────────────────────────────────────────────────
+function validateUUID(str) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
+
+// ── CORS ───────────────────────────────────────────────────────────
+const allowedOrigins = [
+  "http://localhost:3000",
+  "http://localhost:4000",
+  "app://.",
+  "https://tzurah.ai",
+  "https://www.tzurah.ai",
+  "https://admin.tzurah.ai",
+  process.env.ALLOWED_ORIGIN,
+].filter(Boolean);
+
 // ── Express setup ─────────────────────────────────────────────────
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
+}));
+app.use("/api/",      apiLimiter);
+app.use("/credits/",  apiLimiter);
+app.use("/session/",  apiLimiter);
+app.use("/decart/token", tokenLimiter);
+app.use("/admin/login",  authLimiter);
 
 // Raw body for Stripe webhook signature verification (must come before express.json)
 app.use("/stripe/webhook", express.raw({ type: "application/json" }));
@@ -894,6 +937,7 @@ app.post("/session/ping", async (req, res) => {
   const { user_id, email, credits_used, session_id } = req.body || {};
   console.log("[PING]", user_id, email || "no-email", "sid:", session_id);
   if (!user_id) return res.status(400).json({ error: "user_id required" });
+  if (!validateUUID(user_id)) return res.status(400).json({ error: "Invalid user_id format" });
   try {
     const { data: existing } = await supabaseAdmin
       .from("sessions")
@@ -1331,6 +1375,30 @@ app.post("/admin/api/db/action", adminAuth, async (req, res) => {
     console.error(`[DB] Action failed (${action}):`, err.message);
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── Feature flags ─────────────────────────────────────────────────
+app.get("/api/feature-flags", async (_req, res) => {
+  const { data } = await supabaseAdmin.from("feature_flags").select("key, enabled");
+  const flags = {};
+  (data || []).forEach(f => { flags[f.key] = f.enabled; });
+  res.json(flags);
+});
+
+app.get("/admin/api/feature-flags", adminAuth, async (_req, res) => {
+  const { data } = await supabaseAdmin.from("feature_flags").select("*").order("key");
+  res.json({ flags: data || [] });
+});
+
+app.post("/admin/api/feature-flags/:key", adminAuth, async (req, res) => {
+  const { key } = req.params;
+  const { enabled } = req.body;
+  const { error } = await supabaseAdmin.from("feature_flags")
+    .update({ enabled, updated_at: new Date().toISOString(), updated_by: req.session.adminEmail || "admin" })
+    .eq("key", key);
+  if (error) return res.status(500).json({ error: error.message });
+  console.log(`[FLAGS] ${key} = ${enabled}`);
+  res.json({ ok: true });
 });
 
 // ── Admin: launch checklist ────────────────────────────────────────
