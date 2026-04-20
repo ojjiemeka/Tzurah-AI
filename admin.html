@@ -721,6 +721,66 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 .up-hist-table td { padding:6px 8px; border-bottom:1px solid rgba(42,42,74,.5); color:var(--text2); }
 .up-hist-table tr:last-child td { border-bottom:none; }
 .up-actions { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+
+/* ── Testing & Diagnostics tab ─────────────────────────────────── */
+.test-suite-card {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:10px; margin-bottom:12px; overflow:hidden;
+}
+.suite-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 16px; border-bottom:1px solid var(--border);
+}
+.suite-info { display:flex; align-items:center; gap:12px; }
+.suite-icon { font-size:1.4rem; line-height:1; }
+.suite-name { font-weight:700; font-size:0.9rem; color:var(--text); }
+.suite-desc { font-size:0.72rem; color:var(--muted); margin-top:2px; }
+.btn-run-suite {
+  padding:6px 16px;
+  background:rgba(99,102,241,.15); border:1px solid rgba(99,102,241,.3);
+  color:var(--accent); border-radius:6px; cursor:pointer;
+  font-size:0.8rem; font-weight:700; font-family:inherit;
+  transition:all .2s; white-space:nowrap;
+}
+.btn-run-suite:hover { background:rgba(99,102,241,.25); }
+.btn-run-suite:disabled { opacity:.5; cursor:not-allowed; }
+.suite-tests { padding:6px 16px; }
+.test-item {
+  display:grid; grid-template-columns:20px 1fr auto auto;
+  align-items:center; gap:10px;
+  padding:6px 0; border-bottom:1px solid rgba(42,42,74,.4);
+  font-size:0.8rem;
+}
+.test-item:last-child { border-bottom:none; }
+.test-status { font-size:1rem; line-height:1; }
+.test-name   { color:var(--muted); }
+.test-detail { font-size:0.72rem; color:#555; text-align:right; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.test-duration { font-size:0.68rem; color:#444; min-width:40px; text-align:right; }
+.test-log-container {
+  background:#06060d; border:1px solid var(--border);
+  border-radius:8px; padding:12px;
+  height:220px; overflow-y:auto;
+  font-family:monospace; font-size:0.72rem; line-height:1.6;
+}
+.log-line { padding:1px 0; }
+.log-info    { color:#64748b; }
+.log-success { color:#4ade80; }
+.log-error   { color:#f87171; }
+.log-warning { color:#fbbf24; }
+#btn-run-all {
+  padding:9px 24px;
+  background:linear-gradient(135deg,var(--accent),var(--purple));
+  border:none; color:#fff; border-radius:8px;
+  cursor:pointer; font-weight:700; font-size:0.85rem; font-family:inherit;
+  transition:opacity .15s;
+}
+#btn-run-all:hover { opacity:.9; }
+#btn-run-all:disabled { opacity:.5; cursor:not-allowed; }
+.tests-header {
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom:16px;
+}
+.tests-header h2 { font-size:1.1rem; font-weight:800; }
 </style>
 </head>
 <body>
@@ -755,6 +815,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   <button class="tab-btn" data-tab="purchases">Purchases</button>
   <button class="tab-btn" data-tab="alerts">Alerts</button>
   <button class="tab-btn" data-tab="email">✉ Email</button>
+  <button class="tab-btn" data-tab="tests">🧪 Tests</button>
   <button class="tab-btn" data-tab="settings">⚙ Settings</button>
 </div>
 
@@ -1131,6 +1192,33 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
       </tbody>
     </table>
   </div>
+</div>
+
+<!-- ══ TESTS ═══════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-tests">
+
+  <div class="tests-header">
+    <h2>🧪 Testing &amp; Diagnostics</h2>
+    <button id="btn-run-all" onclick="runAllTests()">▶ Run All Tests</button>
+  </div>
+
+  <!-- Suite cards populated by JS -->
+  <div id="test-suites"></div>
+
+  <!-- Test log -->
+  <div style="margin-top:8px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:var(--muted)">Test Log</span>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="clearTestLog()">Clear</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportTestResults()">&#128196; Export</button>
+      </div>
+    </div>
+    <div class="test-log-container" id="test-log">
+      <div class="log-line log-info">[ready] Test runner initialised. Click Run to start.</div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ══ SETTINGS ══════════════════════════════════════════════════ -->
@@ -1542,6 +1630,7 @@ function switchTab(id) {
   if (id==="purchases" && !allPurchases.length)       loadPurchasesData();
   if (id==="alerts")   loadAlertRules();
   if (id==="email")    loadEmailTab();
+  if (id==="tests")    initTestsTab();
   if (id==="settings") loadSettings();
 }
 
@@ -2830,6 +2919,229 @@ function connectSSE() {
   };
 
   return evtSource;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// TESTING & DIAGNOSTICS
+// ══════════════════════════════════════════════════════════════════
+
+const TEST_SUITES = [
+  {
+    id: "health",
+    name: "System Health",
+    icon: "🏥",
+    description: "API server, Supabase connection, Decart key, database tables",
+    tests: [
+      "API Server reachable",
+      "Supabase connected",
+      "Decart API key valid",
+      "Sessions table accessible",
+      "Profiles table accessible",
+    ],
+  },
+  {
+    id: "user",
+    name: "User Flow",
+    icon: "👤",
+    description: "Create test user, assign credits, deduct, cleanup",
+    tests: [
+      "Create test user",
+      "6 free credits assigned",
+      "Credits deduction works",
+      "Test user cleanup",
+    ],
+  },
+  {
+    id: "admin",
+    name: "Admin Actions",
+    icon: "🛡️",
+    description: "Gift credits, ban user, unban user",
+    tests: [
+      "Gift credits",
+      "Ban user",
+      "Unban user",
+    ],
+  },
+  {
+    id: "session",
+    name: "Session Management",
+    icon: "📡",
+    description: "Mock ping, kill signal, end session, cleanup",
+    tests: [
+      "Create mock session",
+      "Session visible in DB",
+      "Kill signal stored",
+      "End session",
+      "Session cleanup",
+    ],
+  },
+  {
+    id: "payment",
+    name: "Payment System",
+    icon: "💳",
+    description: "Stripe config, checkout session creation, webhook secret",
+    tests: [
+      "Stripe keys configured",
+      "Create Stripe checkout",
+      "Stripe webhook secret",
+    ],
+  },
+];
+
+let testsTabInited = false;
+
+function initTestsTab() {
+  if (testsTabInited) return;
+  testsTabInited = true;
+  renderTestSuites();
+}
+
+function renderTestSuites() {
+  const container = document.getElementById("test-suites");
+  if (!container) return;
+  container.innerHTML = TEST_SUITES.map(suite => `
+    <div class="test-suite-card" id="suite-${suite.id}">
+      <div class="suite-header">
+        <div class="suite-info">
+          <span class="suite-icon">${suite.icon}</span>
+          <div>
+            <div class="suite-name">${suite.name}</div>
+            <div class="suite-desc">${suite.description}</div>
+          </div>
+        </div>
+        <button class="btn-run-suite" id="run-${suite.id}" onclick="runSuite('${suite.id}')">▶ Run</button>
+      </div>
+      <div class="suite-tests" id="tests-${suite.id}">
+        ${suite.tests.map(t => {
+          const tid = testItemId(suite.id, t);
+          return `<div class="test-item" id="${tid}">
+            <span class="test-status">⬜</span>
+            <span class="test-name">${t}</span>
+            <span class="test-detail"></span>
+            <span class="test-duration"></span>
+          </div>`;
+        }).join("")}
+      </div>
+    </div>`).join("");
+}
+
+function testItemId(suiteId, testName) {
+  return `test-${suiteId}-${testName.replace(/[^a-zA-Z0-9]/g, "-")}`;
+}
+
+function setTestPending(suiteId) {
+  const suite = TEST_SUITES.find(s => s.id === suiteId);
+  suite?.tests.forEach(t => {
+    const el = document.getElementById(testItemId(suiteId, t));
+    if (!el) return;
+    el.querySelector(".test-status").textContent  = "⏳";
+    el.querySelector(".test-detail").textContent   = "";
+    el.querySelector(".test-duration").textContent = "";
+  });
+}
+
+function applyTestResults(suiteId, results) {
+  results.forEach(r => {
+    // Match by name — server may return names slightly different, try exact then fuzzy
+    const suite = TEST_SUITES.find(s => s.id === suiteId);
+    const matched = suite?.tests.find(t =>
+      t === r.name || t.replace(/[^a-zA-Z0-9]/g, "-") === r.name.replace(/[^a-zA-Z0-9]/g, "-")
+    ) || r.name;
+    const el = document.getElementById(testItemId(suiteId, matched));
+    if (el) {
+      el.querySelector(".test-status").textContent  = r.passed ? "✅" : "❌";
+      el.querySelector(".test-detail").textContent   = r.detail   || "";
+      el.querySelector(".test-duration").textContent = r.duration ? `${r.duration}ms` : "";
+    }
+    addTestLog(
+      `${r.passed ? "✅" : "❌"} ${r.name}${r.detail ? ": " + r.detail : ""}`,
+      r.passed ? "success" : "error"
+    );
+  });
+}
+
+async function runSuite(suiteId) {
+  const btn = document.getElementById(`run-${suiteId}`);
+  if (btn) { btn.textContent = "⏳ Running…"; btn.disabled = true; }
+
+  setTestPending(suiteId);
+
+  const suite = TEST_SUITES.find(s => s.id === suiteId);
+  addTestLog(`▶ Running ${suite?.name || suiteId} tests…`, "info");
+
+  try {
+    const data = await apiPost("/admin/api/tests/run", { suite: suiteId });
+    applyTestResults(suiteId, data.results || []);
+
+    const { passed, total } = data.summary || { passed: 0, total: 0 };
+    addTestLog(`─── ${suite?.name}: ${passed}/${total} passed ───`,
+      passed === total ? "success" : "warning");
+
+    if (btn) {
+      btn.textContent   = `▶ Run (${passed}/${total})`;
+      btn.disabled      = false;
+      btn.style.background   = passed === total ? "rgba(34,197,94,.15)"  : "rgba(239,68,68,.15)";
+      btn.style.borderColor  = passed === total ? "#22c55e" : "#ef4444";
+      btn.style.color        = passed === total ? "#22c55e" : "#ef4444";
+    }
+  } catch(e) {
+    addTestLog(`❌ Suite failed: ${e.message}`, "error");
+    if (btn) { btn.textContent = "▶ Run"; btn.disabled = false; }
+    // Mark remaining ⏳ as ❌
+    suite?.tests.forEach(t => {
+      const el = document.getElementById(testItemId(suiteId, t));
+      if (el && el.querySelector(".test-status").textContent === "⏳") {
+        el.querySelector(".test-status").textContent = "❌";
+        el.querySelector(".test-detail").textContent = "Suite error";
+      }
+    });
+  }
+}
+
+async function runAllTests() {
+  const btn = document.getElementById("btn-run-all");
+  if (btn) { btn.textContent = "⏳ Running all…"; btn.disabled = true; }
+  addTestLog("═══ Running ALL test suites ═══", "info");
+
+  for (const suite of TEST_SUITES) {
+    await runSuite(suite.id);
+    await new Promise(r => setTimeout(r, 400));
+  }
+
+  if (btn) { btn.textContent = "▶ Run All Tests"; btn.disabled = false; }
+  addTestLog("═══ All suites complete ═══", "info");
+}
+
+const testLogs = [];
+function addTestLog(message, level = "info") {
+  const time = new Date().toLocaleTimeString();
+  testLogs.push({ time, message, level });
+  const log = document.getElementById("test-log");
+  if (!log) return;
+  const line = document.createElement("div");
+  line.className = `log-line log-${level}`;
+  line.textContent = `[${time}] ${message}`;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function clearTestLog() {
+  testLogs.length = 0;
+  const log = document.getElementById("test-log");
+  if (log) log.innerHTML = "";
+}
+
+function exportTestResults() {
+  if (!testLogs.length) { toast("No test results to export", "error"); return; }
+  const text = testLogs.map(l => `[${l.time}] ${l.message}`).join("\n");
+  const blob = new Blob([text], { type: "text/plain" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url;
+  a.download = `tzurah-tests-${new Date().toISOString().slice(0,10)}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast(`Exported ${testLogs.length} log lines`);
 }
 
 // ══════════════════════════════════════════════════════════════════

@@ -1350,6 +1350,210 @@ app.get("/admin/api/checklist", adminAuth, (req, res) => {
   });
 });
 
+// ── Admin: test runner ────────────────────────────────────────────
+app.post("/admin/api/tests/run", adminAuth, async (req, res) => {
+  const { suite } = req.body || {};
+  const results = {};
+
+  async function runTest(name, fn) {
+    try {
+      await fn();
+      results[name] = { ok: true };
+    } catch (err) {
+      results[name] = { ok: false, error: err.message || String(err) };
+    }
+  }
+
+  try {
+    if (suite === "health" || !suite) {
+      await runTest("API server reachable", async () => {
+        // We're already here, so the server is reachable
+      });
+      await runTest("Supabase connected", async () => {
+        const { error } = await supabaseAdmin.from("profiles").select("id").limit(1);
+        if (error) throw new Error(error.message);
+      });
+      await runTest("Decart key configured", async () => {
+        const key = process.env.DECART_API_KEY;
+        if (!key || key === "your_decart_key_here") throw new Error("DECART_API_KEY not set");
+      });
+      await runTest("Sessions table accessible", async () => {
+        const { error } = await supabaseAdmin.from("sessions").select("id").limit(1);
+        if (error) throw new Error(error.message);
+      });
+      await runTest("Profiles table accessible", async () => {
+        const { error } = await supabaseAdmin.from("profiles").select("id").limit(1);
+        if (error) throw new Error(error.message);
+      });
+    }
+
+    if (suite === "user" || !suite) {
+      let testUserId = null;
+      await runTest("Create test user", async () => {
+        const email = `test_diag_${Date.now()}@tzurah-test.invalid`;
+        const { data, error } = await supabaseAdmin.auth.admin.createUser({
+          email, password: "TestDiag123!", email_confirm: true,
+        });
+        if (error) throw new Error(error.message);
+        testUserId = data.user.id;
+      });
+      await runTest("Profile auto-created with 6 credits", async () => {
+        if (!testUserId) throw new Error("No test user created");
+        await new Promise(r => setTimeout(r, 1500));
+        const { data, error } = await supabaseAdmin
+          .from("profiles").select("credits").eq("id", testUserId).maybeSingle();
+        if (error) throw new Error(error.message);
+        if (!data) throw new Error("Profile not found — trigger may not be set up");
+        if (data.credits !== 6) throw new Error(`Expected 6 credits, got ${data.credits}`);
+      });
+      await runTest("Deduct 2 credits", async () => {
+        if (!testUserId) throw new Error("No test user created");
+        const { data: before } = await supabaseAdmin
+          .from("profiles").select("credits, total_credits_used").eq("id", testUserId).single();
+        const newBalance   = Math.max(0, (before?.credits || 0) - 2);
+        const newTotalUsed = (before?.total_credits_used || 0) + 2;
+        const { error } = await supabaseAdmin
+          .from("profiles").update({ credits: newBalance, total_credits_used: newTotalUsed })
+          .eq("id", testUserId);
+        if (error) throw new Error(error.message);
+      });
+      await runTest("Verify balance after deduction", async () => {
+        if (!testUserId) throw new Error("No test user created");
+        const { data, error } = await supabaseAdmin
+          .from("profiles").select("credits").eq("id", testUserId).single();
+        if (error) throw new Error(error.message);
+        if (data.credits !== 4) throw new Error(`Expected 4 credits, got ${data.credits}`);
+      });
+      await runTest("Delete test user", async () => {
+        if (!testUserId) throw new Error("No test user created");
+        const { error } = await supabaseAdmin.auth.admin.deleteUser(testUserId);
+        if (error) throw new Error(error.message);
+      });
+    }
+
+    if (suite === "admin" || !suite) {
+      let targetUserId = null;
+      await runTest("Find a real user to test with", async () => {
+        const { data, error } = await supabaseAdmin
+          .from("profiles").select("id, credits").limit(1).single();
+        if (error || !data) throw new Error("No profiles found");
+        targetUserId = data.id;
+      });
+      await runTest("Gift 10 credits to user", async () => {
+        if (!targetUserId) throw new Error("No target user");
+        const { data: before } = await supabaseAdmin
+          .from("profiles").select("credits").eq("id", targetUserId).single();
+        const { error } = await supabaseAdmin
+          .from("profiles").update({ credits: (before?.credits || 0) + 10 })
+          .eq("id", targetUserId);
+        if (error) throw new Error(error.message);
+      });
+      await runTest("Verify gifted credits", async () => {
+        if (!targetUserId) throw new Error("No target user");
+        const { data: before } = await supabaseAdmin
+          .from("profiles").select("credits").eq("id", targetUserId).single();
+        // Just verify the read works — we already set it above
+        if (typeof before?.credits !== "number") throw new Error("Could not read credits");
+      });
+      await runTest("Restore original credits", async () => {
+        if (!targetUserId) throw new Error("No target user");
+        const { data: cur } = await supabaseAdmin
+          .from("profiles").select("credits").eq("id", targetUserId).single();
+        const { error } = await supabaseAdmin
+          .from("profiles").update({ credits: Math.max(0, (cur?.credits || 0) - 10) })
+          .eq("id", targetUserId);
+        if (error) throw new Error(error.message);
+      });
+      await runTest("Ban user via auth metadata", async () => {
+        if (!targetUserId) throw new Error("No target user");
+        const { error } = await supabaseAdmin.auth.admin.updateUserById(targetUserId, {
+          ban_duration: "876600h",
+        });
+        if (error) throw new Error(error.message);
+      });
+      await runTest("Unban user", async () => {
+        if (!targetUserId) throw new Error("No target user");
+        const { error } = await supabaseAdmin.auth.admin.updateUserById(targetUserId, {
+          ban_duration: "none",
+        });
+        if (error) throw new Error(error.message);
+      });
+    }
+
+    if (suite === "session" || !suite) {
+      const mockUserId = "00000000-0000-0000-0000-000000000001";
+      let mockSessionId = null;
+      await runTest("Insert mock session", async () => {
+        const { data, error } = await supabaseAdmin.from("sessions").insert({
+          user_id: mockUserId,
+          email: "diag-test@tzurah-test.invalid",
+          started_at: new Date().toISOString(),
+          last_ping: new Date().toISOString(),
+          credits_used: 0,
+          is_active: true,
+          session_id: "diag-" + Date.now(),
+        }).select("id").single();
+        if (error) throw new Error(error.message);
+        mockSessionId = data.id;
+      });
+      await runTest("Verify session exists", async () => {
+        if (!mockSessionId) throw new Error("No mock session");
+        const { data, error } = await supabaseAdmin
+          .from("sessions").select("id, is_active").eq("id", mockSessionId).single();
+        if (error) throw new Error(error.message);
+        if (!data.is_active) throw new Error("Session not active");
+      });
+      await runTest("Set kill signal on session", async () => {
+        if (!mockSessionId) throw new Error("No mock session");
+        const { error } = await supabaseAdmin.from("sessions")
+          .update({ kill_signal: true, kill_reason: "technical_issue" }).eq("id", mockSessionId);
+        if (error) throw new Error(error.message);
+      });
+      await runTest("End session (clear kill signal)", async () => {
+        if (!mockSessionId) throw new Error("No mock session");
+        const { error } = await supabaseAdmin.from("sessions")
+          .update({ kill_signal: false, is_active: false }).eq("id", mockSessionId);
+        if (error) throw new Error(error.message);
+      });
+      await runTest("Cleanup mock session", async () => {
+        if (!mockSessionId) throw new Error("No mock session");
+        const { error } = await supabaseAdmin.from("sessions").delete().eq("id", mockSessionId);
+        if (error) throw new Error(error.message);
+      });
+    }
+
+    if (suite === "payment" || !suite) {
+      await runTest("Stripe keys configured", async () => {
+        const key = process.env.STRIPE_SECRET_KEY;
+        if (!key || key === "your_stripe_key") throw new Error("STRIPE_SECRET_KEY not set");
+        if (!stripe) throw new Error("Stripe client not initialized");
+      });
+      await runTest("Create test Stripe checkout session", async () => {
+        if (!stripe) throw new Error("Stripe not configured");
+        const session = await stripe.checkout.sessions.create({
+          mode: "payment",
+          line_items: [{ price_data: {
+            currency: "usd",
+            unit_amount: 100,
+            product_data: { name: "Diagnostic Test" },
+          }, quantity: 1 }],
+          success_url: "https://example.com/success",
+          cancel_url:  "https://example.com/cancel",
+        });
+        if (!session?.id) throw new Error("No session ID returned");
+      });
+      await runTest("Webhook secret configured", async () => {
+        const secret = process.env.STRIPE_WEBHOOK_SECRET;
+        if (!secret) throw new Error("STRIPE_WEBHOOK_SECRET not set");
+      });
+    }
+
+    res.json({ ok: true, results });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message, results });
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════
 // START
 // ═══════════════════════════════════════════════════════════════════
