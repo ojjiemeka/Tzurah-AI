@@ -122,25 +122,27 @@ const allowedOrigins = [
 // ── Express setup ─────────────────────────────────────────────────
 const app = express();
 
-// Admin routes bypass whitelist CORS so the browser-based login page works
-// regardless of what origin the admin dashboard is served from.
-app.use("/admin", (req, res, next) => {
-  res.header("Access-Control-Allow-Origin",  req.headers.origin || "*");
-  res.header("Access-Control-Allow-Credentials", "true");
-  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.sendStatus(200);
-  next();
+// Single CORS handler: admin routes get a full bypass (no origin whitelist),
+// all other routes use the strict allowedOrigins whitelist.
+// Must be one middleware so admin requests never reach the cors() check.
+app.use((req, res, next) => {
+  if (req.path.startsWith("/admin")) {
+    res.header("Access-Control-Allow-Origin",      req.headers.origin || "*");
+    res.header("Access-Control-Allow-Credentials", "true");
+    res.header("Access-Control-Allow-Methods",     "GET,POST,OPTIONS");
+    res.header("Access-Control-Allow-Headers",     "Content-Type,Authorization");
+    if (req.method === "OPTIONS") return res.sendStatus(200);
+    return next();
+  }
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
+  })(req, res, next);
 });
-
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    callback(new Error("Not allowed by CORS"));
-  },
-  credentials: true,
-}));
 app.use("/api/",      apiLimiter);
 app.use("/credits/",  apiLimiter);
 app.use("/session/",  apiLimiter);
