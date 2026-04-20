@@ -443,7 +443,11 @@ app.post("/admin/login", async (req, res) => {
         req.session.adminRole  = admins.role;
         req.session.adminName  = admins.name;
         await supabaseAdmin.from("admin_users").update({ last_login: new Date().toISOString() }).eq("id", admins.id);
-        return res.json({ success: true });
+        return res.json({
+          success: true,
+          mustChangePassword: !!admins.must_change_password,
+          role: admins.role,
+        });
       }
     }
   } catch (_) {}
@@ -1572,22 +1576,64 @@ app.post("/admin/api/notifications/read-all", adminAuth, async (_req, res) => {
   res.json({ ok: true });
 });
 
+// ── C4 supplement: force password change ──────────────────────────
+app.post("/admin/api/change-password", adminAuth, async (req, res) => {
+  const { password } = req.body || {};
+  if (!password || password.length < 8) {
+    return res.status(400).json({ error: "Password must be at least 8 characters" });
+  }
+  const bcrypt = require("bcryptjs");
+  const hash = await bcrypt.hash(password, 10);
+  const { error } = await supabaseAdmin
+    .from("admin_users")
+    .update({ password_hash: hash, must_change_password: false })
+    .eq("email", req.session.adminEmail);
+  if (error) return res.status(500).json({ error: error.message });
+  console.log(`[ADMIN] Password changed: ${req.session.adminEmail}`);
+  res.json({ ok: true });
+});
+
 // ── C7: Global Search ─────────────────────────────────────────────
 app.get("/admin/api/search", adminAuth, async (req, res) => {
   const { q } = req.query;
   if (!q || q.length < 2) return res.json({ results: [] });
   const results = [];
-  const query = q.toLowerCase();
+  const query = q.toLowerCase().trim();
+
+  // Users — paginate up to 200
   try {
-    const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
-    (authUsers?.users || []).filter(u => u.email?.toLowerCase().includes(query)).slice(0, 5).forEach(u => {
-      results.push({ type: "user", icon: "👤", title: u.email, subtitle: `User · joined ${new Date(u.created_at).toLocaleDateString()}`, action: `switchTab('users')` });
+    let page = 1;
+    let allUsers = [];
+    while (true) {
+      const { data: authData } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 50 });
+      if (!authData?.users?.length) break;
+      allUsers = allUsers.concat(authData.users);
+      if (allUsers.length >= 200 || authData.users.length < 50) break;
+      page++;
+    }
+    const matches = allUsers
+      .filter(u => u.email?.toLowerCase().includes(query) || u.user_metadata?.full_name?.toLowerCase().includes(query))
+      .slice(0, 8);
+    for (const u of matches) {
+      const { data: profile } = await supabaseAdmin.from("profiles").select("credits").eq("id", u.id).maybeSingle();
+      results.push({ type: "user", icon: "👤", title: u.email, subtitle: `${profile?.credits ?? "?"} credits · joined ${new Date(u.created_at).toLocaleDateString()}`, action: `switchTab('users')` });
+    }
+  } catch (e) { console.error("[SEARCH] user error:", e.message); }
+
+  // Sessions by email
+  try {
+    const { data: sessions } = await supabaseAdmin.from("sessions").select("user_id, email, is_active, last_ping").ilike("email", `%${q}%`).limit(3);
+    (sessions || []).forEach(s => {
+      results.push({ type: "session", icon: s.is_active ? "🟢" : "⚫", title: s.email, subtitle: s.is_active ? "Live now" : `Last seen ${new Date(s.last_ping).toLocaleDateString()}`, action: `switchTab('overview')` });
     });
-  } catch (e) {}
+  } catch (_) {}
+
+  // Purchases by payment ID
   try {
-    const { data: purchases } = await supabaseAdmin.from("purchases").select("*").or(`stripe_payment_id.ilike.%${q}%`).limit(3);
-    (purchases || []).forEach(p => { results.push({ type: "purchase", icon: "💳", title: `$${p.price_usd} — ${p.pack_name || "pack"}`, subtitle: `Purchase · ${new Date(p.created_at).toLocaleDateString()}`, action: `switchTab('purchases')` }); });
-  } catch (e) {}
+    const { data: purchases } = await supabaseAdmin.from("purchases").select("*").or(`stripe_payment_id.ilike.%${q}%`).order("created_at", { ascending: false }).limit(3);
+    (purchases || []).forEach(p => { results.push({ type: "purchase", icon: "💳", title: `$${p.price_usd} — ${p.pack_name || "pack"}`, subtitle: `Payment · ${new Date(p.created_at).toLocaleDateString()}`, action: `switchTab('purchases')` }); });
+  } catch (_) {}
+
   res.json({ results });
 });
 

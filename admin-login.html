@@ -177,13 +177,18 @@
         });
         const data = await res.json();
         if (data.success) {
-          window.location.href = "/admin";
+          if (data.mustChangePassword) {
+            showForcePasswordChangeModal();
+          } else {
+            window.location.href = "/admin";
+          }
         } else {
           showError(data.error || "Invalid credentials");
+          btnEl.disabled    = false;
+          btnEl.textContent = "Sign In to Admin";
         }
       } catch {
         showError("Connection error — try again");
-      } finally {
         btnEl.disabled    = false;
         btnEl.textContent = "Sign In to Admin";
       }
@@ -192,6 +197,73 @@
     function showError(msg) {
       errEl.textContent   = msg;
       errEl.style.display = "block";
+    }
+
+    function showForcePasswordChangeModal() {
+      const card = document.querySelector(".login-card");
+      if (!card) return;
+      card.innerHTML = `
+        <div style="text-align:center;margin-bottom:24px">
+          <div style="font-size:2.5rem;margin-bottom:8px">🔐</div>
+          <h2 style="margin:0 0 6px;font-size:1.1rem;color:var(--text)">Change Your Password</h2>
+          <p style="color:var(--muted);font-size:0.82rem;margin:0">You must set a new password before continuing</p>
+        </div>
+        <div class="field">
+          <label>New Password</label>
+          <input type="password" id="new-password" class="input" placeholder="Minimum 8 characters" autocomplete="new-password">
+        </div>
+        <div class="field">
+          <label>Confirm Password</label>
+          <input type="password" id="confirm-password" class="input" placeholder="Repeat new password" autocomplete="new-password">
+        </div>
+        <div id="change-error" style="color:#ef4444;font-size:0.8rem;margin-bottom:12px;display:none"></div>
+        <button id="change-pwd-btn" class="btn-login">Set New Password</button>
+      `;
+      document.getElementById("change-pwd-btn").addEventListener("click", submitPasswordChange);
+      document.getElementById("confirm-password").addEventListener("keydown", e => { if (e.key === "Enter") submitPasswordChange(); });
+    }
+
+    async function submitPasswordChange() {
+      const newPwd     = document.getElementById("new-password")?.value || "";
+      const confirmPwd = document.getElementById("confirm-password")?.value || "";
+      const errorEl    = document.getElementById("change-error");
+      const btn        = document.getElementById("change-pwd-btn");
+
+      if (newPwd.length < 8) {
+        errorEl.textContent = "Password must be at least 8 characters";
+        errorEl.style.display = "block"; return;
+      }
+      if (newPwd !== confirmPwd) {
+        errorEl.textContent = "Passwords do not match";
+        errorEl.style.display = "block"; return;
+      }
+
+      btn.textContent = "Saving…";
+      btn.disabled = true;
+      errorEl.style.display = "none";
+
+      try {
+        const res = await fetch("/admin/api/change-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ password: newPwd }),
+        });
+        if (res.ok) {
+          window.location.href = "/admin";
+        } else {
+          const err = await res.json().catch(() => ({}));
+          errorEl.textContent = err.error || "Failed to change password";
+          errorEl.style.display = "block";
+          btn.textContent = "Set New Password";
+          btn.disabled = false;
+        }
+      } catch {
+        errorEl.textContent = "Network error — try again";
+        errorEl.style.display = "block";
+        btn.textContent = "Set New Password";
+        btn.disabled = false;
+      }
     }
 
     btnEl.addEventListener("click", doLogin);
