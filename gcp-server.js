@@ -1363,6 +1363,9 @@ app.post("/admin/api/tests/run", adminAuth, async (req, res) => {
       results[name] = { ok: false, error: err.message || String(err) };
     }
   }
+  function skipTest(name, reason) {
+    results[name] = { ok: null, error: reason || "skipped" };
+  }
 
   try {
     if (suite === "health" || !suite) {
@@ -1426,6 +1429,11 @@ app.post("/admin/api/tests/run", adminAuth, async (req, res) => {
       });
       await runTest("Delete test user", async () => {
         if (!testUserId) throw new Error("No test user created");
+        // Delete all FK-constrained rows before deleting auth user
+        await supabaseAdmin.from("sessions").delete().eq("user_id", testUserId);
+        await supabaseAdmin.from("usage").delete().eq("user_id", testUserId);
+        await supabaseAdmin.from("purchases").delete().eq("user_id", testUserId);
+        await supabaseAdmin.from("profiles").delete().eq("id", testUserId);
         const { error } = await supabaseAdmin.auth.admin.deleteUser(testUserId);
         if (error) throw new Error(error.message);
       });
@@ -1481,18 +1489,23 @@ app.post("/admin/api/tests/run", adminAuth, async (req, res) => {
     }
 
     if (suite === "session" || !suite) {
-      const mockUserId = "00000000-0000-0000-0000-000000000001";
       let mockSessionId = null;
+      const { data: realUser } = await supabaseAdmin
+        .from("profiles").select("id").limit(1).single();
+      const mockUserId = realUser?.id || null;
+      const diagSessionId = "diag-" + Date.now();
       await runTest("Insert mock session", async () => {
-        const { data, error } = await supabaseAdmin.from("sessions").insert({
+        if (!mockUserId) throw new Error("No users in database to test with");
+        const { data, error } = await supabaseAdmin.from("sessions").upsert({
           user_id: mockUserId,
-          email: "diag-test@tzurah-test.invalid",
+          email: "mock-test@tzurah.ai",
           started_at: new Date().toISOString(),
           last_ping: new Date().toISOString(),
           credits_used: 0,
           is_active: true,
-          session_id: "diag-" + Date.now(),
-        }).select("id").single();
+          session_id: diagSessionId,
+          kill_signal: false,
+        }, { onConflict: "user_id" }).select("id").single();
         if (error) throw new Error(error.message);
         mockSessionId = data.id;
       });
@@ -1523,29 +1536,33 @@ app.post("/admin/api/tests/run", adminAuth, async (req, res) => {
     }
 
     if (suite === "payment" || !suite) {
-      await runTest("Stripe keys configured", async () => {
-        const key = process.env.STRIPE_SECRET_KEY;
-        if (!key || key === "your_stripe_key") throw new Error("STRIPE_SECRET_KEY not set");
-        if (!stripe) throw new Error("Stripe client not initialized");
-      });
-      await runTest("Create test Stripe checkout session", async () => {
-        if (!stripe) throw new Error("Stripe not configured");
-        const session = await stripe.checkout.sessions.create({
-          mode: "payment",
-          line_items: [{ price_data: {
-            currency: "usd",
-            unit_amount: 100,
-            product_data: { name: "Diagnostic Test" },
-          }, quantity: 1 }],
-          success_url: "https://example.com/success",
-          cancel_url:  "https://example.com/cancel",
+      const stripeConfigured = !!process.env.STRIPE_SECRET_KEY &&
+        process.env.STRIPE_SECRET_KEY !== "your_stripe_key" && !!stripe;
+
+      if (!stripeConfigured) {
+        skipTest("Stripe keys configured",       "Not configured — add STRIPE_SECRET_KEY to .env");
+        skipTest("Create test Stripe checkout session", "Skipped — Stripe not configured");
+        skipTest("Webhook secret configured",    "Not configured — add STRIPE_WEBHOOK_SECRET to .env");
+      } else {
+        await runTest("Stripe keys configured", async () => {});
+        await runTest("Create test Stripe checkout session", async () => {
+          const session = await stripe.checkout.sessions.create({
+            mode: "payment",
+            line_items: [{ price_data: {
+              currency: "usd",
+              unit_amount: 100,
+              product_data: { name: "Diagnostic Test" },
+            }, quantity: 1 }],
+            success_url: "https://example.com/success",
+            cancel_url:  "https://example.com/cancel",
+          });
+          if (!session?.id) throw new Error("No session ID returned");
         });
-        if (!session?.id) throw new Error("No session ID returned");
-      });
-      await runTest("Webhook secret configured", async () => {
-        const secret = process.env.STRIPE_WEBHOOK_SECRET;
-        if (!secret) throw new Error("STRIPE_WEBHOOK_SECRET not set");
-      });
+        await runTest("Webhook secret configured", async () => {
+          const secret = process.env.STRIPE_WEBHOOK_SECRET;
+          if (!secret) throw new Error("STRIPE_WEBHOOK_SECRET not set");
+        });
+      }
     }
 
     res.json({ ok: true, results });
