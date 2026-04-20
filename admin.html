@@ -1635,10 +1635,36 @@ function toast(msg, type="success") {
 }
 
 // ── Modal system ──────────────────────────────────────────────────
-function showModal(html, opts={}) {
+function showModal(htmlOrOpts, opts = {}) {
+  // Object API: showModal({ title, body, onConfirm, confirmLabel, confirmClass })
+  if (typeof htmlOrOpts !== "string") {
+    const { title, body, onConfirm, confirmLabel = "Confirm", confirmClass = "" } = htmlOrOpts;
+    const ov = document.createElement("div");
+    ov.className = "admin-modal-overlay";
+    ov.innerHTML = `
+      <div class="admin-modal-card" style="max-width:520px;width:100%">
+        <div class="modal-header">${title || ""}</div>
+        <div class="modal-body">${body || ""}</div>
+        <div class="modal-footer">
+          <button class="modal-btn-cancel">Cancel</button>
+          <button class="modal-btn-confirm ${confirmClass}">${confirmLabel}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.querySelector(".modal-btn-cancel").addEventListener("click", () => ov.remove());
+    ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+    ov.querySelector(".modal-btn-confirm").addEventListener("click", async () => {
+      const result = await onConfirm?.();
+      if (result !== false) ov.remove();
+    });
+    setTimeout(() => ov.querySelector("input,textarea,select")?.focus(), 80);
+    return ov;
+  }
+
+  // String API: showModal(htmlString, opts)
   const ov = document.createElement("div");
   ov.className = "admin-modal-overlay";
-  ov.innerHTML = `<div class="admin-modal-card">${html}</div>`;
+  ov.innerHTML = `<div class="admin-modal-card">${htmlOrOpts}</div>`;
   document.body.appendChild(ov);
 
   ov.querySelector(".modal-btn-cancel")?.addEventListener("click", () => { ov.remove(); opts.onCancel?.(); });
@@ -3863,37 +3889,6 @@ function timeAgo(date) {
   return relTime(date instanceof Date ? date.toISOString() : date);
 }
 
-// showModal — support BOTH the existing HTML-string API and the new object API:
-//   showModal(htmlString, opts)         — existing usage
-//   showModal({ title, body, onConfirm }) — new C2-C12 usage
-const _showModalOrig = showModal;
-function showModal(htmlOrOpts, opts = {}) {
-  if (typeof htmlOrOpts === "string") {
-    return _showModalOrig(htmlOrOpts, opts);
-  }
-  // Object API
-  const { title, body, onConfirm, confirmLabel = "Confirm", confirmClass = "" } = htmlOrOpts;
-  const ov = document.createElement("div");
-  ov.className = "admin-modal-overlay";
-  ov.innerHTML = `
-    <div class="admin-modal-card" style="max-width:520px;width:100%">
-      <div class="modal-header">${title || ""}</div>
-      <div class="modal-body">${body || ""}</div>
-      <div class="modal-footer">
-        <button class="modal-btn-cancel">Cancel</button>
-        <button class="modal-btn-confirm ${confirmClass}">${confirmLabel}</button>
-      </div>
-    </div>`;
-  document.body.appendChild(ov);
-  ov.querySelector(".modal-btn-cancel").addEventListener("click", () => ov.remove());
-  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
-  ov.querySelector(".modal-btn-confirm").addEventListener("click", async () => {
-    const result = await onConfirm?.();
-    if (result !== false) ov.remove();
-  });
-  setTimeout(() => ov.querySelector("input,textarea,select")?.focus(), 80);
-  return ov;
-}
 
 // ══════════════════════════════════════════════════════════════════
 // TAB PERMISSIONS + ROLE VISIBILITY
