@@ -2559,7 +2559,7 @@ function updateLiveSessions(sessions) {
       <td><span id="duration-${esc(s.user_id)}">${fmtSecs(s.duration_secs || 0)}</span></td>
       <td>${(s.credits_per_min || 130.8).toFixed(1)}</td>
       <td><button class="btn btn-red btn-xs" data-end-session="${esc(s.user_id)}"
-            onclick="endSession('${esc(s.user_id)}','${esc(s.email||"")}')">End</button></td>
+            onclick="showEndSessionModal('${esc(s.user_id)}','${esc(s.email||"")}')">End</button></td>
     </tr>`).join("");
 
   const totalBurn = (n * 130.8).toFixed(1);
