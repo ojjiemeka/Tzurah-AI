@@ -433,11 +433,12 @@ app.post("/admin/login", async (req, res) => {
   // Try sub-admin login
   try {
     const { data: admins } = await supabaseAdmin.from("admin_users")
-      .select("id, email, name, role, is_active, password_hash").eq("email", email).eq("is_active", true).maybeSingle();
+      .select("id, email, name, role, is_active, password_hash, must_change_password").eq("email", email).eq("is_active", true).maybeSingle();
     if (admins?.password_hash) {
       const bcrypt = require("bcryptjs");
       const ok = await bcrypt.compare(password, admins.password_hash);
       if (ok) {
+        console.log("[LOGIN] Sub-admin:", admins.email, "must_change_password:", admins.must_change_password, "type:", typeof admins.must_change_password);
         req.session.isAdmin    = true;
         req.session.adminEmail = admins.email;
         req.session.adminRole  = admins.role;
@@ -445,8 +446,9 @@ app.post("/admin/login", async (req, res) => {
         await supabaseAdmin.from("admin_users").update({ last_login: new Date().toISOString() }).eq("id", admins.id);
         return res.json({
           success: true,
-          mustChangePassword: !!admins.must_change_password,
+          mustChangePassword: admins.must_change_password === true,
           role: admins.role,
+          name: admins.name,
         });
       }
     }
