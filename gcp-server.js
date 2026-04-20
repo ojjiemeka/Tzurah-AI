@@ -1432,6 +1432,35 @@ app.post("/admin/api/db/action", adminAuth, async (req, res) => {
   }
 });
 
+// ── Ensure profile (called after OAuth login for new Google users) ─
+app.post("/api/ensure-profile", async (req, res) => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+
+  const token = auth.slice(7);
+  const { data: { user }, error: userErr } = await supabaseAdmin.auth.getUser(token);
+  if (userErr || !user) return res.status(401).json({ error: "Invalid token" });
+
+  const { data: profile } = await supabaseAdmin
+    .from("profiles")
+    .select("id, credits")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile) {
+    await supabaseAdmin.from("profiles").insert({
+      id:                 user.id,
+      credits:            6,
+      total_credits_used: 0,
+      last_seen:          new Date().toISOString(),
+    });
+    console.log("[PROFILE] Created profile for OAuth user:", user.email);
+    return res.json({ created: true, credits: 6 });
+  }
+
+  res.json({ created: false, credits: profile.credits });
+});
+
 // ── Feature flags ─────────────────────────────────────────────────
 app.get("/api/feature-flags", async (_req, res) => {
   const { data } = await supabaseAdmin.from("feature_flags").select("key, enabled");
