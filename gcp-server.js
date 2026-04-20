@@ -100,6 +100,7 @@ const tokenLimiter = rateLimit({
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, max: 20,
   message: { error: "Too many auth attempts" },
+  skip: (req) => req.ip === "127.0.0.1" || req.ip === "::1",
 });
 
 // ── UUID validation ────────────────────────────────────────────────
@@ -120,6 +121,18 @@ const allowedOrigins = [
 
 // ── Express setup ─────────────────────────────────────────────────
 const app = express();
+
+// Admin routes bypass whitelist CORS so the browser-based login page works
+// regardless of what origin the admin dashboard is served from.
+app.use("/admin", (req, res, next) => {
+  res.header("Access-Control-Allow-Origin",  req.headers.origin || "*");
+  res.header("Access-Control-Allow-Credentials", "true");
+  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.sendStatus(200);
+  next();
+});
+
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
@@ -141,7 +154,7 @@ app.use(session({
   secret:            process.env.ADMIN_SECRET || "tzurah_admin_secret",
   resave:            false,
   saveUninitialized: false,
-  cookie:            { secure: false, maxAge: 24 * 60 * 60 * 1000 },
+  cookie:            { secure: false, httpOnly: true, sameSite: "lax", maxAge: 24 * 60 * 60 * 1000 },
 }));
 
 // ═══════════════════════════════════════════════════════════════════
