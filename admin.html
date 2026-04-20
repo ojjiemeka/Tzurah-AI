@@ -722,6 +722,46 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 .up-hist-table tr:last-child td { border-bottom:none; }
 .up-actions { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
 
+/* ── Notification bell ─────────────────────────────────────────── */
+.notif-bell { position:relative; cursor:pointer; font-size:1.1rem; padding:4px 8px; border-radius:6px; transition:background 0.2s; }
+.notif-bell:hover { background:var(--surface2); }
+.notif-badge { position:absolute; top:-2px; right:-2px; background:#ef4444; color:#fff; font-size:0.6rem; font-weight:700; min-width:16px; height:16px; border-radius:8px; display:flex; align-items:center; justify-content:center; padding:0 3px; }
+.notif-panel { position:fixed; top:48px; right:16px; width:320px; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 8px 32px rgba(0,0,0,0.4); z-index:10000; overflow:hidden; }
+.notif-header { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--border); font-weight:700; font-size:0.85rem; }
+.notif-header button { background:none; border:none; color:var(--muted); font-size:11px; cursor:pointer; font-family:inherit; }
+.notif-header button:hover { color:var(--text); }
+.notif-item { padding:10px 16px; border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.15s; }
+.notif-item:hover { background:var(--surface2); }
+.notif-item.unread { background:rgba(99,102,241,0.05); }
+.notif-title { font-size:0.82rem; font-weight:600; color:var(--text); }
+.notif-msg { font-size:0.75rem; color:var(--muted); margin-top:2px; }
+.notif-time { font-size:0.68rem; color:#444; margin-top:4px; }
+.notif-empty { padding:20px; text-align:center; color:var(--muted); font-size:0.82rem; }
+
+/* ── Feature flags tab ─────────────────────────────────────────── */
+.flag-row { display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--border); }
+.flag-row:last-child { border-bottom:none; }
+.flag-key { font-size:0.82rem; font-weight:600; color:var(--text); font-family:monospace; }
+.flag-desc { font-size:0.72rem; color:var(--muted); margin-top:2px; }
+.toggle-switch { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0; }
+.toggle-switch input { opacity:0; width:0; height:0; }
+.toggle-slider { position:absolute; cursor:pointer; inset:0; background:#333; border-radius:24px; transition:0.3s; }
+.toggle-slider:before { content:''; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background:#666; border-radius:50%; transition:0.3s; }
+.toggle-switch input:checked + .toggle-slider { background:rgba(99,102,241,0.3); }
+.toggle-switch input:checked + .toggle-slider:before { background:var(--accent); transform:translateX(20px); }
+
+/* ── Status dots ───────────────────────────────────────────────── */
+.status-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; flex-shrink:0; }
+.dot-green { background:var(--success); box-shadow:0 0 4px rgba(34,197,94,0.5); }
+.dot-red   { background:var(--danger);  box-shadow:0 0 4px rgba(239,68,68,0.5);  }
+.dot-amber { background:var(--warning); }
+
+/* ── Empty table cell ──────────────────────────────────────────── */
+.td-empty { text-align:center; padding:32px; color:var(--muted); font-size:12px; }
+
+/* ── Extra badge colours ────────────────────────────────────────── */
+.badge-warning { background:rgba(245,158,11,.15); color:#fbbf24; }
+
 /* ── Testing & Diagnostics tab ─────────────────────────────────── */
 .test-suite-card {
   background:var(--surface); border:1px solid var(--border);
@@ -813,6 +853,17 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
     <span class="refresh-countdown" id="refresh-cd" title="Auto-refresh"></span>
     <button class="btn btn-ghost" id="auto-btn" onclick="toggleAuto()">&#8635; Auto</button>
     <button class="btn btn-ghost" onclick="manualRefresh()">&#8635; Now</button>
+    <div class="notif-bell" id="notif-bell">
+      🔔
+      <span class="notif-badge" id="notif-badge" style="display:none">0</span>
+    </div>
+    <div id="notif-panel" class="notif-panel" style="display:none">
+      <div class="notif-header">
+        <span>Notifications</span>
+        <button onclick="markAllNotifsRead()">Mark all read</button>
+      </div>
+      <div id="notif-list"><div class="notif-empty">No notifications</div></div>
+    </div>
     <button class="btn btn-ghost" onclick="logout()">Logout</button>
   </div>
 </header>
@@ -824,8 +875,13 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   <button class="tab-btn" data-tab="revenue">Revenue</button>
   <button class="tab-btn" data-tab="purchases">Purchases</button>
   <button class="tab-btn" data-tab="alerts">Alerts</button>
+  <button class="tab-btn" data-tab="announcements">📣 Announcements</button>
   <button class="tab-btn" data-tab="email">✉ Email</button>
+  <button class="tab-btn" data-tab="packs">📦 Packs</button>
+  <button class="tab-btn" data-tab="ipblocks">🚫 IP Blocks</button>
+  <button class="tab-btn" data-tab="subadmins">👮 Sub-admins</button>
   <button class="tab-btn" data-tab="tests">🧪 Tests</button>
+  <button class="tab-btn" data-tab="flags">🚩 Flags</button>
   <button class="tab-btn" data-tab="settings">⚙ Settings</button>
 </div>
 
@@ -1400,6 +1456,72 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 
 </div>
 
+<!-- ══ ANNOUNCEMENTS ══════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-announcements">
+  <div class="sec-hdr">
+    <div><h3>📣 Announcements</h3><div class="sub">Broadcast messages shown to all users</div></div>
+    <button class="btn btn-accent" onclick="showNewAnnouncementModal()">+ New Announcement</button>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Title</th><th>Type</th><th>Status</th><th>Expires</th><th>Actions</th></tr></thead>
+      <tbody id="announcements-tbody"><tr><td colspan="5" class="loading-cell"><div class="spinner"></div></td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ══ CREDIT PACKS ════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-packs">
+  <div class="sec-hdr">
+    <div><h3>📦 Credit Packs</h3><div class="sub">Manage purchasable credit packs</div></div>
+    <button class="btn btn-accent" onclick="showNewPackModal()">+ New Pack</button>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Name</th><th>Price</th><th>Credits</th><th>Minutes</th><th>Popular</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody id="packs-tbody"><tr><td colspan="7" class="loading-cell"><div class="spinner"></div></td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ══ IP BLOCKS ═══════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-ipblocks">
+  <div class="sec-hdr">
+    <div><h3>🚫 IP Blocks</h3><div class="sub">Blocked IP addresses</div></div>
+    <button class="btn btn-accent" onclick="showBlockIPModal()">+ Block IP</button>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>IP Address</th><th>Reason</th><th>Blocked</th><th>Actions</th></tr></thead>
+      <tbody id="ipblocks-tbody"><tr><td colspan="4" class="loading-cell"><div class="spinner"></div></td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ══ SUB-ADMINS ═══════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-subadmins">
+  <div class="sec-hdr">
+    <div><h3>👮 Sub-Admins</h3><div class="sub">Manage admin team members</div></div>
+    <button class="btn btn-accent" onclick="showCreateSubAdminModal()">+ Create Sub-Admin</button>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Last Login</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody id="subadmins-tbody"><tr><td colspan="6" class="loading-cell"><div class="spinner"></div></td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ══ FEATURE FLAGS ════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-flags">
+  <div class="sec-hdr"><h3>🚩 Feature Flags</h3></div>
+  <div class="panel-card">
+    <div class="panel-body" id="flags-list">
+      <div class="loading-cell"><div class="spinner"></div></div>
+    </div>
+  </div>
+</div>
+
 </main>
 
 <script>
@@ -1633,15 +1755,27 @@ const Modal = {
 document.querySelectorAll(".tab-btn").forEach(b => {
   b.addEventListener("click", () => switchTab(b.dataset.tab));
 });
-function switchTab(id) {
-  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab===id));
-  document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id==="tab-"+id));
-  if (id==="revenue"   && !cache.allPurchases.length) loadRevenuePurchases();
-  if (id==="purchases" && !allPurchases.length)       loadPurchasesData();
-  if (id==="alerts")   loadAlertRules();
-  if (id==="email")    loadEmailTab();
-  if (id==="tests")    initTestsTab();
-  if (id==="settings") loadSettings();
+function switchTab(tab) {
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  document.querySelectorAll(".tab-panel").forEach(p => p.style.display = p.id === `tab-${tab}` ? '' : 'none');
+  // also handle legacy .active class for overview initial state
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === `tab-${tab}`));
+  switch(tab) {
+    case 'overview':      if (!cache.stats) loadStats(); break;
+    case 'users':         if (!cache.users.length) loadUsersData(); break;
+    case 'revenue':       if (!cache.allPurchases.length) loadRevenuePurchases(); break;
+    case 'purchases':     if (!allPurchases.length) loadPurchasesData(); break;
+    case 'alerts':        loadAlertRules(); break;
+    case 'announcements': loadAnnouncements(); break;
+    case 'packs':         loadCreditPacks(); break;
+    case 'ipblocks':      loadIPBlocks(); break;
+    case 'subadmins':     loadSubAdmins(); break;
+    case 'flags':         loadFeatureFlagsTab(); break;
+    case 'email':         loadEmailTab(); break;
+    case 'tests':         initTestsTab(); break;
+    case 'settings':      loadSettings(); if (typeof loadDbStats === 'function') loadDbStats(); break;
+  }
+  sessionStorage.setItem('activeTab', tab);
 }
 
 // ── Logout ────────────────────────────────────────────────────────
@@ -2919,6 +3053,12 @@ function connectSSE() {
     updateLiveSessions(data.liveSessions || []);
     checkAlertsAgainstData(data);
 
+    // C6: unread notification badge
+    if (typeof data.unreadNotifications === 'number') {
+      const badge = document.getElementById('notif-badge');
+      if (badge) { badge.textContent = data.unreadNotifications; badge.style.display = data.unreadNotifications > 0 ? 'flex' : 'none'; }
+    }
+
     lastRefreshTime = Date.now();
   };
 
@@ -2995,6 +3135,27 @@ const TEST_SUITES = [
       "Create Stripe checkout",
       "Stripe webhook secret",
     ],
+  },
+  {
+    id: "performance",
+    name: "Performance",
+    icon: "⚡",
+    description: "Concurrent load, DB speed, memory usage",
+    tests: ["Concurrent requests (10x)", "DB query speed", "Memory usage OK", "Server uptime"],
+  },
+  {
+    id: "security",
+    name: "Security",
+    icon: "🔒",
+    description: "Rate limits, passwords, API keys",
+    tests: ["Rate limiting active", "Admin password changed", "Decart API key configured", "Supabase service role set", "Stripe webhook secret"],
+  },
+  {
+    id: "reliability",
+    name: "Reliability",
+    icon: "🛡️",
+    description: "DB connectivity, flags, packs, sessions",
+    tests: ["Supabase response time", "Feature flags table", "Credit packs table", "Sessions table healthy"],
   },
 ];
 
@@ -3479,6 +3640,490 @@ function confirmRestartServer() {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// HELPERS — adminFetch, timeAgo, showModal (object API)
+// ══════════════════════════════════════════════════════════════════
+
+// adminFetch: wrapper used by C2-C12 features (mirrors api/apiPost)
+async function adminFetch(path, opts = {}) {
+  const options = {
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    ...opts,
+  };
+  try {
+    const r = await fetch(path, options);
+    if (r.status === 401) { window.location.href = "/admin/login"; return null; }
+    return r;
+  } catch (e) {
+    toast("Network error: " + e.message, "error");
+    return null;
+  }
+}
+
+// timeAgo: alias for relTime (used by C3-C6 spec)
+function timeAgo(date) {
+  if (!date) return "Never";
+  return relTime(date instanceof Date ? date.toISOString() : date);
+}
+
+// showModal — support BOTH the existing HTML-string API and the new object API:
+//   showModal(htmlString, opts)         — existing usage
+//   showModal({ title, body, onConfirm }) — new C2-C12 usage
+const _showModalOrig = showModal;
+function showModal(htmlOrOpts, opts = {}) {
+  if (typeof htmlOrOpts === "string") {
+    return _showModalOrig(htmlOrOpts, opts);
+  }
+  // Object API
+  const { title, body, onConfirm, confirmLabel = "Confirm", confirmClass = "" } = htmlOrOpts;
+  const ov = document.createElement("div");
+  ov.className = "admin-modal-overlay";
+  ov.innerHTML = `
+    <div class="admin-modal-card" style="max-width:520px;width:100%">
+      <div class="modal-header">${title || ""}</div>
+      <div class="modal-body">${body || ""}</div>
+      <div class="modal-footer">
+        <button class="modal-btn-cancel">Cancel</button>
+        <button class="modal-btn-confirm ${confirmClass}">${confirmLabel}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  ov.querySelector(".modal-btn-cancel").addEventListener("click", () => ov.remove());
+  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+  ov.querySelector(".modal-btn-confirm").addEventListener("click", async () => {
+    const result = await onConfirm?.();
+    if (result !== false) ov.remove();
+  });
+  setTimeout(() => ov.querySelector("input,textarea,select")?.focus(), 80);
+  return ov;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// TAB PERMISSIONS + ROLE VISIBILITY
+// ══════════════════════════════════════════════════════════════════
+const TAB_PERMISSIONS = {
+  overview:      ['super_admin', 'admin', 'support', 'analyst'],
+  users:         ['super_admin', 'admin', 'support'],
+  revenue:       ['super_admin', 'admin', 'analyst'],
+  purchases:     ['super_admin', 'admin', 'support', 'analyst'],
+  alerts:        ['super_admin', 'admin', 'support'],
+  announcements: ['super_admin', 'admin'],
+  email:         ['super_admin', 'admin'],
+  packs:         ['super_admin', 'admin'],
+  ipblocks:      ['super_admin', 'admin'],
+  subadmins:     ['super_admin'],
+  tests:         ['super_admin', 'admin'],
+  flags:         ['super_admin'],
+  settings:      ['super_admin'],
+};
+
+function applyRoleVisibility(role) {
+  Object.entries(TAB_PERMISSIONS).forEach(([tab, roles]) => {
+    const btn = document.querySelector(`[data-tab="${tab}"]`);
+    if (btn) btn.style.display = roles.includes(role) ? '' : 'none';
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════
+// C2: CREDIT PACKS
+// ══════════════════════════════════════════════════════════════════
+async function loadCreditPacks() {
+  const res = await adminFetch('/admin/api/credit-packs');
+  if (!res) return;
+  const { packs } = await res.json();
+  renderCreditPacks(packs);
+}
+
+function renderCreditPacks(packs) {
+  const tbody = document.getElementById('packs-tbody');
+  if (!tbody) return;
+  if (!packs?.length) { tbody.innerHTML = `<tr><td colspan="7" class="td-empty">No credit packs yet</td></tr>`; return; }
+  tbody.innerHTML = packs.map(p => `
+    <tr>
+      <td>${esc(p.name)}</td>
+      <td>$${p.price_usd}</td>
+      <td>${p.credits} cr</td>
+      <td>≈${Math.floor(p.credits / 13.08)}m</td>
+      <td>${p.is_popular ? '<span class="badge badge-accent">★ Popular</span>' : '<span style="color:#444">—</span>'}</td>
+      <td><span class="status-dot ${p.is_active ? 'dot-green' : 'dot-red'}"></span> ${p.is_active ? 'Active' : 'Archived'}</td>
+      <td>
+        <button class="btn btn-xs btn-ghost" onclick="editPack('${p.id}')">Edit</button>
+        <button class="btn btn-xs btn-ghost" onclick="archivePack('${p.id}', ${!p.is_active})" style="color:${p.is_active ? '#ef4444' : '#22c55e'}">${p.is_active ? 'Archive' : 'Restore'}</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function showNewPackModal(pack = null) {
+  const isEdit = !!pack;
+  showModal({
+    title: isEdit ? 'Edit Credit Pack' : 'New Credit Pack',
+    body: `
+      <div class="modal-field"><label>Name</label><input class="modal-input" id="pack-name" value="${pack?.name || ''}" placeholder="e.g. Starter"></div>
+      <div class="modal-field"><label>Price (USD)</label><input class="modal-input" id="pack-price" type="number" value="${pack?.price_usd || ''}" placeholder="20"></div>
+      <div class="modal-field"><label>Credits</label><input class="modal-input" id="pack-credits" type="number" value="${pack?.credits || ''}" placeholder="42" oninput="document.getElementById('pack-minutes').textContent = Math.floor(this.value/13.08) + ' min'"><small id="pack-minutes" style="color:var(--muted)">${pack ? Math.floor(pack.credits/13.08) + ' min' : '0 min'}</small></div>
+      <div class="modal-field"><label>Stripe Price ID</label><input class="modal-input" id="pack-stripe" value="${pack?.stripe_price_id || ''}" placeholder="price_xxx (optional)"></div>
+      <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px"><label style="width:auto">Popular badge</label><input type="checkbox" id="pack-popular" ${pack?.is_popular ? 'checked' : ''}></div>
+      <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px"><label style="width:auto">Active</label><input type="checkbox" id="pack-active" ${pack?.is_active !== false ? 'checked' : ''}></div>
+      <div class="modal-field"><label>Sort order</label><input class="modal-input" id="pack-order" type="number" value="${pack?.sort_order || 0}"></div>
+    `,
+    onConfirm: async () => {
+      const body = {
+        name: document.getElementById('pack-name').value,
+        price_usd: parseFloat(document.getElementById('pack-price').value),
+        credits: parseInt(document.getElementById('pack-credits').value),
+        stripe_price_id: document.getElementById('pack-stripe').value || null,
+        is_popular: document.getElementById('pack-popular').checked,
+        is_active: document.getElementById('pack-active').checked,
+        sort_order: parseInt(document.getElementById('pack-order').value) || 0,
+      };
+      if (!body.name || !body.price_usd || !body.credits) { toast('Fill in all required fields', 'error'); return false; }
+      const url = isEdit ? `/admin/api/credit-packs/${pack.id}` : '/admin/api/credit-packs';
+      const method = isEdit ? 'PATCH' : 'POST';
+      const res = await adminFetch(url, { method, body: JSON.stringify(body) });
+      if (res?.ok) { toast(`Pack ${isEdit ? 'updated' : 'created'} ✓`, 'success'); loadCreditPacks(); }
+      else { const err = await res?.json().catch(()=>{}); toast(err?.error || 'Failed', 'error'); return false; }
+    },
+  });
+}
+
+async function editPack(id) {
+  const res = await adminFetch('/admin/api/credit-packs');
+  if (!res) return;
+  const { packs } = await res.json();
+  const pack = packs.find(p => p.id === id);
+  if (pack) showNewPackModal(pack);
+}
+
+async function archivePack(id, restore = false) {
+  const res = await adminFetch(`/admin/api/credit-packs/${id}`, { method: 'PATCH', body: JSON.stringify({ is_active: restore }) });
+  if (res?.ok) { toast(restore ? 'Pack restored ✓' : 'Pack archived ✓', 'success'); loadCreditPacks(); }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// C3: ANNOUNCEMENTS
+// ══════════════════════════════════════════════════════════════════
+async function loadAnnouncements() {
+  const res = await adminFetch('/admin/api/announcements');
+  if (!res) return;
+  const { announcements } = await res.json();
+  renderAnnouncements(announcements);
+}
+
+function renderAnnouncements(items) {
+  const tbody = document.getElementById('announcements-tbody');
+  if (!tbody) return;
+  if (!items?.length) { tbody.innerHTML = `<tr><td colspan="5" class="td-empty">No announcements yet</td></tr>`; return; }
+  const typeColors = { info: '#6366f1', warning: '#f59e0b', error: '#ef4444', success: '#22c55e' };
+  const typeIcons  = { info: 'ℹ️', warning: '⚠️', error: '🚫', success: '✅' };
+  tbody.innerHTML = items.map(a => `
+    <tr>
+      <td>${esc(a.title)}</td>
+      <td><span style="color:${typeColors[a.type] || '#888'}">${typeIcons[a.type] || '•'} ${a.type}</span></td>
+      <td><span class="status-dot ${a.is_active ? 'dot-green':'dot-red'}"></span> ${a.is_active ? 'Active' : 'Inactive'}</td>
+      <td style="color:var(--muted);font-size:0.78rem">${a.expires_at ? new Date(a.expires_at).toLocaleDateString() : 'Never'}</td>
+      <td><button class="btn btn-xs btn-ghost" onclick="deleteAnnouncement('${a.id}')">Delete</button></td>
+    </tr>
+  `).join('');
+}
+
+function showNewAnnouncementModal() {
+  showModal({
+    title: '📣 New Announcement',
+    body: `
+      <div class="modal-field"><label>Title</label><input class="modal-input" id="ann-title" placeholder="e.g. Scheduled maintenance tonight"></div>
+      <div class="modal-field"><label>Message</label><textarea class="modal-input" id="ann-message" rows="3" placeholder="Details visible to all users..." style="resize:vertical"></textarea></div>
+      <div class="modal-field"><label>Type</label><select class="modal-input" id="ann-type" onchange="updateAnnPreview()"><option value="info">ℹ️ Info</option><option value="warning">⚠️ Warning</option><option value="error">🚫 Error / Outage</option><option value="success">✅ Success</option></select></div>
+      <div class="modal-field"><label>Expires</label><div style="display:flex;gap:12px;align-items:center"><label style="width:auto;color:var(--text)"><input type="radio" name="ann-exp" value="never" checked onchange="toggleExpiry(false)"> Never</label><label style="width:auto;color:var(--text)"><input type="radio" name="ann-exp" value="date" onchange="toggleExpiry(true)"> Set date</label><input type="datetime-local" id="ann-expires" class="modal-input" style="display:none;flex:1"></div></div>
+      <div class="modal-field"><label>Preview</label><div id="ann-preview" style="padding:8px 12px;border-radius:6px;font-size:0.8rem;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);color:#a5b4fc">Your announcement will appear here</div></div>
+    `,
+    onConfirm: async () => {
+      const title = document.getElementById('ann-title').value;
+      const message = document.getElementById('ann-message').value;
+      const type = document.getElementById('ann-type').value;
+      const expRadio = document.querySelector('input[name="ann-exp"]:checked')?.value;
+      const expires_at = expRadio === 'date' ? document.getElementById('ann-expires').value || null : null;
+      if (!title || !message) { toast('Title and message required', 'error'); return false; }
+      const res = await adminFetch('/admin/api/announcements', { method: 'POST', body: JSON.stringify({ title, message, type, expires_at }) });
+      if (res?.ok) { toast('Announcement published ✓', 'success'); loadAnnouncements(); }
+      else { const err = await res?.json().catch(()=>{}); toast(err?.error || 'Failed', 'error'); return false; }
+    },
+  });
+  setTimeout(() => {
+    ['ann-title', 'ann-message', 'ann-type'].forEach(id => document.getElementById(id)?.addEventListener('input', updateAnnPreview));
+  }, 100);
+}
+
+function toggleExpiry(show) {
+  const el = document.getElementById('ann-expires');
+  if (el) el.style.display = show ? 'block' : 'none';
+}
+
+function updateAnnPreview() {
+  const title = document.getElementById('ann-title')?.value || 'Title';
+  const msg   = document.getElementById('ann-message')?.value || 'Message';
+  const type  = document.getElementById('ann-type')?.value || 'info';
+  const colors = { info: { bg:'rgba(99,102,241,0.1)',border:'rgba(99,102,241,0.3)',text:'#a5b4fc' }, warning:{bg:'rgba(245,158,11,0.1)',border:'rgba(245,158,11,0.3)',text:'#fbbf24'}, error:{bg:'rgba(239,68,68,0.1)',border:'rgba(239,68,68,0.3)',text:'#f87171'}, success:{bg:'rgba(34,197,94,0.1)',border:'rgba(34,197,94,0.3)',text:'#4ade80'} };
+  const icons  = { info:'ℹ️', warning:'⚠️', error:'🚫', success:'✅' };
+  const c = colors[type] || colors.info;
+  const preview = document.getElementById('ann-preview');
+  if (preview) { preview.style.background = c.bg; preview.style.borderColor = c.border; preview.style.color = c.text; preview.innerHTML = `<strong>${icons[type]} ${esc(title)}:</strong> ${esc(msg)}<span style="float:right;cursor:pointer;opacity:0.6">×</span>`; }
+}
+
+async function deleteAnnouncement(id) {
+  if (!confirm('Delete this announcement?')) return;
+  const res = await adminFetch(`/admin/api/announcements/${id}`, { method: 'DELETE' });
+  if (res?.ok) { toast('Announcement deleted ✓', 'success'); loadAnnouncements(); }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// C4: SUB-ADMINS
+// ══════════════════════════════════════════════════════════════════
+async function loadSubAdmins() {
+  const res = await adminFetch('/admin/api/sub-admins');
+  if (!res) return;
+  const { admins } = await res.json();
+  renderSubAdmins(admins);
+}
+
+function renderSubAdmins(admins) {
+  const tbody = document.getElementById('subadmins-tbody');
+  if (!tbody) return;
+  if (!admins?.length) { tbody.innerHTML = `<tr><td colspan="6" class="td-empty">No sub-admins yet</td></tr>`; return; }
+  tbody.innerHTML = admins.map(a => `
+    <tr>
+      <td>${esc(a.name || '—')}</td>
+      <td>${esc(a.email)}</td>
+      <td><span class="badge ${a.role === 'admin' ? 'badge-accent' : a.role === 'support' ? 'badge-warning' : 'badge-muted'}">${a.role}</span></td>
+      <td style="color:var(--muted);font-size:0.78rem">${a.last_login ? timeAgo(new Date(a.last_login)) : 'Never'}</td>
+      <td><span class="status-dot ${a.is_active ? 'dot-green':'dot-red'}"></span> ${a.is_active ? 'Active' : 'Suspended'}</td>
+      <td><button class="btn btn-xs btn-ghost" onclick="toggleSubAdmin('${a.id}', ${!a.is_active})">${a.is_active ? 'Suspend' : 'Restore'}</button></td>
+    </tr>
+  `).join('');
+}
+
+function showCreateSubAdminModal() {
+  showModal({
+    title: '👮 Create Sub-Admin',
+    body: `
+      <div class="modal-field"><label>Full Name</label><input class="modal-input" id="sa-name" placeholder="John Smith"></div>
+      <div class="modal-field"><label>Email</label><input class="modal-input" id="sa-email" type="email" placeholder="john@company.com"></div>
+      <div class="modal-field"><label>Role</label><select class="modal-input" id="sa-role"><option value="admin">Admin — full access except settings</option><option value="support" selected>Support — view + gift credits only</option><option value="analyst">Analyst — read-only stats</option></select></div>
+      <div class="modal-field"><label>Password</label><div style="display:flex;gap:8px"><input class="modal-input" id="sa-password" type="password" placeholder="Min 8 characters" style="flex:1"><button type="button" class="btn btn-xs btn-ghost" onclick="generateSubAdminPassword()" style="white-space:nowrap">Generate</button><button type="button" class="btn btn-xs btn-ghost" onclick="togglePasswordVisibility('sa-password')" style="white-space:nowrap">👁</button></div><small id="sa-password-display" style="color:var(--muted);font-size:0.7rem;margin-top:4px;display:none"></small></div>
+      <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px"><input type="checkbox" id="sa-must-change" checked><label style="width:auto;color:var(--text)">Force password change on first login</label></div>
+    `,
+    onConfirm: async () => {
+      const name = document.getElementById('sa-name').value;
+      const email = document.getElementById('sa-email').value;
+      const role = document.getElementById('sa-role').value;
+      const password = document.getElementById('sa-password').value;
+      const must_change = document.getElementById('sa-must-change').checked;
+      if (!name || !email || !password) { toast('All fields required', 'error'); return false; }
+      if (password.length < 8) { toast('Password must be at least 8 characters', 'error'); return false; }
+      const res = await adminFetch('/admin/api/sub-admins', { method: 'POST', body: JSON.stringify({ name, email, role, password, must_change_password: must_change }) });
+      if (res?.ok) { toast(`Sub-admin ${email} created ✓`, 'success'); loadSubAdmins(); }
+      else { const err = await res?.json().catch(()=>{}); toast(err?.error || 'Failed to create', 'error'); return false; }
+    },
+  });
+}
+
+function generateSubAdminPassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$';
+  let pwd = '';
+  for (let i = 0; i < 16; i++) pwd += chars[Math.floor(Math.random() * chars.length)];
+  const input = document.getElementById('sa-password');
+  const display = document.getElementById('sa-password-display');
+  if (input) { input.value = pwd; input.type = 'text'; }
+  if (display) { display.textContent = `Generated: ${pwd} (copy this!)`; display.style.display = 'block'; }
+}
+
+function togglePasswordVisibility(inputId) {
+  const input = document.getElementById(inputId);
+  if (input) input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+async function toggleSubAdmin(id, activate) {
+  const res = await adminFetch(`/admin/api/sub-admins/${id}`, { method: 'PATCH', body: JSON.stringify({ is_active: activate }) });
+  if (res?.ok) { toast(activate ? 'Sub-admin restored ✓' : 'Sub-admin suspended ✓', 'success'); loadSubAdmins(); }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// C5: IP BLOCKS
+// ══════════════════════════════════════════════════════════════════
+async function loadIPBlocks() {
+  const res = await adminFetch('/admin/api/ip-blocks');
+  if (!res) return;
+  const { blocks } = await res.json();
+  const tbody = document.getElementById('ipblocks-tbody');
+  if (!tbody) return;
+  if (!blocks?.length) { tbody.innerHTML = `<tr><td colspan="4" class="td-empty">No IP blocks — system open to all IPs</td></tr>`; return; }
+  tbody.innerHTML = blocks.map(b => `
+    <tr>
+      <td style="font-family:monospace">${esc(b.ip_address)}</td>
+      <td style="color:var(--muted)">${esc(b.reason || '—')}</td>
+      <td style="color:var(--muted);font-size:0.78rem">${timeAgo(new Date(b.created_at))}${b.expires_at ? `<br><small>Expires: ${new Date(b.expires_at).toLocaleDateString()}</small>` : ''}</td>
+      <td><button class="btn btn-xs btn-ghost" style="color:#ef4444" onclick="removeIPBlock('${esc(b.ip_address)}')">Remove</button></td>
+    </tr>
+  `).join('');
+}
+
+function showBlockIPModal() {
+  showModal({
+    title: '🚫 Block IP Address',
+    body: `
+      <div class="modal-field"><label>IP Address</label><input class="modal-input" id="block-ip" placeholder="e.g. 192.168.1.1" style="font-family:monospace"></div>
+      <div class="modal-field"><label>Reason</label><input class="modal-input" id="block-reason" placeholder="e.g. Spam, abuse, ban evasion"></div>
+      <div class="modal-field"><label>Expires</label><div style="display:flex;gap:8px;flex-wrap:wrap">${[['never','Never'],['1','1 day'],['7','7 days'],['30','30 days']].map(([val,label]) => `<label style="display:flex;align-items:center;gap:4px;color:var(--text);width:auto"><input type="radio" name="block-exp" value="${val}" ${val==='never'?'checked':''}>${label}</label>`).join('')}</div></div>
+    `,
+    onConfirm: async () => {
+      const ip = document.getElementById('block-ip').value.trim();
+      const reason = document.getElementById('block-reason').value;
+      const expVal = document.querySelector('input[name="block-exp"]:checked')?.value;
+      const expires_in_days = expVal === 'never' ? null : parseInt(expVal);
+      if (!ip) { toast('IP address required', 'error'); return false; }
+      const res = await adminFetch('/admin/api/ip-blocks', { method: 'POST', body: JSON.stringify({ ip_address: ip, reason, expires_in_days }) });
+      if (res?.ok) { toast(`${ip} blocked ✓`, 'success'); loadIPBlocks(); }
+      else { const err = await res?.json().catch(()=>{}); toast(err?.error || 'Failed', 'error'); return false; }
+    },
+  });
+}
+
+async function removeIPBlock(ip) {
+  const res = await adminFetch(`/admin/api/ip-blocks/${encodeURIComponent(ip)}`, { method: 'DELETE' });
+  if (res?.ok) { toast('IP block removed ✓', 'success'); loadIPBlocks(); }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// C6: NOTIFICATION BELL
+// ══════════════════════════════════════════════════════════════════
+let notifPanelOpen = false;
+
+function toggleNotifPanel() {
+  notifPanelOpen = !notifPanelOpen;
+  const panel = document.getElementById('notif-panel');
+  if (panel) { panel.style.display = notifPanelOpen ? 'block' : 'none'; if (notifPanelOpen) loadNotifications(); }
+}
+
+async function loadNotifications() {
+  const res = await adminFetch('/admin/api/notifications');
+  if (!res) return;
+  const { notifications } = await res.json();
+  renderNotifications(notifications);
+}
+
+function renderNotifications(items) {
+  const list  = document.getElementById('notif-list');
+  const badge = document.getElementById('notif-badge');
+  if (!items?.length) { if (list) list.innerHTML = '<div class="notif-empty">No notifications</div>'; if (badge) badge.style.display = 'none'; return; }
+  const unread = items.filter(n => !n.is_read).length;
+  if (badge) { badge.textContent = unread; badge.style.display = unread > 0 ? 'flex' : 'none'; }
+  if (list) list.innerHTML = items.slice(0, 20).map(n => `<div class="notif-item ${n.is_read ? '' : 'unread'}" onclick="markNotifRead('${n.id}')"><div class="notif-title">${esc(n.title)}</div>${n.message ? `<div class="notif-msg">${esc(n.message)}</div>` : ''}<div class="notif-time">${timeAgo(new Date(n.created_at))}</div></div>`).join('');
+}
+
+async function markNotifRead(id) {
+  await adminFetch(`/admin/api/notifications/${id}/read`, { method: 'POST' });
+  loadNotifications();
+}
+
+async function markAllNotifsRead() {
+  await adminFetch('/admin/api/notifications/read-all', { method: 'POST' });
+  loadNotifications();
+  notifPanelOpen = false;
+  const panel = document.getElementById('notif-panel');
+  if (panel) panel.style.display = 'none';
+}
+
+document.addEventListener('click', (e) => {
+  const bell = document.getElementById('notif-bell');
+  const panel = document.getElementById('notif-panel');
+  if (notifPanelOpen && panel && !panel.contains(e.target) && !bell?.contains(e.target)) { notifPanelOpen = false; panel.style.display = 'none'; }
+});
+
+// ══════════════════════════════════════════════════════════════════
+// C7: GLOBAL SEARCH (Ctrl+K)
+// ══════════════════════════════════════════════════════════════════
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); showGlobalSearch(); }
+});
+
+function showGlobalSearch() {
+  if (document.getElementById('global-search')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'global-search';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:99999;display:flex;align-items:flex-start;justify-content:center;padding-top:15vh;';
+  overlay.innerHTML = `
+    <div style="width:560px;background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,0.5)">
+      <div style="display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--border)">
+        <span style="font-size:1.1rem">🔍</span>
+        <input id="global-search-input" placeholder="Search users, sessions, purchases..." style="flex:1;background:none;border:none;color:var(--text);font-size:0.95rem;outline:none;font-family:inherit">
+        <kbd style="background:var(--surface2);border:1px solid var(--border);padding:2px 8px;border-radius:4px;font-size:0.7rem;color:var(--muted)">ESC</kbd>
+      </div>
+      <div id="search-results" style="max-height:400px;overflow-y:auto;padding:6px">
+        <div style="padding:24px;text-align:center;color:var(--muted);font-size:0.85rem">Type to search users, purchases, sessions...</div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  setTimeout(() => document.getElementById('global-search-input')?.focus(), 50);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.addEventListener('keydown', function closeOnEsc(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', closeOnEsc); } });
+  let searchTimer2;
+  document.getElementById('global-search-input')?.addEventListener('input', (e) => {
+    clearTimeout(searchTimer2);
+    const q = e.target.value.trim();
+    if (q.length < 2) { document.getElementById('search-results').innerHTML = `<div style="padding:24px;text-align:center;color:var(--muted);font-size:0.85rem">Type at least 2 characters...</div>`; return; }
+    searchTimer2 = setTimeout(() => runGlobalSearch(q), 300);
+  });
+}
+
+async function runGlobalSearch(q) {
+  const results = document.getElementById('search-results');
+  results.innerHTML = `<div style="padding:24px;text-align:center;color:var(--muted);font-size:0.85rem">Searching...</div>`;
+  const res = await adminFetch(`/admin/api/search?q=${encodeURIComponent(q)}`);
+  if (!res) return;
+  const data = await res.json();
+  if (!data.results?.length) { results.innerHTML = `<div style="padding:24px;text-align:center;color:var(--muted);font-size:0.85rem">No results for "<strong>${esc(q)}</strong>"</div>`; return; }
+  results.innerHTML = data.results.map(r => `
+    <div onclick="${r.action}; document.getElementById('global-search').remove()" style="display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;cursor:pointer;transition:background 0.15s" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
+      <span style="font-size:1.2rem">${r.icon}</span>
+      <div style="flex:1;min-width:0"><div style="font-size:0.85rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.title)}</div><div style="font-size:0.72rem;color:var(--muted)">${esc(r.subtitle)}</div></div>
+      <span style="font-size:0.65rem;color:#444;text-transform:uppercase;letter-spacing:0.05em;flex-shrink:0">${r.type}</span>
+    </div>
+  `).join('');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// C8: FEATURE FLAGS TAB
+// ══════════════════════════════════════════════════════════════════
+async function loadFeatureFlagsTab() {
+  const res = await adminFetch('/admin/api/feature-flags');
+  if (!res) return;
+  const { flags } = await res.json();
+  renderFeatureFlags(flags);
+}
+
+function renderFeatureFlags(flags) {
+  const container = document.getElementById('flags-list');
+  if (!container) return;
+  if (!flags?.length) { container.innerHTML = '<div class="td-empty">No feature flags configured</div>'; return; }
+  container.innerHTML = flags.map(f => `
+    <div class="flag-row">
+      <div class="flag-info"><div class="flag-key">${esc(f.key)}</div><div class="flag-desc">${esc(f.description || '')}</div></div>
+      <label class="toggle-switch"><input type="checkbox" ${f.enabled ? 'checked' : ''} onchange="updateFlag('${esc(f.key)}', this.checked)"><span class="toggle-slider"></span></label>
+    </div>
+  `).join('');
+}
+
+async function updateFlag(key, enabled) {
+  const res = await adminFetch(`/admin/api/feature-flags/${key}`, { method: 'POST', body: JSON.stringify({ enabled }) });
+  if (res?.ok) { toast(`${key}: ${enabled ? 'ON' : 'OFF'} ✓`, 'success'); }
+  else { toast('Failed to update flag', 'error'); loadFeatureFlagsTab(); }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// C9-C11: UPDATED switchTab + TAB_PERMISSIONS applied
+// ══════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════════════
 function init() {
@@ -3490,6 +4135,13 @@ function init() {
   checkHealth();
   setInterval(checkHealth, 30000);
   setInterval(checkAlerts, 60000);
+
+  // C6: notification bell
+  document.getElementById('notif-bell')?.addEventListener('click', toggleNotifPanel);
+
+  // Restore last active tab
+  const savedTab = sessionStorage.getItem('activeTab');
+  if (savedTab && savedTab !== 'overview') switchTab(savedTab);
 }
 init();
 </script>
