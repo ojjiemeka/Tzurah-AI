@@ -158,34 +158,44 @@ app.get("/decart/token", requireAuth, async (req, res) => {
 app.post("/credits/deduct", requireAuth, async (req, res) => {
   const { credits, session_seconds } = req.body || {};
 
+  console.log("[DEDUCT] user:", req.userId, "credits:", credits, "seconds:", session_seconds);
+
   if (typeof credits !== "number" || credits < 0) {
+    console.warn("[DEDUCT] Bad credits value:", credits);
     return res.status(400).json({ error: "credits must be a non-negative number" });
   }
 
   const { data: profile, error: fetchErr } = await supabaseAdmin
     .from("profiles")
-    .select("credits")
+    .select("credits, total_credits_used")
     .eq("id", req.userId)
     .single();
 
+  console.log("[DEDUCT] current balance:", profile?.credits, "fetch error:", fetchErr?.message || "none");
+
   if (fetchErr || !profile) return res.status(404).json({ error: "Profile not found" });
   if (profile.credits < credits) {
+    console.warn("[DEDUCT] Insufficient credits:", profile.credits, "<", credits);
     return res.status(402).json({ error: "Insufficient credits", credits_remaining: profile.credits });
   }
 
-  const newBalance = Math.max(0, profile.credits - credits);
+  const newBalance      = Math.max(0, profile.credits - credits);
+  const newTotalUsed    = (profile.total_credits_used || 0) + credits;
+
+  console.log("[DEDUCT] updating balance:", profile.credits, "→", newBalance);
+
   const { error: updateErr } = await supabaseAdmin
     .from("profiles")
-    .update({ credits: newBalance })
+    .update({
+      credits:            newBalance,
+      total_credits_used: newTotalUsed,
+      last_seen:          new Date().toISOString(),
+    })
     .eq("id", req.userId);
 
-  if (updateErr) return res.status(500).json({ error: updateErr.message });
+  console.log("[DEDUCT] update error:", updateErr?.message || "none");
 
-  // Increment total_credits_used (non-fatal)
-  await supabaseAdmin.rpc("increment_credits_used", {
-    p_user_id: req.userId,
-    p_amount:  credits,
-  }).then(() => {}).catch(() => {});
+  if (updateErr) return res.status(500).json({ error: updateErr.message });
 
   if (session_seconds && session_seconds > 0) {
     const now = new Date().toISOString();
@@ -195,9 +205,10 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
       credits_used:    credits,
       ended_at:        now,
       created_at:      now,
-    });
+    }).then(() => {}).catch((e) => console.warn("[DEDUCT] usage insert error:", e.message));
   }
 
+  console.log("[DEDUCT] success — new balance:", newBalance);
   res.json({ ok: true, credits_remaining: newBalance });
 });
 
