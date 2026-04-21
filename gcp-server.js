@@ -1533,45 +1533,54 @@ async function doMockPurchase(userId, userEmail, packId) {
     .from("credit_packs").select("id, name, price_usd, credits").eq("id", packId).single();
   if (packErr || !pack) throw new Error("Pack not found");
 
-  // Add credits to profile
-  const { data: profile } = await supabaseAdmin
-    .from("profiles").select("credits, total_credits_purchased").eq("id", userId).single();
-  if (!profile) throw new Error("User profile not found");
+  // Fetch profile
+  const { data: profile, error: profileErr } = await supabaseAdmin
+    .from("profiles").select("credits, total_credits_purchased, email").eq("id", userId).single();
+  if (profileErr || !profile) throw new Error("User profile not found");
 
+  const email = userEmail || profile.email;
   const newBalance = (profile.credits || 0) + pack.credits;
-  await supabaseAdmin.from("profiles").update({
-    credits:                 newBalance,
-    total_credits_purchased: (profile.total_credits_purchased || 0) + pack.credits,
-  }).eq("id", userId);
+
+  // Update credits
+  const { error: updateErr } = await supabaseAdmin
+    .from("profiles")
+    .update({
+      credits:                 newBalance,
+      total_credits_purchased: (profile.total_credits_purchased || 0) + pack.credits,
+    })
+    .eq("id", userId);
+  if (updateErr) throw new Error(updateErr.message);
 
   // Insert purchase record
-  const mockPaymentId = "mock_" + Date.now();
-  await supabaseAdmin.from("purchases").insert({
+  const { error: purchaseErr } = await supabaseAdmin.from("purchases").insert({
     user_id:           userId,
     pack_id:           packId,
     pack_name:         pack.name,
     price_usd:         pack.price_usd,
     credits_added:     pack.credits,
-    stripe_payment_id: mockPaymentId,
+    stripe_payment_id: "mock_" + Date.now(),
     created_at:        new Date().toISOString(),
   });
+  if (purchaseErr) throw new Error(purchaseErr.message);
 
-  // Admin notification
-  await supabaseAdmin.from("admin_notifications").insert({
+  // Admin notification (non-fatal)
+  const { error: notifErr } = await supabaseAdmin.from("admin_notifications").insert({
     type:       "purchase",
-    message:    `Mock purchase: ${pack.name} by ${userEmail} ($${pack.price_usd})`,
+    message:    `Mock purchase: ${pack.name} by ${email} ($${pack.price_usd})`,
     created_at: new Date().toISOString(),
-  }).catch(() => {});
+  });
+  if (notifErr) console.warn("[MOCK] Notification insert error:", notifErr.message);
 
-  // Admin action log
-  await supabaseAdmin.from("admin_actions").insert({
+  // Admin action log (non-fatal)
+  const { error: logErr } = await supabaseAdmin.from("admin_actions").insert({
     action:      "mock_purchase",
     target_user: userId,
     details:     JSON.stringify({ pack_id: packId, credits: pack.credits, price: pack.price_usd }),
     created_at:  new Date().toISOString(),
-  }).catch(() => {});
+  });
+  if (logErr) console.warn("[MOCK] Action log insert error:", logErr.message);
 
-  console.log(`[MOCK] Purchase: ${pack.name} → ${userEmail} (+${pack.credits} cr)`);
+  console.log(`[MOCK] Purchase: ${pack.name} → ${email} (+${pack.credits} cr)`);
   return { success: true, credits_added: pack.credits, new_balance: newBalance, pack_name: pack.name };
 }
 

@@ -2849,11 +2849,11 @@ async function openUserProfile(userId, emailHint) {
   openSlideOver("so-user-profile");
 
   try {
-    const [d, flagsRes] = await Promise.all([
+    const [d, flags] = await Promise.all([
       api(`/admin/api/users/${userId}`),
-      adminFetch("/api/feature-flags").then(r => r?.json()).catch(() => ({})),
+      fetch("/api/feature-flags").then(r => r.json()).catch(() => ({})),
     ]);
-    const mockEnabled = !!flagsRes?.mock_payments;
+    const mockEnabled = flags.mock_payments === true;
     const u = d.user;
     const sessions  = d.sessions  || [];
     const purchases = d.purchases || [];
@@ -2973,40 +2973,87 @@ async function openUserProfile(userId, emailHint) {
 async function openMockPurchaseModal(userId, email) {
   let packs = [];
   try {
-    const res = await adminFetch("/admin/api/credit-packs");
-    const data = await res?.json();
-    packs = (data?.packs || []).filter(p => p.is_active);
+    const data = await fetch("/api/credit-packs").then(r => r.json());
+    packs = (data?.packs || data || []).filter(p => p.is_active !== false);
   } catch (e) {
     toast("Failed to load packs: " + e.message, "error");
     return;
   }
+  if (!packs.length) { toast("No active packs found", "error"); return; }
 
-  showModal({
-    title: `🧪 Mock Purchase for ${email}`,
-    body: `
-      <div class="modal-field">
-        <label>Credit Pack</label>
-        <select class="modal-input" id="mock-pack-select">
-          ${packs.map(p => `<option value="${esc(p.id)}">${esc(p.name)} — ${fmtN(p.credits)} cr — $${p.price_usd}</option>`).join("")}
-        </select>
+  let selectedPackId = null;
+
+  const ov = document.createElement("div");
+  ov.className = "admin-modal-overlay";
+  ov.innerHTML = `
+    <div class="admin-modal-card" style="max-width:540px;width:100%;background:#1a1a2e;border:1px solid #7c3aed">
+      <div class="modal-header" style="color:#f59e0b;border-bottom:1px solid rgba(124,58,237,.3)">
+        🧪 Mock Purchase
+        <div style="font-size:11px;color:var(--muted);font-weight:400;margin-top:2px">${esc(email)}</div>
       </div>
-      <div style="padding:8px 12px;border-radius:6px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);font-size:11px;color:#f59e0b">
-        ⚠ Mock purchase — credits are added instantly, no real payment is charged.
+      <div class="modal-body" style="padding:16px;display:flex;flex-direction:column;gap:8px">
+        <div style="padding:8px 12px;border-radius:6px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);font-size:11px;color:#f59e0b;margin-bottom:4px">
+          ⚠ Test mode — credits added instantly, no real payment charged
+        </div>
+        <div id="mock-pack-list" style="display:flex;flex-direction:column;gap:6px">
+          ${packs.map(p => {
+            const totalSec = Math.round((p.credits || 0) / 2.18);
+            const m = Math.floor(totalSec / 60), s = totalSec % 60;
+            const timeStr = m > 0 ? `${m}m${s ? " " + s + "s" : ""}` : `${s}s`;
+            return `<div class="mock-pack-card" data-pack-id="${esc(p.id)}" style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:8px;background:#12122a;border:1px solid rgba(124,58,237,.2);cursor:pointer;transition:border-color .15s,background .15s" onclick="selectMockPack(this,'${esc(p.id)}')">
+              <div>
+                <div style="font-weight:600;font-size:13px">${esc(p.name)}</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px">${fmtN(p.credits)} cr &middot; ~${timeStr}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px">
+                <div style="font-size:14px;font-weight:700;color:#a78bfa">$${p.price_usd}</div>
+                <button class="btn btn-xs" style="background:rgba(124,58,237,.15);color:#a78bfa;border:1px solid rgba(124,58,237,.4);pointer-events:none">Select</button>
+              </div>
+            </div>`;
+          }).join("")}
+        </div>
       </div>
-    `,
-    confirmLabel: "Confirm Mock Purchase",
-    onConfirm: async () => {
-      const packId = document.getElementById("mock-pack-select")?.value;
-      if (!packId) { toast("Select a pack", "error"); return false; }
-      try {
-        const d = await apiPost("/admin/api/mock-purchase", { user_id: userId, pack_id: packId, user_email: email });
-        toast(`✅ Added ${d.credits_added} credits to ${email}`, "success");
-        openUserProfile(userId, email);
-      } catch (e) {
-        toast("Mock purchase failed: " + e.message, "error");
-        return false;
-      }
-    },
+      <div class="modal-footer" style="border-top:1px solid rgba(124,58,237,.2)">
+        <button class="modal-btn-cancel" id="mock-cancel-btn">Cancel</button>
+        <button id="mock-confirm-btn" style="background:#7c3aed;color:#fff;border:none;padding:8px 18px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;opacity:.5" disabled>
+          Confirm Mock Purchase
+        </button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(ov);
+  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+  ov.querySelector("#mock-cancel-btn").addEventListener("click", () => ov.remove());
+
+  window.selectMockPack = function(card, packId) {
+    selectedPackId = packId;
+    ov.querySelectorAll(".mock-pack-card").forEach(c => {
+      c.style.borderColor = "rgba(124,58,237,.2)";
+      c.style.background = "#12122a";
+    });
+    card.style.borderColor = "#7c3aed";
+    card.style.background = "rgba(124,58,237,.12)";
+    const confirmBtn = ov.querySelector("#mock-confirm-btn");
+    confirmBtn.disabled = false;
+    confirmBtn.style.opacity = "1";
+  };
+
+  ov.querySelector("#mock-confirm-btn").addEventListener("click", async () => {
+    if (!selectedPackId) return;
+    const confirmBtn = ov.querySelector("#mock-confirm-btn");
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Processing…";
+    try {
+      const d = await apiPost("/admin/api/mock-purchase", { user_id: userId, pack_id: selectedPackId, user_email: email });
+      toast(`✅ Added ${d.credits_added} credits to ${email}`, "success");
+      ov.remove();
+      openUserProfile(userId, email);
+    } catch (e) {
+      toast("Mock purchase failed: " + e.message, "error");
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "Confirm Mock Purchase";
+      confirmBtn.style.opacity = "1";
+    }
   });
 }
 
