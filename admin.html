@@ -1740,14 +1740,25 @@ function fmtDateTime(ts) {
 }
 
 // ── Flash a user's row cells after a data-modifying action ─────────
-function flashUserRow(userId, updates) {
+const FLASH_COLORS = {
+  gift:     "#14532d",
+  deduct:   "#7c2d12",
+  ban:      "#7f1d1d",
+  unban:    "#14532d",
+  purchase: "#1e3a5f",
+  session:  "#1e3a5f",
+  default:  "#14532d",
+};
+
+function flashUserRow(userId, updates, action = "default") {
   const row = document.querySelector(`tr[data-uid="${userId}"]`);
   if (!row) return;
 
-  const flash = (cell, color) => {
+  const color = FLASH_COLORS[action] || FLASH_COLORS.default;
+  const flash = (cell) => {
     if (!cell) return;
     cell.style.transition = "background 0.3s";
-    cell.style.background = color || "#14532d";
+    cell.style.background = color;
     setTimeout(() => { cell.style.background = ""; }, 1500);
   };
 
@@ -1766,14 +1777,13 @@ function flashUserRow(userId, updates) {
       statusCell.innerHTML = isBanned
         ? '<span class="badge badge-red">Banned</span>'
         : '<span class="badge badge-green">Active</span>';
-      flash(statusCell, isBanned ? "#7f1d1d" : "#14532d");
+      flash(statusCell);
     }
   }
 
   if (updates.credits === undefined && updates.status === undefined) {
-    // Neutral flash (e.g. session-end) — highlight last-seen cell in blue
     const lastSeenCell = row.querySelector('[data-col="last-seen"]');
-    flash(lastSeenCell, "#1e3a5f");
+    flash(lastSeenCell);
   }
 }
 
@@ -2165,7 +2175,7 @@ async function _doEndSession(userId, email, reason, adminNote) {
       toast(`Ended session for ${esc(email)}`);
 
       // Blue flash on user's last-seen cell in Users table
-      flashUserRow(userId, {});
+      flashUserRow(userId, {}, "session");
 
       // Immediately remove row — don't wait for SSE
       const row = document.getElementById("session-row-" + userId);
@@ -2415,7 +2425,7 @@ function doGift(uid, email) {
     try {
       const d = await apiPost("/admin/api/gift-credits", { userId:uid, amount, reason });
       toast(`&#127873; Gifted ${amount} credits to ${email}`);
-      flashUserRow(uid, { credits: d.new_balance });
+      flashUserRow(uid, { credits: d.new_balance }, "gift");
       const u = cache.users.find(u=>u.id===uid);
       if (u) u.credits_balance = d.new_balance ?? (u.credits_balance + amount);
       triggerAlert("gift", `Gifted ${amount}cr to ${email}`);
@@ -2427,7 +2437,7 @@ function doDeduct(uid, email) {
     try {
       const d = await apiPost("/admin/api/deduct-credits", { userId:uid, amount, reason });
       toast(`Deducted ${amount} credits from ${email}`);
-      flashUserRow(uid, { credits: d.new_balance });
+      flashUserRow(uid, { credits: d.new_balance }, "deduct");
       const u = cache.users.find(u=>u.id===uid);
       if (u) u.credits_balance = d.new_balance;
     } catch(e) { toast("Error: "+e.message,"error"); }
@@ -2438,7 +2448,7 @@ function doBan(uid, email) {
     try {
       await apiPost("/admin/api/ban-user", { userId:uid });
       toast(`Banned ${email}`, "warning");
-      flashUserRow(uid, { status: "Banned" });
+      flashUserRow(uid, { status: "Banned" }, "ban");
       const u = cache.users.find(u=>u.id===uid);
       if (u) u.is_banned = true;
       triggerAlert("ban", `Banned user: ${email}`);
@@ -2450,7 +2460,7 @@ function doUnban(uid, email) {
     try {
       await apiPost("/admin/api/unban-user", { userId:uid });
       toast(`Unbanned ${email}`, "success");
-      flashUserRow(uid, { status: "Active" });
+      flashUserRow(uid, { status: "Active" }, "unban");
       const u = cache.users.find(u=>u.id===uid);
       if (u) u.is_banned = false;
     } catch(e) { toast("Error: "+e.message,"error"); }
@@ -2963,13 +2973,13 @@ async function openUserProfile(userId, emailHint) {
       <!-- Quick actions -->
       <div class="up-section-title">Quick Actions</div>
       <div class="up-actions">
-        <button class="btn btn-green btn-sm" onclick="Modal.giftCredits('${esc(u.email)}','${esc(u.id)}', (amt,rsn)=>apiPost('/admin/api/gift-credits',{userId:'${esc(u.id)}',amount:amt,reason:rsn}).then(d=>{toast('Gifted '+amt+' credits');flashUserRow('${esc(u.id)}',{credits:d.new_balance});openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
+        <button class="btn btn-green btn-sm" onclick="Modal.giftCredits('${esc(u.email)}','${esc(u.id)}', (amt,rsn)=>apiPost('/admin/api/gift-credits',{userId:'${esc(u.id)}',amount:amt,reason:rsn}).then(d=>{toast('Gifted '+amt+' credits');flashUserRow('${esc(u.id)}',{credits:d.new_balance},'gift');openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
           &#127873; Gift Credits
         </button>
-        <button class="btn btn-amber btn-sm" onclick="Modal.deductCredits('${esc(u.email)}','${esc(u.id)}', (amt,rsn)=>apiPost('/admin/api/deduct-credits',{userId:'${esc(u.id)}',amount:amt,reason:rsn}).then(d=>{toast('Deducted '+amt+' credits');flashUserRow('${esc(u.id)}',{credits:d.new_balance});openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
+        <button class="btn btn-amber btn-sm" onclick="Modal.deductCredits('${esc(u.email)}','${esc(u.id)}', (amt,rsn)=>apiPost('/admin/api/deduct-credits',{userId:'${esc(u.id)}',amount:amt,reason:rsn}).then(d=>{toast('Deducted '+amt+' credits');flashUserRow('${esc(u.id)}',{credits:d.new_balance},'deduct');openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
           &#10134; Deduct
         </button>
-        <button class="btn btn-red btn-sm" onclick="Modal.banUser('${esc(u.email)}','${esc(u.id)}',${u.is_banned},()=>apiPost('${u.is_banned ? '/admin/api/unban-user' : '/admin/api/ban-user'}',{userId:'${esc(u.id)}'}).then(()=>{toast('${u.is_banned ? 'Unbanned' : 'Banned'}');flashUserRow('${esc(u.id)}',{status:'${u.is_banned ? 'Active' : 'Banned'}'});openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
+        <button class="btn btn-red btn-sm" onclick="Modal.banUser('${esc(u.email)}','${esc(u.id)}',${u.is_banned},()=>apiPost('${u.is_banned ? '/admin/api/unban-user' : '/admin/api/ban-user'}',{userId:'${esc(u.id)}'}).then(()=>{toast('${u.is_banned ? 'Unbanned' : 'Banned'}');flashUserRow('${esc(u.id)}',{status:'${u.is_banned ? 'Active' : 'Banned'}'},'${u.is_banned ? 'unban' : 'ban'}');openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
           ${u.is_banned ? "&#9989; Unban" : "&#128683; Ban"}
         </button>
         <button class="btn btn-ghost btn-sm" onclick="window.open('mailto:${esc(u.email)}')">
@@ -3104,7 +3114,7 @@ async function openMockPurchaseModal(userId, email) {
 
       // Flash users table row and update slide-over balance instantly
       if (typeof d.new_balance === "number") {
-        flashUserRow(userId, { credits: d.new_balance });
+        flashUserRow(userId, { credits: d.new_balance }, "purchase");
         const balanceVal = document.querySelector("#so-user-profile .up-stat-val");
         if (balanceVal) balanceVal.textContent = `${fmtN(d.new_balance)} cr`;
       }
