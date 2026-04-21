@@ -2618,9 +2618,14 @@ function testLowBalanceAlert() {
 // SLIDE-OVER
 // ══════════════════════════════════════════════════════════════════
 function openSlideOver(id) {
-  document.querySelectorAll(".slide-over").forEach(s => s.classList.remove("open"));
+  document.querySelectorAll(".slide-over").forEach(s => {
+    s.classList.remove("open");
+    s.style.right = "";  // clear inline right so CSS class takes over for hidden state
+  });
   document.getElementById("so-backdrop").classList.add("open");
-  document.getElementById(id).classList.add("open");
+  const el = document.getElementById(id);
+  el.classList.add("open");
+  el.style.right = "0";  // override any inline right (e.g. wider panels set right:-480px)
 }
 function closeSlideOver() {
   document.querySelectorAll(".slide-over").forEach(s => s.classList.remove("open"));
