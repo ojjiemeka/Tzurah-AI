@@ -966,7 +966,7 @@ app.post("/admin/api/ban-user", adminAuth, async (req, res) => {
     });
     if (error) return res.status(500).json({ error: error.message });
     console.log(`[Tzurah] Admin banned user ${userId}`);
-    res.json({ ok: true });
+    res.json({ ok: true, status: "banned" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -983,7 +983,7 @@ app.post("/admin/api/unban-user", adminAuth, async (req, res) => {
       ban_duration: "none",
     });
     if (error) return res.status(500).json({ error: error.message });
-    res.json({ ok: true });
+    res.json({ ok: true, status: "active" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

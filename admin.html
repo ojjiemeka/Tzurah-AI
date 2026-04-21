@@ -1739,6 +1739,44 @@ function fmtDateTime(ts) {
   return new Date(ts).toLocaleString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
 }
 
+// ── Flash a user's row cells after a data-modifying action ─────────
+function flashUserRow(userId, updates) {
+  const row = document.querySelector(`tr[data-uid="${userId}"]`);
+  if (!row) return;
+
+  const flash = (cell, color) => {
+    if (!cell) return;
+    cell.style.transition = "background 0.3s";
+    cell.style.background = color || "#14532d";
+    setTimeout(() => { cell.style.background = ""; }, 1500);
+  };
+
+  if (updates.credits !== undefined) {
+    const creditsCell = row.querySelector('[data-col="credits"]');
+    const timeCell    = row.querySelector('[data-col="time-left"]');
+    if (creditsCell) { creditsCell.innerHTML = `<strong>${fmtN(updates.credits)}</strong>`; flash(creditsCell); }
+    if (timeCell)    { timeCell.textContent = `≈${Math.round(updates.credits / 130.8)}m`;  flash(timeCell); }
+  }
+
+  if (updates.status !== undefined) {
+    const statusCell = row.querySelector('[data-col="status"]');
+    const isBanned   = updates.status === "Banned";
+    row.dataset.banned = isBanned ? "true" : "false";
+    if (statusCell) {
+      statusCell.innerHTML = isBanned
+        ? '<span class="badge badge-red">Banned</span>'
+        : '<span class="badge badge-green">Active</span>';
+      flash(statusCell, isBanned ? "#7f1d1d" : "#14532d");
+    }
+  }
+
+  if (updates.credits === undefined && updates.status === undefined) {
+    // Neutral flash (e.g. session-end) — highlight last-seen cell in blue
+    const lastSeenCell = row.querySelector('[data-col="last-seen"]');
+    flash(lastSeenCell, "#1e3a5f");
+  }
+}
+
 // ── API helpers ───────────────────────────────────────────────────
 async function api(path) {
   const r = await fetch(path, { credentials: "include" });
@@ -2126,6 +2164,9 @@ async function _doEndSession(userId, email, reason, adminNote) {
       await apiPost("/admin/api/end-session", { userId, reason, admin_note: adminNote });
       toast(`Ended session for ${esc(email)}`);
 
+      // Blue flash on user's last-seen cell in Users table
+      flashUserRow(userId, {});
+
       // Immediately remove row — don't wait for SSE
       const row = document.getElementById("session-row-" + userId);
       if (row) row.remove();
@@ -2290,12 +2331,12 @@ function renderUsersPage() {
       <td data-label=""><input type="checkbox" class="row-check" data-id="${esc(u.id)}" onchange="toggleRowSelect(this)"></td>
       <td data-label="Email" class="td-email" title="${esc(u.email)}" style="cursor:pointer;color:var(--accent)" onclick="openUserProfile('${esc(u.id)}','${esc(u.email)}')">${esc(u.email)}</td>
       <td data-label="Name">${esc(u.name||"—")}</td>
-      <td data-label="Credits"><strong>${fmtN(u.credits_balance)}</strong></td>
-      <td data-label="Time Left" style="color:var(--muted)">&approx;${minsLeft}m</td>
-      <td data-label="Spent">${fmt$(u.credits_purchased * 100 / 216)}</td>
+      <td data-label="Credits" data-col="credits"><strong>${fmtN(u.credits_balance)}</strong></td>
+      <td data-label="Time Left" data-col="time-left" style="color:var(--muted)">&approx;${minsLeft}m</td>
+      <td data-label="Spent" data-col="spent">${fmt$(u.credits_purchased * 100 / 216)}</td>
       <td data-label="Joined">${fmtDate(u.created_at)}</td>
-      <td data-label="Last Seen">${relTime(u.last_seen_at)}</td>
-      <td data-label="Status">${u.is_banned
+      <td data-label="Last Seen" data-col="last-seen">${relTime(u.last_seen_at)}</td>
+      <td data-label="Status" data-col="status">${u.is_banned
         ? '<span class="badge badge-red">Banned</span>'
         : '<span class="badge badge-green">Active</span>'}</td>
       <td data-label="⋯"><button class="btn btn-ghost btn-xs" data-action="user-menu">&#8943;</button></td>
@@ -2372,11 +2413,11 @@ function closeMenu() { document.querySelectorAll(".action-dropdown").forEach(d=>
 function doGift(uid, email) {
   Modal.giftCredits(email, uid, async (amount, reason) => {
     try {
-      await apiPost("/admin/api/gift-credits", { userId:uid, amount, reason });
+      const d = await apiPost("/admin/api/gift-credits", { userId:uid, amount, reason });
       toast(`&#127873; Gifted ${amount} credits to ${email}`);
-      // Update row inline
+      flashUserRow(uid, { credits: d.new_balance });
       const u = cache.users.find(u=>u.id===uid);
-      if (u) { u.credits_balance += amount; renderUsersPage(); }
+      if (u) u.credits_balance = d.new_balance ?? (u.credits_balance + amount);
       triggerAlert("gift", `Gifted ${amount}cr to ${email}`);
     } catch(e) { toast("Error: "+e.message,"error"); }
   });
@@ -2386,8 +2427,9 @@ function doDeduct(uid, email) {
     try {
       const d = await apiPost("/admin/api/deduct-credits", { userId:uid, amount, reason });
       toast(`Deducted ${amount} credits from ${email}`);
+      flashUserRow(uid, { credits: d.new_balance });
       const u = cache.users.find(u=>u.id===uid);
-      if (u) { u.credits_balance = d.new_balance; renderUsersPage(); }
+      if (u) u.credits_balance = d.new_balance;
     } catch(e) { toast("Error: "+e.message,"error"); }
   });
 }
@@ -2396,8 +2438,9 @@ function doBan(uid, email) {
     try {
       await apiPost("/admin/api/ban-user", { userId:uid });
       toast(`Banned ${email}`, "warning");
+      flashUserRow(uid, { status: "Banned" });
       const u = cache.users.find(u=>u.id===uid);
-      if (u) { u.is_banned = true; renderUsersPage(); }
+      if (u) u.is_banned = true;
       triggerAlert("ban", `Banned user: ${email}`);
     } catch(e) { toast("Error: "+e.message,"error"); }
   });
@@ -2407,8 +2450,9 @@ function doUnban(uid, email) {
     try {
       await apiPost("/admin/api/unban-user", { userId:uid });
       toast(`Unbanned ${email}`, "success");
+      flashUserRow(uid, { status: "Active" });
       const u = cache.users.find(u=>u.id===uid);
-      if (u) { u.is_banned = false; renderUsersPage(); }
+      if (u) u.is_banned = false;
     } catch(e) { toast("Error: "+e.message,"error"); }
   });
 }
@@ -2919,13 +2963,13 @@ async function openUserProfile(userId, emailHint) {
       <!-- Quick actions -->
       <div class="up-section-title">Quick Actions</div>
       <div class="up-actions">
-        <button class="btn btn-green btn-sm" onclick="Modal.giftCredits('${esc(u.email)}','${esc(u.id)}', (amt,rsn)=>apiPost('/admin/api/gift-credits',{userId:'${esc(u.id)}',amount:amt,reason:rsn}).then(()=>{toast('Gifted '+amt+' credits');openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
+        <button class="btn btn-green btn-sm" onclick="Modal.giftCredits('${esc(u.email)}','${esc(u.id)}', (amt,rsn)=>apiPost('/admin/api/gift-credits',{userId:'${esc(u.id)}',amount:amt,reason:rsn}).then(d=>{toast('Gifted '+amt+' credits');flashUserRow('${esc(u.id)}',{credits:d.new_balance});openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
           &#127873; Gift Credits
         </button>
-        <button class="btn btn-amber btn-sm" onclick="Modal.deductCredits('${esc(u.email)}','${esc(u.id)}', (amt,rsn)=>apiPost('/admin/api/deduct-credits',{userId:'${esc(u.id)}',amount:amt,reason:rsn}).then(()=>{toast('Deducted '+amt+' credits');openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
+        <button class="btn btn-amber btn-sm" onclick="Modal.deductCredits('${esc(u.email)}','${esc(u.id)}', (amt,rsn)=>apiPost('/admin/api/deduct-credits',{userId:'${esc(u.id)}',amount:amt,reason:rsn}).then(d=>{toast('Deducted '+amt+' credits');flashUserRow('${esc(u.id)}',{credits:d.new_balance});openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
           &#10134; Deduct
         </button>
-        <button class="btn btn-red btn-sm" onclick="Modal.banUser('${esc(u.email)}','${esc(u.id)}',${u.is_banned},()=>apiPost('${u.is_banned ? '/admin/api/unban-user' : '/admin/api/ban-user'}',{userId:'${esc(u.id)}'}).then(()=>{toast('${u.is_banned ? 'Unbanned' : 'Banned'}');openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
+        <button class="btn btn-red btn-sm" onclick="Modal.banUser('${esc(u.email)}','${esc(u.id)}',${u.is_banned},()=>apiPost('${u.is_banned ? '/admin/api/unban-user' : '/admin/api/ban-user'}',{userId:'${esc(u.id)}'}).then(()=>{toast('${u.is_banned ? 'Unbanned' : 'Banned'}');flashUserRow('${esc(u.id)}',{status:'${u.is_banned ? 'Active' : 'Banned'}'});openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
           ${u.is_banned ? "&#9989; Unban" : "&#128683; Ban"}
         </button>
         <button class="btn btn-ghost btn-sm" onclick="window.open('mailto:${esc(u.email)}')">
@@ -3058,27 +3102,9 @@ async function openMockPurchaseModal(userId, email) {
       toast(`✅ Added ${d.credits_added} credits to ${email}`, "success");
       ov.remove();
 
-      // Instantly update the users table row (no full reload)
+      // Flash users table row and update slide-over balance instantly
       if (typeof d.new_balance === "number") {
-        const tableRow = document.querySelector(`tr[data-uid="${userId}"]`);
-        if (tableRow) {
-          const credCell = tableRow.querySelector('[data-label="Credits"]');
-          const timeCell = tableRow.querySelector('[data-label="Time Left"]');
-          if (credCell) {
-            credCell.innerHTML = `<strong>${fmtN(d.new_balance)}</strong>`;
-            credCell.style.transition = "background 0.3s";
-            credCell.style.background = "#14532d";
-            setTimeout(() => { credCell.style.background = ""; }, 1500);
-          }
-          if (timeCell) {
-            timeCell.textContent = `≈${Math.round(d.new_balance / 130.8)}m`;
-            timeCell.style.transition = "background 0.3s";
-            timeCell.style.background = "#14532d";
-            setTimeout(() => { timeCell.style.background = ""; }, 1500);
-          }
-        }
-
-        // Instantly update the balance in the open slide-over (first stat card)
+        flashUserRow(userId, { credits: d.new_balance });
         const balanceVal = document.querySelector("#so-user-profile .up-stat-val");
         if (balanceVal) balanceVal.textContent = `${fmtN(d.new_balance)} cr`;
       }
