@@ -1725,24 +1725,37 @@ async function doMockPurchase(userId, packId, email) {
   const newBalance     = currentCredits + pack.credits;
   const resolvedEmail  = email || profile.email || userId;
 
-  // Update credits using whichever PK column was found
+  // Update credits using whichever PK column was found (FATAL — must succeed)
   const { error: updateErr } = await supabaseAdmin
     .from("profiles")
     .update({ credits: newBalance })
     .eq(profilePKCol, profilePK);
   if (updateErr) throw new Error("Credits update failed: " + updateErr.message);
 
-  // Insert purchase record
-  const { error: purchaseErr } = await supabaseAdmin.from("purchases").insert({
-    user_id:           userId,
-    pack_id:           packId,
-    pack_name:         pack.name,
-    price_usd:         pack.price_usd,
+  // Diagnose purchases table schema, then insert (NON-FATAL)
+  const { data: samplePurchase } = await supabaseAdmin
+    .from("purchases").select("*").limit(1).maybeSingle();
+  console.log("[MOCK] Sample purchases row columns:",
+    samplePurchase ? Object.keys(samplePurchase).join(", ") : "no rows yet");
+
+  const hasPurchaseCols = samplePurchase ? Object.keys(samplePurchase) : [];
+  const purchaseRow = {
+    user_id:           profile.id || userId,
     credits_added:     pack.credits,
     stripe_payment_id: "mock_" + Date.now(),
     created_at:        new Date().toISOString(),
-  });
-  if (purchaseErr) throw new Error(purchaseErr.message);
+  };
+  if (!samplePurchase || hasPurchaseCols.includes("pack_id"))   purchaseRow.pack_id   = packId;
+  if (!samplePurchase || hasPurchaseCols.includes("pack_name")) purchaseRow.pack_name = pack.name;
+  if (!samplePurchase || hasPurchaseCols.includes("price_usd")) purchaseRow.price_usd = pack.price_usd;
+  if (!samplePurchase || hasPurchaseCols.includes("amount_paid")) purchaseRow.amount_paid = pack.price_usd;
+
+  const { error: purchaseErr } = await supabaseAdmin.from("purchases").insert(purchaseRow);
+  if (purchaseErr) {
+    console.warn("[MOCK] Purchase insert failed (non-fatal):", purchaseErr.message);
+  } else {
+    console.log("[MOCK] Purchase record created");
+  }
 
   // Admin notification (non-fatal)
   const { error: notifErr } = await supabaseAdmin.from("admin_notifications").insert({
