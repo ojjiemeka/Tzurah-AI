@@ -831,6 +831,91 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   margin-bottom:16px;
 }
 .tests-header h2 { font-size:1.1rem; font-weight:800; }
+
+/* ── Slide-over transition ─────────────────────────────────────── */
+.slide-over { transition: right 0.3s ease; }
+
+/* ── Mobile responsive ────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Header */
+  header {
+    padding: 0 12px; gap: 8px; height: auto;
+    min-height: 48px; flex-wrap: wrap; padding-top: 6px; padding-bottom: 6px;
+  }
+  .logo { font-size: 14px; }
+  .hdr-actions { gap: 4px; flex-wrap: wrap; }
+  .refresh-countdown { display: none; }
+
+  /* Tab bar: horizontally scrollable */
+  .tab-bar {
+    padding: 0 8px; overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; gap: 0;
+  }
+  .tab-bar::-webkit-scrollbar { display: none; }
+  .tab-btn { padding: 10px 10px; font-size: 12px; }
+
+  /* Main padding */
+  main { padding: 10px; }
+
+  /* Stats grid: 2 cols */
+  .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }
+  .stat-card .sval { font-size: 20px; }
+
+  /* Two-col → single col */
+  .two-col { grid-template-columns: 1fr; gap: 12px; }
+
+  /* Rev cards: 2 cols */
+  .rev-cards { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+
+  /* Filter row */
+  .filter-row input { min-width: 0; }
+
+  /* Pager */
+  .pager { flex-direction: column; align-items: flex-start; gap: 6px; }
+
+  /* Slide-over: full width */
+  .slide-over { width: 100% !important; }
+
+  /* Modals: full width with margin */
+  .admin-modal-card {
+    min-width: unset !important;
+    width: calc(100vw - 32px) !important;
+    max-width: calc(100vw - 32px) !important;
+  }
+  .admin-modal-overlay { align-items: flex-end; padding-bottom: 16px; }
+
+  /* Table → card layout on mobile */
+  table.mobile-cards thead { display: none; }
+  table.mobile-cards tbody tr {
+    display: block;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    padding: 10px 12px;
+    background: var(--surface);
+  }
+  table.mobile-cards tbody td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(42,42,74,0.4);
+    font-size: 12px;
+  }
+  table.mobile-cards tbody td:last-child { border-bottom: none; padding-bottom: 0; }
+  table.mobile-cards tbody td:first-child { padding-top: 0; }
+  table.mobile-cards tbody td::before {
+    content: attr(data-label);
+    font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    color: var(--muted); flex-shrink: 0; margin-right: 8px;
+  }
+  table.mobile-cards tbody td[data-label=""] { display: none; }
+  table.mobile-cards tbody td[data-label="⋯"] { justify-content: flex-end; }
+  table.mobile-cards tbody td[data-label="⋯"]::before { display: none; }
+  .table-wrap { border-radius: 0; border-left: none; border-right: none; }
+}
 </style>
 </head>
 <body>
@@ -1052,7 +1137,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
     <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="clearSelection()">&#215; Clear</button>
   </div>
   <div class="table-wrap">
-    <table>
+    <table class="mobile-cards">
       <thead><tr>
         <th><input type="checkbox" id="select-all" onclick="toggleSelectAll(this)"></th>
         <th>Email</th><th>Name</th><th>Credits</th><th>Time Left</th>
@@ -1119,7 +1204,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
     <button class="btn btn-ghost" onclick="exportPurchasesCSV()">&#128196; Export CSV</button>
   </div>
   <div class="table-wrap">
-    <table>
+    <table class="mobile-cards">
       <thead><tr><th>Date</th><th>Email</th><th>Pack</th><th>Amount</th><th>Payment ID</th><th>Type</th></tr></thead>
       <tbody id="purch-tbody"><tr><td colspan="6" class="loading-cell"><div class="spinner"></div></td></tr></tbody>
     </table>
@@ -1506,7 +1591,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
     <button class="btn btn-accent" onclick="showBlockIPModal()">+ Block IP</button>
   </div>
   <div class="table-wrap">
-    <table>
+    <table class="mobile-cards">
       <thead><tr><th>IP Address</th><th>Reason</th><th>Blocked</th><th>Actions</th></tr></thead>
       <tbody id="ipblocks-tbody"><tr><td colspan="4" class="loading-cell"><div class="spinner"></div></td></tr></tbody>
     </table>
@@ -1520,7 +1605,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
     <button class="btn btn-accent" onclick="showCreateSubAdminModal()">+ Create Sub-Admin</button>
   </div>
   <div class="table-wrap">
-    <table>
+    <table class="mobile-cards">
       <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Last Login</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody id="subadmins-tbody"><tr><td colspan="6" class="loading-cell"><div class="spinner"></div></td></tr></tbody>
     </table>
@@ -2162,18 +2247,18 @@ function renderUsersPage() {
   document.getElementById("users-tbody").innerHTML = slice.map(u => {
     const minsLeft = creditsToMinutes(u.credits_balance);
     return `<tr data-uid="${esc(u.id)}" data-email="${esc(u.email)}" data-banned="${u.is_banned}">
-      <td><input type="checkbox" class="row-check" data-id="${esc(u.id)}" onchange="toggleRowSelect(this)"></td>
-      <td class="td-email" title="${esc(u.email)}" style="cursor:pointer;color:var(--accent)" onclick="openUserProfile('${esc(u.id)}','${esc(u.email)}')">${esc(u.email)}</td>
-      <td>${esc(u.name||"—")}</td>
-      <td><strong>${fmtN(u.credits_balance)}</strong></td>
-      <td style="color:var(--muted)">&approx;${minsLeft}m</td>
-      <td>${fmt$(u.credits_purchased * 100 / 216)}</td>
-      <td>${fmtDate(u.created_at)}</td>
-      <td>${relTime(u.last_seen_at)}</td>
-      <td>${u.is_banned
+      <td data-label=""><input type="checkbox" class="row-check" data-id="${esc(u.id)}" onchange="toggleRowSelect(this)"></td>
+      <td data-label="Email" class="td-email" title="${esc(u.email)}" style="cursor:pointer;color:var(--accent)" onclick="openUserProfile('${esc(u.id)}','${esc(u.email)}')">${esc(u.email)}</td>
+      <td data-label="Name">${esc(u.name||"—")}</td>
+      <td data-label="Credits"><strong>${fmtN(u.credits_balance)}</strong></td>
+      <td data-label="Time Left" style="color:var(--muted)">&approx;${minsLeft}m</td>
+      <td data-label="Spent">${fmt$(u.credits_purchased * 100 / 216)}</td>
+      <td data-label="Joined">${fmtDate(u.created_at)}</td>
+      <td data-label="Last Seen">${relTime(u.last_seen_at)}</td>
+      <td data-label="Status">${u.is_banned
         ? '<span class="badge badge-red">Banned</span>'
         : '<span class="badge badge-green">Active</span>'}</td>
-      <td><button class="btn btn-ghost btn-xs" onclick="openMenu(event)">&#8943;</button></td>
+      <td data-label="⋯"><button class="btn btn-ghost btn-xs" onclick="openMenu(event)">&#8943;</button></td>
     </tr>`;
   }).join("");
 }
@@ -2529,12 +2614,12 @@ function renderPurchPage() {
   document.getElementById("purch-tbody").innerHTML = slice.map(p => {
     const isGift = (p.stripe_session_id||"").startsWith("gift_") || (p.amount_usd||0)===0;
     return `<tr>
-      <td>${fmtDateTime(p.created_at)}</td>
-      <td class="td-email">${esc(p.user_email||"—")}</td>
-      <td><span class="badge badge-accent">${esc(p.pack_name||"—")}</span></td>
-      <td>${fmt$(p.amount_usd)}</td>
-      <td class="td-mono">${esc((p.stripe_session_id||"—").slice(0,26))}${(p.stripe_session_id||"").length>26?"…":""}</td>
-      <td><span class="badge ${isGift?"badge-amber":"badge-green"}">${isGift?"Gifted":"Paid"}</span></td>
+      <td data-label="Date">${fmtDateTime(p.created_at)}</td>
+      <td data-label="Email" class="td-email">${esc(p.user_email||"—")}</td>
+      <td data-label="Pack"><span class="badge badge-accent">${esc(p.pack_name||"—")}</span></td>
+      <td data-label="Amount">${fmt$(p.amount_usd)}</td>
+      <td data-label="Payment ID" class="td-mono">${esc((p.stripe_session_id||"—").slice(0,26))}${(p.stripe_session_id||"").length>26?"…":""}</td>
+      <td data-label="Type"><span class="badge ${isGift?"badge-amber":"badge-green"}">${isGift?"Gifted":"Paid"}</span></td>
     </tr>`;
   }).join("");
 }
@@ -2617,20 +2702,30 @@ function testLowBalanceAlert() {
 // ══════════════════════════════════════════════════════════════════
 // SLIDE-OVER
 // ══════════════════════════════════════════════════════════════════
+const _soHideTimers = {};
 function openSlideOver(id) {
   document.querySelectorAll(".slide-over").forEach(s => {
+    if (_soHideTimers[s.id]) { clearTimeout(_soHideTimers[s.id]); _soHideTimers[s.id] = null; }
     s.classList.remove("open");
-    s.style.right = "";  // clear inline right so CSS class takes over for hidden state
+    s.style.right = "-600px";
+    s.style.display = "none";
   });
   document.getElementById("so-backdrop").classList.add("open");
   const el = document.getElementById(id);
+  el.style.display = "";
+  void el.offsetWidth; // force reflow so transition plays from off-screen
   el.classList.add("open");
-  el.style.right = "0";  // override any inline right (e.g. wider panels set right:-480px)
+  el.style.right = "0";
 }
 function closeSlideOver() {
   document.querySelectorAll(".slide-over").forEach(s => {
     s.classList.remove("open");
-    s.style.right = "";  // clear JS-set inline right so CSS hidden position takes over
+    s.style.right = "-600px";
+    _soHideTimers[s.id] = setTimeout(() => {
+      s.style.display = "none";
+      s.style.right = "";
+      _soHideTimers[s.id] = null;
+    }, 310);
   });
   document.getElementById("so-backdrop").classList.remove("open");
 }
@@ -4155,12 +4250,12 @@ function renderSubAdmins(admins) {
   if (!admins?.length) { tbody.innerHTML = `<tr><td colspan="6" class="td-empty">No sub-admins yet</td></tr>`; return; }
   tbody.innerHTML = admins.map(a => `
     <tr>
-      <td>${esc(a.name || '—')}</td>
-      <td>${esc(a.email)}</td>
-      <td><span class="badge ${a.role === 'admin' ? 'badge-accent' : a.role === 'support' ? 'badge-warning' : 'badge-muted'}">${a.role}</span></td>
-      <td style="color:var(--muted);font-size:0.78rem">${a.last_login ? timeAgo(new Date(a.last_login)) : 'Never'}</td>
-      <td><span class="status-dot ${a.is_active ? 'dot-green':'dot-red'}"></span> ${a.is_active ? 'Active' : 'Suspended'}</td>
-      <td><button class="btn btn-xs btn-ghost" onclick="toggleSubAdmin('${a.id}', ${!a.is_active})">${a.is_active ? 'Suspend' : 'Restore'}</button></td>
+      <td data-label="Name">${esc(a.name || '—')}</td>
+      <td data-label="Email">${esc(a.email)}</td>
+      <td data-label="Role"><span class="badge ${a.role === 'admin' ? 'badge-accent' : a.role === 'support' ? 'badge-warning' : 'badge-muted'}">${a.role}</span></td>
+      <td data-label="Last Login" style="color:var(--muted);font-size:0.78rem">${a.last_login ? timeAgo(new Date(a.last_login)) : 'Never'}</td>
+      <td data-label="Status"><span class="status-dot ${a.is_active ? 'dot-green':'dot-red'}"></span> ${a.is_active ? 'Active' : 'Suspended'}</td>
+      <td data-label="⋯"><button class="btn btn-xs btn-ghost" onclick="toggleSubAdmin('${a.id}', ${!a.is_active})">${a.is_active ? 'Suspend' : 'Restore'}</button></td>
     </tr>
   `).join('');
 }
@@ -4222,10 +4317,10 @@ async function loadIPBlocks() {
   if (!blocks?.length) { tbody.innerHTML = `<tr><td colspan="4" class="td-empty">No IP blocks — system open to all IPs</td></tr>`; return; }
   tbody.innerHTML = blocks.map(b => `
     <tr>
-      <td style="font-family:monospace">${esc(b.ip_address)}</td>
-      <td style="color:var(--muted)">${esc(b.reason || '—')}</td>
-      <td style="color:var(--muted);font-size:0.78rem">${timeAgo(new Date(b.created_at))}${b.expires_at ? `<br><small>Expires: ${new Date(b.expires_at).toLocaleDateString()}</small>` : ''}</td>
-      <td><button class="btn btn-xs btn-ghost" style="color:#ef4444" onclick="removeIPBlock('${esc(b.ip_address)}')">Remove</button></td>
+      <td data-label="IP" style="font-family:monospace">${esc(b.ip_address)}</td>
+      <td data-label="Reason" style="color:var(--muted)">${esc(b.reason || '—')}</td>
+      <td data-label="Blocked" style="color:var(--muted);font-size:0.78rem">${timeAgo(new Date(b.created_at))}${b.expires_at ? `<br><small>Expires: ${new Date(b.expires_at).toLocaleDateString()}</small>` : ''}</td>
+      <td data-label="⋯"><button class="btn btn-xs btn-ghost" style="color:#ef4444" onclick="removeIPBlock('${esc(b.ip_address)}')">Remove</button></td>
     </tr>
   `).join('');
 }
