@@ -1533,10 +1533,23 @@ async function doMockPurchase(userId, userEmail, packId) {
     .from("credit_packs").select("id, name, price_usd, credits").eq("id", packId).single();
   if (packErr || !pack) throw new Error("Pack not found");
 
-  // Fetch profile
-  const { data: profile, error: profileErr } = await supabaseAdmin
-    .from("profiles").select("credits, total_credits_purchased, email").eq("id", userId).single();
-  if (profileErr || !profile) throw new Error("User profile not found");
+  // Fetch profile with debug logging
+  console.log("[MOCK] Looking up user_id:", userId);
+  let { data: profile, error: profileErr } = await supabaseAdmin
+    .from("profiles").select("id, credits, total_credits_purchased, email").eq("id", userId).single();
+  console.log("[MOCK] Profile lookup result:", { profile, profileErr: profileErr?.message });
+
+  // Fallback: if no profile found by id and user_id looks like an email, try by email
+  if ((profileErr?.code === "PGRST116" || !profile) && userId.includes("@")) {
+    console.log("[MOCK] Trying email fallback lookup for:", userId);
+    const { data: byEmail, error: emailErr } = await supabaseAdmin
+      .from("profiles").select("id, credits, total_credits_purchased, email").eq("email", userId).single();
+    console.log("[MOCK] Email fallback result:", { byEmail, emailErr: emailErr?.message });
+    if (byEmail) { profile = byEmail; profileErr = null; }
+  }
+
+  if (profileErr || !profile) throw new Error(`User profile not found (id: ${userId})`);
+
 
   const email = userEmail || profile.email;
   const newBalance = (profile.credits || 0) + pack.credits;
@@ -1598,6 +1611,7 @@ app.post("/mock/purchase", requireAuth, async (req, res) => {
 
 // POST /admin/api/mock-purchase — authenticated via admin session (used by admin panel)
 app.post("/admin/api/mock-purchase", adminAuth, async (req, res) => {
+  console.log("[MOCK] Admin mock-purchase request body:", req.body);
   const { user_id, pack_id, user_email } = req.body || {};
   if (!user_id || !pack_id) return res.status(400).json({ error: "user_id and pack_id required" });
   try {

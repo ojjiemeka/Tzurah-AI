@@ -2971,6 +2971,7 @@ async function openUserProfile(userId, emailHint) {
 // MOCK PURCHASE MODAL
 // ══════════════════════════════════════════════════════════════════
 async function openMockPurchaseModal(userId, email) {
+  console.log("[MOCK] openMockPurchaseModal called — uid:", userId, "email:", email);
   let packs = [];
   try {
     const data = await fetch("/api/credit-packs").then(r => r.json());
