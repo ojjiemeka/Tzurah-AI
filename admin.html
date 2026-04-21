@@ -2628,7 +2628,10 @@ function openSlideOver(id) {
   el.style.right = "0";  // override any inline right (e.g. wider panels set right:-480px)
 }
 function closeSlideOver() {
-  document.querySelectorAll(".slide-over").forEach(s => s.classList.remove("open"));
+  document.querySelectorAll(".slide-over").forEach(s => {
+    s.classList.remove("open");
+    s.style.right = "";  // clear JS-set inline right so CSS hidden position takes over
+  });
   document.getElementById("so-backdrop").classList.remove("open");
 }
 
@@ -2782,15 +2785,15 @@ async function openUserProfile(userId, emailHint) {
       <div class="up-section-title">Purchase History (last ${purchases.length})</div>
       ${purchases.length ? `
       <table class="up-hist-table">
-        <thead><tr><th>Date</th><th>Pack</th><th>Amount</th><th>Type</th></tr></thead>
+        <thead><tr><th>Date</th><th>Pack</th><th>Credits</th><th>Paid</th></tr></thead>
         <tbody>
           ${purchases.map(p => {
             const isGift = (p.stripe_payment_id||"").startsWith("gift_") || (p.price_usd||0)===0;
             return `<tr>
               <td>${relTime(p.created_at)}</td>
-              <td>${esc(p.pack_name||"—")}</td>
-              <td>${fmt$(p.price_usd||0)}</td>
-              <td><span class="badge ${isGift?"badge-amber":"badge-green"}" style="font-size:9px">${isGift?"Gift":"Paid"}</span></td>
+              <td>${isGift ? "&#127873; " : ""}${esc(p.pack_name||"—")}</td>
+              <td style="color:#22c55e">+${fmtN(p.credits_added||0)} cr</td>
+              <td>${p.price_usd > 0 ? fmt$(p.price_usd) : '<span style="color:#6366f1">Free</span>'}</td>
             </tr>`;
           }).join("")}
         </tbody>
