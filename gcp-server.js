@@ -1759,19 +1759,30 @@ async function doMockPurchase(userId, packId, email) {
 
   // Admin notification (non-fatal)
   const { error: notifErr } = await supabaseAdmin.from("admin_notifications").insert({
+    title:      "Mock Purchase",
     type:       "purchase",
-    message:    `Mock purchase: ${pack.name} by ${resolvedEmail} ($${pack.price_usd})`,
+    message:    `${pack.name} → ${resolvedEmail} (+${pack.credits} cr)`,
     created_at: new Date().toISOString(),
   });
   if (notifErr) console.warn("[MOCK] Notification insert error:", notifErr.message);
 
-  // Admin action log (non-fatal)
-  const { error: logErr } = await supabaseAdmin.from("admin_actions").insert({
-    action:      "mock_purchase",
-    target_user: userId,
-    details:     JSON.stringify({ pack_id: packId, credits: pack.credits, price: pack.price_usd }),
-    created_at:  new Date().toISOString(),
-  });
+  // Admin action log (non-fatal) — diagnose columns first
+  const { data: sampleAction } = await supabaseAdmin
+    .from("admin_actions").select("*").limit(1).maybeSingle();
+  console.log("[MOCK] admin_actions columns:",
+    sampleAction ? Object.keys(sampleAction).join(", ") : "no rows");
+
+  const actionRow = {
+    action:       "mock_purchase",
+    performed_by: "admin",
+    created_at:   new Date().toISOString(),
+  };
+  if (!sampleAction || Object.keys(sampleAction).includes("target_user"))
+    actionRow.target_user = profile.id || userId;
+  if (!sampleAction || Object.keys(sampleAction).includes("details"))
+    actionRow.details = JSON.stringify({ pack_id: packId, credits: pack.credits, price: pack.price_usd });
+
+  const { error: logErr } = await supabaseAdmin.from("admin_actions").insert(actionRow);
   if (logErr) console.warn("[MOCK] Action log insert error:", logErr.message);
 
   console.log(`[MOCK] Purchase: ${pack.name} → ${resolvedEmail} (+${pack.credits} cr)`);

@@ -3057,6 +3057,32 @@ async function openMockPurchaseModal(userId, email) {
       const d = await apiPost("/admin/api/mock-purchase", { user_id: userId, pack_id: selectedPackId, email });
       toast(`✅ Added ${d.credits_added} credits to ${email}`, "success");
       ov.remove();
+
+      // Instantly update the users table row (no full reload)
+      if (typeof d.new_balance === "number") {
+        const tableRow = document.querySelector(`tr[data-uid="${userId}"]`);
+        if (tableRow) {
+          const credCell = tableRow.querySelector('[data-label="Credits"]');
+          const timeCell = tableRow.querySelector('[data-label="Time Left"]');
+          if (credCell) {
+            credCell.innerHTML = `<strong>${fmtN(d.new_balance)}</strong>`;
+            credCell.style.transition = "background 0.3s";
+            credCell.style.background = "#14532d";
+            setTimeout(() => { credCell.style.background = ""; }, 1500);
+          }
+          if (timeCell) {
+            timeCell.textContent = `≈${Math.round(d.new_balance / 130.8)}m`;
+            timeCell.style.transition = "background 0.3s";
+            timeCell.style.background = "#14532d";
+            setTimeout(() => { timeCell.style.background = ""; }, 1500);
+          }
+        }
+
+        // Instantly update the balance in the open slide-over (first stat card)
+        const balanceVal = document.querySelector("#so-user-profile .up-stat-val");
+        if (balanceVal) balanceVal.textContent = `${fmtN(d.new_balance)} cr`;
+      }
+
       openUserProfile(userId, email);
     } catch (e) {
       toast("Mock purchase failed: " + e.message, "error");
