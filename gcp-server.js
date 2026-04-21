@@ -724,8 +724,19 @@ app.get("/admin/api/users/active-today", adminAuth, async (_req, res) => {
 
     const enriched = await Promise.all(
       Object.entries(byUser).map(async ([userId, stats]) => {
-        const { data: au } = await supabaseAdmin.auth.admin.getUserById(userId);
-        return { user_id: userId, email: au?.user?.email || "unknown", ...stats };
+        const [{ data: au }, { data: profile }] = await Promise.all([
+          supabaseAdmin.auth.admin.getUserById(userId),
+          supabaseAdmin.from("profiles").select("name, credits, last_seen, is_banned").eq("id", userId).single(),
+        ]);
+        return {
+          user_id:   userId,
+          email:     au?.user?.email || "unknown",
+          name:      profile?.name   || null,
+          balance:   profile?.credits ?? 0,
+          last_seen: profile?.last_seen || au?.user?.last_sign_in_at || null,
+          is_banned: profile?.is_banned || false,
+          ...stats,
+        };
       })
     );
 
@@ -1495,7 +1506,22 @@ app.get("/admin/api/credit-packs", adminAuth, async (_req, res) => {
 app.post("/admin/api/credit-packs", adminAuth, async (req, res) => {
   const { name, price_usd, credits, stripe_price_id, is_popular, is_active, sort_order } = req.body || {};
   if (!name || !price_usd || !credits) return res.status(400).json({ error: "name, price_usd, credits required" });
-  const { data, error } = await supabaseAdmin.from("credit_packs").insert({ name, price_usd, credits, stripe_price_id: stripe_price_id || null, is_popular: !!is_popular, is_active: is_active !== false, sort_order: sort_order || 0 }).select("*").single();
+
+  // Auto-generate unique slug from name
+  const baseSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  const { data: existingSlugs } = await supabaseAdmin
+    .from("credit_packs").select("slug").like("slug", baseSlug + "%");
+  const slugSet = new Set((existingSlugs || []).map(r => r.slug));
+  let slug = baseSlug, attempt = 2;
+  while (slugSet.has(slug)) slug = `${baseSlug}-${attempt++}`;
+
+  const { data, error } = await supabaseAdmin.from("credit_packs").insert({
+    name, slug, price_usd, credits,
+    stripe_price_id: stripe_price_id || null,
+    is_popular: !!is_popular,
+    is_active: is_active !== false,
+    sort_order: sort_order || 0,
+  }).select("*").single();
   if (error) return res.status(400).json({ error: error.message });
   res.json({ pack: data });
 });

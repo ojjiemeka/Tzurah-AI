@@ -1695,6 +1695,18 @@ function fmt$(n)  { return "$" + Number(n||0).toFixed(2); }
 function fmtN(n)  { return Number(n||0).toLocaleString(); }
 // 2.18 cr/sec = 130.8 cr/min
 function creditsToMinutes(credits) { return Math.round((credits||0) / 130.8); }
+function packMinutesLabel(credits) {
+  const c = parseFloat(credits) || 0;
+  const totalSec = Math.round(c / 2.18);
+  const m = Math.floor(totalSec / 60), s = totalSec % 60;
+  if (c <= 0) return "0 min";
+  if (m === 0) return `${c} cr = 0 min (${s}s)`;
+  return `${c} cr = ${m} min${s ? " " + s + "s" : ""}`;
+}
+function updatePackMinutes(val) {
+  const el = document.getElementById("pack-minutes");
+  if (el) el.textContent = packMinutesLabel(val);
+}
 function fmtSecs(s) {
   s = Math.max(0, Math.round(s));
   const m = Math.floor(s / 60), sec = s % 60;
@@ -2277,7 +2289,7 @@ function renderUsersPage() {
       <td data-label="Status">${u.is_banned
         ? '<span class="badge badge-red">Banned</span>'
         : '<span class="badge badge-green">Active</span>'}</td>
-      <td data-label="⋯"><button class="btn btn-ghost btn-xs" onclick="openMenu(event)">&#8943;</button></td>
+      <td data-label="⋯"><button class="btn btn-ghost btn-xs" data-action="user-menu">&#8943;</button></td>
     </tr>`;
   }).join("");
 }
@@ -2307,19 +2319,29 @@ function clearSelection() {
   updateBulkBar();
 }
 
-// ── ⋯ dropdown ────────────────────────────────────────────────────
-function openMenu(event) {
+// ── ⋯ dropdown — event delegation on tbody ────────────────────────
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("users-tbody")?.addEventListener("click", (e) => {
+    const btn = e.target.closest('[data-action="user-menu"]');
+    if (!btn) return;
+    e.stopPropagation();
+    openMenu(btn);
+  });
+});
+
+function openMenu(btn) {
   document.querySelectorAll(".action-dropdown").forEach(d=>d.remove());
-  const btn  = event.currentTarget;
-  const row  = btn.closest("tr");
-  const uid   = row.dataset.uid;
-  const email = row.dataset.email;
+  const row    = btn.closest("tr");
+  const uid    = row.dataset.uid;
+  const email  = row.dataset.email;
   const banned = row.dataset.banned === "true";
-  const rect = btn.getBoundingClientRect();
+  const rect   = btn.getBoundingClientRect();
 
   const menu = document.createElement("div");
   menu.className = "action-dropdown";
   menu.innerHTML = `
+    <button onclick="openUserProfile('${esc(uid)}','${esc(email)}')">&#128100; View Profile</button>
+    <div class="sep"></div>
     <button onclick="doGift('${esc(uid)}','${esc(email)}')">&#127873; Gift Credits</button>
     <button onclick="doDeduct('${esc(uid)}','${esc(email)}')">&#10134; Deduct Credits</button>
     <button onclick="Modal.viewUsage('${esc(email)}','${esc(uid)}')">&#128202; View Purchases</button>
@@ -2330,7 +2352,7 @@ function openMenu(event) {
       : `<button class="item-red"   onclick="doBan('${esc(uid)}','${esc(email)}')">&#128683; Ban User</button>`}
   `;
   menu.style.position = "fixed";
-  menu.style.top  = (rect.bottom + 4) + "px";
+  menu.style.top   = (rect.bottom + 4) + "px";
   menu.style.right = (window.innerWidth - rect.right) + "px";
   document.body.appendChild(menu);
   setTimeout(() => document.addEventListener("click", closeMenu, {once:true}), 0);
@@ -2771,12 +2793,25 @@ async function openActiveToday() {
       return;
     }
     body.innerHTML = users.map(u => `
-      <div class="so-user-row" onclick="openUserProfile('${esc(u.user_id)}','${esc(u.email)}')">
-        <div style="flex:1">
-          <div class="so-user-email">${esc(u.email)}</div>
-          <div class="so-user-meta">${u.sessions} session${u.sessions!==1?"s":""} · ${Math.round(u.credits)} cr used · ${fmtSecs(u.seconds)}</div>
+      <div class="so-user-row" style="align-items:flex-start;gap:10px">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+            <span class="so-user-email" style="font-size:12px;font-weight:600">${esc(u.email)}</span>
+            ${u.is_banned
+              ? '<span class="badge badge-red" style="font-size:9px;padding:1px 6px">Banned</span>'
+              : '<span class="badge badge-green" style="font-size:9px;padding:1px 6px">Active</span>'}
+          </div>
+          ${u.name ? `<div style="font-size:11px;color:var(--muted);margin-top:1px">${esc(u.name)}</div>` : ""}
+          <div class="so-user-meta" style="margin-top:4px">
+            ${u.sessions} session${u.sessions!==1?"s":""} &middot; ${Math.round(u.credits)} cr used &middot; ${fmtSecs(u.seconds)}
+          </div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">
+            Balance: <strong style="color:var(--text)">${fmtN(u.balance)} cr</strong>
+            &nbsp;&middot;&nbsp; Last seen: ${relTime(u.last_seen)}
+          </div>
         </div>
-        <span style="font-size:11px;color:var(--muted)">→</span>
+        <button class="btn btn-xs btn-ghost" style="flex-shrink:0;margin-top:2px"
+          onclick="openUserProfile('${esc(u.user_id)}','${esc(u.email)}')">→ Profile</button>
       </div>`).join("");
   } catch(e) {
     body.innerHTML = `<div class="empty"><div class="eicon">⚠️</div>${esc(e.message)}</div>`;
@@ -4138,7 +4173,7 @@ function showNewPackModal(pack = null) {
     body: `
       <div class="modal-field"><label>Name</label><input class="modal-input" id="pack-name" value="${pack?.name || ''}" placeholder="e.g. Starter"></div>
       <div class="modal-field"><label>Price (USD)</label><input class="modal-input" id="pack-price" type="number" value="${pack?.price_usd || ''}" placeholder="20"></div>
-      <div class="modal-field"><label>Credits</label><input class="modal-input" id="pack-credits" type="number" value="${pack?.credits || ''}" placeholder="42" oninput="document.getElementById('pack-minutes').textContent = creditsToMinutes(this.value) + ' min'"><small id="pack-minutes" style="color:var(--muted)">${pack ? creditsToMinutes(pack.credits) + ' min' : '0 min'}</small></div>
+      <div class="modal-field"><label>Credits</label><input class="modal-input" id="pack-credits" type="number" value="${pack?.credits || ''}" placeholder="42" oninput="updatePackMinutes(this.value)"><small id="pack-minutes" style="color:var(--muted)">${pack ? packMinutesLabel(pack.credits) : '0 min'}</small></div>
       <div class="modal-field"><label>Stripe Price ID</label><input class="modal-input" id="pack-stripe" value="${pack?.stripe_price_id || ''}" placeholder="price_xxx (optional)"></div>
       <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px"><label style="width:auto">Popular badge</label><input type="checkbox" id="pack-popular" ${pack?.is_popular ? 'checked' : ''}></div>
       <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px"><label style="width:auto">Active</label><input type="checkbox" id="pack-active" ${pack?.is_active !== false ? 'checked' : ''}></div>
