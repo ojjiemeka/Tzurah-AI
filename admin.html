@@ -1547,6 +1547,15 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
         </div>
       </div>
 
+      <!-- Maintenance -->
+      <div style="padding:12px 14px;border-bottom:1px solid var(--border)">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px">Maintenance</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="db-btn db-btn-warning" id="repair-profiles-btn" onclick="repairMissingProfiles()">🔧 Repair Missing Profiles</button>
+          <span id="repair-profiles-result" style="font-size:11px;color:var(--muted)"></span>
+        </div>
+      </div>
+
       <!-- Database Info -->
       <div style="padding:12px 14px">
         <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;margin-bottom:10px">Database Info</div>
@@ -3987,6 +3996,28 @@ async function loadSettings() {
 }
 
 // ── Database management ───────────────────────────────────────────
+async function repairMissingProfiles() {
+  const btn    = document.getElementById("repair-profiles-btn");
+  const result = document.getElementById("repair-profiles-result");
+  btn.disabled = true;
+  btn.textContent = "Running…";
+  result.textContent = "";
+  try {
+    const d = await apiPost("/admin/api/repair-missing-profiles", {});
+    result.textContent = d.message || "Done";
+    result.style.color = "var(--green)";
+    if (d.errors?.length) console.warn("[REPAIR] Errors:", d.errors);
+    toast(d.message, "success");
+  } catch (e) {
+    result.textContent = "Error: " + e.message;
+    result.style.color = "var(--danger)";
+    toast("Repair failed: " + e.message, "error");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "🔧 Repair Missing Profiles";
+  }
+}
+
 async function loadDbStats() {
   try {
     const d = await api("/admin/api/db/stats");

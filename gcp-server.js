@@ -1461,31 +1461,141 @@ app.post("/admin/api/db/action", adminAuth, async (req, res) => {
 
 // ── Ensure profile (called after OAuth login for new Google users) ─
 app.post("/api/ensure-profile", async (req, res) => {
-  const auth = req.headers.authorization;
-  if (!auth?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    // Accept body params (from Electron renderer) or fall back to Bearer token
+    let userId, email, full_name, avatar_url;
 
-  const token = auth.slice(7);
-  const { data: { user }, error: userErr } = await supabaseAdmin.auth.getUser(token);
-  if (userErr || !user) return res.status(401).json({ error: "Invalid token" });
+    if (req.body?.user_id) {
+      ({ user_id: userId, email, full_name, avatar_url } = req.body);
+      if (!userId || !email) return res.status(400).json({ error: "user_id and email required" });
+    } else {
+      // Legacy: Bearer token path (called from electron.js ensureProfileForUser)
+      const auth = req.headers.authorization;
+      if (!auth?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthorized" });
+      const token = auth.slice(7);
+      const { data: { user }, error: userErr } = await supabaseAdmin.auth.getUser(token);
+      if (userErr || !user) return res.status(401).json({ error: "Invalid token" });
+      userId     = user.id;
+      email      = user.email;
+      full_name  = user.user_metadata?.full_name || user.user_metadata?.name || null;
+      avatar_url = user.user_metadata?.avatar_url || null;
+    }
 
-  const { data: profile } = await supabaseAdmin
-    .from("profiles")
-    .select("id, credits")
-    .eq("id", user.id)
-    .single();
+    const { data: existing } = await supabaseAdmin
+      .from("profiles")
+      .select("id, credits")
+      .eq("id", userId)
+      .maybeSingle();
 
-  if (!profile) {
-    await supabaseAdmin.from("profiles").insert({
-      id:                 user.id,
-      credits:            6,
-      total_credits_used: 0,
-      last_seen:          new Date().toISOString(),
-    });
-    console.log("[PROFILE] Created profile for OAuth user:", user.email);
-    return res.json({ created: true, credits: 6 });
+    if (existing) return res.json({ created: false, profile: existing });
+
+    const { data: newProfile, error: createErr } = await supabaseAdmin
+      .from("profiles")
+      .insert({
+        id:                      userId,
+        email:                   email,
+        display_name:            full_name || email.split("@")[0],
+        avatar_url:              avatar_url || null,
+        credits:                 6,
+        total_credits_purchased: 0,
+        created_at:              new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (createErr) {
+      console.error("[PROFILE] Create error:", createErr);
+      return res.status(500).json({ error: createErr.message });
+    }
+
+    console.log("[PROFILE] Created profile for OAuth user:", email);
+    return res.json({ created: true, profile: newProfile });
+  } catch (err) {
+    console.error("[PROFILE] ensure-profile error:", err);
+    return res.status(500).json({ error: err.message });
   }
+});
 
-  res.json({ created: false, credits: profile.credits });
+// ── Auth webhook — Supabase calls this on INSERT to auth.users ────
+app.post("/auth/webhook", async (req, res) => {
+  try {
+    const { type, record } = req.body || {};
+    if (type === "INSERT" && record?.id) {
+      const userId = record.id;
+      const email  = record.email;
+      const { data: existing } = await supabaseAdmin
+        .from("profiles").select("id").eq("id", userId).maybeSingle();
+      if (!existing) {
+        const displayName = record.raw_user_meta_data?.full_name
+                         || record.raw_user_meta_data?.name
+                         || email?.split("@")[0]
+                         || "User";
+        const { error } = await supabaseAdmin.from("profiles").insert({
+          id:                      userId,
+          email:                   email,
+          display_name:            displayName,
+          avatar_url:              record.raw_user_meta_data?.avatar_url || null,
+          credits:                 6,
+          total_credits_purchased: 0,
+          created_at:              new Date().toISOString(),
+        });
+        if (error) console.error("[WEBHOOK] Profile create error:", error);
+        else console.log("[WEBHOOK] Profile auto-created for:", email);
+      }
+    }
+    res.json({ received: true });
+  } catch (err) {
+    console.error("[WEBHOOK] Auth webhook error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Repair missing profiles (one-time admin utility) ──────────────
+app.post("/admin/api/repair-missing-profiles", adminAuth, async (req, res) => {
+  try {
+    const { data: { users }, error: authErr } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
+    if (authErr) throw authErr;
+
+    let created = 0, skipped = 0;
+    const errors = [];
+
+    for (const user of users) {
+      const { data: existing } = await supabaseAdmin
+        .from("profiles").select("id").eq("id", user.id).maybeSingle();
+      if (existing) { skipped++; continue; }
+
+      const displayName = user.user_metadata?.full_name
+                       || user.user_metadata?.name
+                       || user.email?.split("@")[0]
+                       || "User";
+      const { error: createErr } = await supabaseAdmin.from("profiles").insert({
+        id:                      user.id,
+        email:                   user.email,
+        display_name:            displayName,
+        avatar_url:              user.user_metadata?.avatar_url || null,
+        credits:                 6,
+        total_credits_purchased: 0,
+        created_at:              user.created_at || new Date().toISOString(),
+      });
+      if (createErr) {
+        errors.push({ email: user.email, error: createErr.message });
+      } else {
+        created++;
+        console.log("[REPAIR] Created missing profile for:", user.email);
+      }
+    }
+
+    return res.json({
+      success: true,
+      created,
+      skipped,
+      errors,
+      message: `Created ${created} missing profiles, skipped ${skipped} existing`,
+    });
+  } catch (err) {
+    console.error("[REPAIR] repair-missing-profiles error:", err);
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Feature flags ─────────────────────────────────────────────────
@@ -1566,13 +1676,44 @@ async function doMockPurchase(userId, packId, email) {
   console.log("[MOCK] Profile found:", profile ? "yes" : "no",
               profile ? Object.keys(profile) : "none");
 
-  // Diagnostic: dump sample rows so we can see the real column structure
+  // Diagnostic + last-resort auto-create if still not found
   if (!profile) {
     const { data: allProfiles, error: listErr } = await supabaseAdmin
       .from("profiles").select("*").limit(3);
     console.log("[MOCK] Sample profiles rows:", JSON.stringify(allProfiles));
     console.log("[MOCK] List error:", listErr);
-    throw new Error(`User profile not found (id: ${userId})`);
+
+    // Last resort: look up the auth user and auto-create the missing profile
+    console.log("[MOCK] Attempting auto-create for user:", userId);
+    const { data: authData } = await supabaseAdmin.auth.admin.getUserById(userId);
+    const authUser = authData?.user;
+    if (authUser) {
+      const displayName = authUser.user_metadata?.full_name
+                       || authUser.user_metadata?.name
+                       || authUser.email?.split("@")[0]
+                       || "User";
+      const { data: created, error: createErr } = await supabaseAdmin
+        .from("profiles")
+        .insert({
+          id:                      userId,
+          email:                   authUser.email,
+          display_name:            displayName,
+          avatar_url:              authUser.user_metadata?.avatar_url || null,
+          credits:                 6,
+          total_credits_purchased: 0,
+          created_at:              new Date().toISOString(),
+        })
+        .select()
+        .single();
+      if (!createErr && created) {
+        profile = created;
+        console.log("[MOCK] Auto-created missing profile for:", authUser.email);
+      } else {
+        console.error("[MOCK] Auto-create failed:", createErr?.message);
+      }
+    }
+
+    if (!profile) throw new Error(`User profile not found (id: ${userId})`);
   }
 
   // Determine actual PK column and value
