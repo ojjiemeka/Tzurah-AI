@@ -835,16 +835,24 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 /* ── Slide-over transition ─────────────────────────────────────── */
 .slide-over { transition: right 0.3s ease; }
 
+/* ── Alerts layout class (replaces inline style for mobile override) */
+.alerts-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
 /* ── Mobile responsive ────────────────────────────────────────── */
 @media (max-width: 768px) {
-  /* Header */
+  /* Header: Row 1 = logo + live counter, Row 2 = action buttons */
   header {
-    padding: 0 12px; gap: 8px; height: auto;
-    min-height: 48px; flex-wrap: wrap; padding-top: 6px; padding-bottom: 6px;
+    padding: 8px 12px; gap: 8px; height: auto;
+    flex-wrap: wrap; align-items: center;
   }
-  .logo { font-size: 14px; }
-  .hdr-actions { gap: 4px; flex-wrap: wrap; }
+  .logo { font-size: 14px; flex-shrink: 0; }
+  .live-pill { margin-left: auto; }  /* pushes live-pill to right of row 1 */
+  .hdr-actions {
+    width: 100%; margin-left: 0;
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  }
   .refresh-countdown { display: none; }
+  #admin-name { font-size: 10px; }
 
   /* Tab bar: horizontally scrollable */
   .tab-bar {
@@ -868,8 +876,19 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   /* Rev cards: 2 cols */
   .rev-cards { grid-template-columns: repeat(2, 1fr); gap: 10px; }
 
-  /* Filter row */
-  .filter-row input { min-width: 0; }
+  /* Filter row: full-width stacked on mobile */
+  .filter-row {
+    flex-direction: column; gap: 6px;
+  }
+  .filter-row input,
+  .filter-row select,
+  .filter-row .btn { width: 100%; min-width: 0; box-sizing: border-box; }
+
+  /* Filter chips: wrap naturally */
+  .chip-row { flex-wrap: wrap; }
+
+  /* Alerts layout: single column */
+  .alerts-layout { grid-template-columns: 1fr; }
 
   /* Pager */
   .pager { flex-direction: column; align-items: flex-start; gap: 6px; }
@@ -1221,7 +1240,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 
 <!-- ══ ALERTS ═════════════════════════════════════════════════════ -->
 <div class="tab-panel" id="tab-alerts">
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+  <div class="alerts-layout">
     <!-- Rules -->
     <div>
       <div class="sec-hdr"><h3>Alert Rules</h3><button class="btn btn-accent btn-sm" onclick="saveAlertRules()">Save Rules</button></div>
