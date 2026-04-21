@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      background:#000;
+      width:1280px; height:720px;
+      overflow:hidden;
+    }
+    #frame {
+      width:1280px; height:720px;
+      object-fit:cover;
+      display:none;
+      position:absolute; top:0; left:0;
+    }
+    #status {
+      position:absolute; top:50%; left:50%;
+      transform:translate(-50%,-50%);
+      color:rgba(255,255,255,0.6); font-size:14px;
+      font-family:sans-serif; text-align:center;
+      pointer-events:none;
+    }
+    #preview-badge {
+      display:none;
+      position:absolute; top:12px; left:50%; transform:translateX(-50%);
+      background:rgba(99,102,241,0.85); color:#fff;
+      font-family:sans-serif; font-size:12px; font-weight:700;
+      letter-spacing:0.08em; padding:4px 12px; border-radius:20px;
+      pointer-events:none;
+    }
+    body.preview-mode { outline:2px solid rgba(99,102,241,0.7); }
+    body.preview-mode #preview-badge { display:block; }
+  </style>
+</head>
+<body>
+  <img id="frame" alt="" />
+  <div id="status">Waiting for Tzurah output…<br><small>Make sure the app is running and OBS mode is on</small></div>
+  <div id="preview-badge">PREVIEW MODE</div>
+  <script>
+    if (location.search.includes("preview")) {
+      document.body.classList.add("preview-mode");
+    }
+
+    const img    = document.getElementById("frame");
+    const status = document.getElementById("status");
+
+    function connect() {
+      const ws = new WebSocket("ws://localhost:3000");
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "obs-source" }));
+      };
+
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === "frame" && msg.data) {
+            img.src = msg.data;
+            img.style.display = "block";
+            status.style.display = "none";
+          }
+        } catch (_) {}
+      };
+
+      ws.onclose = () => {
+        img.style.display = "none";
+        status.style.display = "block";
+        status.innerHTML = "Connection lost. Reconnecting…<br><small>Make sure Tzurah Live is running</small>";
+        setTimeout(connect, 2000);
+      };
+
+      ws.onerror = () => ws.close();
+    }
+
+    connect();
+  </script>
+</body>
+</html>
