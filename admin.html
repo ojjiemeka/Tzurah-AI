@@ -2635,6 +2635,14 @@ function closeSlideOver() {
   document.getElementById("so-backdrop").classList.remove("open");
 }
 
+// Single persistent ESC handler — closes topmost modal overlay, then open slide-over
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const overlays = document.querySelectorAll(".admin-modal-overlay");
+  if (overlays.length) { overlays[overlays.length - 1].remove(); return; }
+  if (document.querySelector(".slide-over.open")) { closeSlideOver(); }
+});
+
 function openRevenue() { switchTab("revenue"); }
 
 async function openActiveToday() {
