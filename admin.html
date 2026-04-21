@@ -1091,6 +1091,13 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   <div class="panel-card" style="padding:16px 20px;margin-bottom:20px">
     <div id="rev-chart-wrap"><div class="loading-cell"><div class="spinner"></div></div></div>
   </div>
+  <div class="sec-hdr"><h3>Revenue by Period</h3></div>
+  <div class="rev-cards" id="rev-analytics-periods" style="margin-bottom:20px">
+    <div class="stat-card"><div class="slabel">Today</div><div class="sval">—</div></div>
+    <div class="stat-card"><div class="slabel">This Month</div><div class="sval">—</div></div>
+    <div class="stat-card"><div class="slabel">This Year</div><div class="sval">—</div></div>
+    <div class="stat-card"><div class="slabel">All Time</div><div class="sval">—</div></div>
+  </div>
   <div class="sec-hdr"><h3>Pack Breakdown</h3></div>
   <div class="table-wrap">
     <table>
@@ -1582,6 +1589,8 @@ function esc(s) {
 }
 function fmt$(n)  { return "$" + Number(n||0).toFixed(2); }
 function fmtN(n)  { return Number(n||0).toLocaleString(); }
+// 2.18 cr/sec = 130.8 cr/min
+function creditsToMinutes(credits) { return Math.round((credits||0) / 130.8); }
 function fmtSecs(s) {
   s = Math.max(0, Math.round(s));
   const m = Math.floor(s / 60), sec = s % 60;
@@ -2151,7 +2160,7 @@ function renderUsersPage() {
   }
 
   document.getElementById("users-tbody").innerHTML = slice.map(u => {
-    const minsLeft = ((u.credits_balance||0) * 10 / 60).toFixed(0);
+    const minsLeft = creditsToMinutes(u.credits_balance);
     return `<tr data-uid="${esc(u.id)}" data-email="${esc(u.email)}" data-banned="${u.is_banned}">
       <td><input type="checkbox" class="row-check" data-id="${esc(u.id)}" onchange="toggleRowSelect(this)"></td>
       <td class="td-email" title="${esc(u.email)}" style="cursor:pointer;color:var(--accent)" onclick="openUserProfile('${esc(u.id)}','${esc(u.email)}')">${esc(u.email)}</td>
@@ -2409,26 +2418,67 @@ function renderRevenue() {
         <td>${fmt$(p.revenue/daysN)}</td>
       </tr>`).join("") ||
     `<tr><td colspan="5"><div class="empty">No paid sales in this period</div></td></tr>`;
+  renderAnalyticsPeriods();
 }
 
 function renderRevenueChart(data) {
   const entries = Object.entries(data);
-  if (!entries.length) return `<div class="chart-container"><div style="color:var(--muted);font-size:12px;margin:auto">No revenue data yet</div></div>`;
+  if (!entries.length) return `<div style="color:var(--muted);font-size:12px;padding:20px;text-align:center">No revenue data yet</div>`;
   const maxVal = Math.max(...entries.map(([,v]) => v), 1);
+  const hasAny = entries.some(([,v]) => v > 0);
+  if (!hasAny) return `<div style="color:var(--muted);font-size:12px;padding:20px;text-align:center">No revenue in this period</div>`;
   const bars = entries.map(([date, amount]) => {
-    const pct   = amount > 0 ? Math.max((amount / maxVal * 100), 2) : 0;
-    const label = date.slice(5);
+    const pct = Math.max((amount / maxVal) * 100, amount > 0 ? 3 : 0);
     return `
-      <div class="chart-col">
-        <div class="chart-bar-wrap">
-          <div class="chart-bar" style="height:${pct}%">
-            <div class="chart-bar-tooltip">${date}: ${fmt$(amount)}</div>
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;height:100%;min-width:0">
+        <div style="flex:1;width:100%;display:flex;align-items:flex-end">
+          <div style="width:100%;height:${pct}%;min-height:${amount>0?'4px':'0'};
+               background:${amount>0?'linear-gradient(to top,#6366f1,#8b5cf6)':'transparent'};
+               border-radius:2px 2px 0 0;transition:opacity 0.15s"
+               title="${date}: ${fmt$(amount)}"
+               onmouseover="this.style.opacity='0.75'"
+               onmouseout="this.style.opacity='1'">
           </div>
         </div>
-        <div class="chart-label">${label}</div>
+        <div style="font-size:7px;color:#555;margin-top:3px;transform:rotate(-45deg);
+                    transform-origin:top left;white-space:nowrap;height:14px">
+          ${date.slice(5)}
+        </div>
       </div>`;
   }).join("");
-  return `<div class="chart-container">${bars}</div>`;
+  return `<div style="display:flex;align-items:flex-end;gap:2px;height:160px;padding-bottom:20px">${bars}</div>`;
+}
+
+function renderAnalyticsPeriods() {
+  const all = cache.allPurchases || [];
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const yearStart  = new Date(now.getFullYear(), 0, 1);
+
+  const periods = {
+    Today:      { revenue: 0, count: 0 },
+    "This Month": { revenue: 0, count: 0 },
+    "This Year":  { revenue: 0, count: 0 },
+    "All Time":   { revenue: 0, count: 0 },
+  };
+  all.forEach(p => {
+    const d = new Date(p.created_at);
+    const r = p.amount_usd || 0;
+    periods["All Time"].revenue += r; periods["All Time"].count++;
+    if (d >= yearStart)  { periods["This Year"].revenue  += r; periods["This Year"].count++;  }
+    if (d >= monthStart) { periods["This Month"].revenue += r; periods["This Month"].count++; }
+    if (d >= todayStart) { periods.Today.revenue          += r; periods.Today.count++;         }
+  });
+
+  const el = document.getElementById("rev-analytics-periods");
+  if (!el) return;
+  el.innerHTML = Object.entries(periods).map(([label, p]) => `
+    <div class="stat-card">
+      <div class="slabel">${label}</div>
+      <div class="sval" style="color:#22c55e">${fmt$(p.revenue)}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">${p.count} purchase${p.count!==1?"s":""}</div>
+    </div>`).join("");
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -2639,9 +2689,10 @@ async function openUserProfile(userId, emailHint) {
     const sessions  = d.sessions  || [];
     const purchases = d.purchases || [];
 
-    const initials  = (u.name || u.email || "?").slice(0, 2).toUpperCase();
-    const minsLeft  = ((u.credits || 0) * 10 / 60).toFixed(0);
-    const totalHrs  = (u.total_session_seconds / 3600).toFixed(1);
+    const initials   = (u.name || u.email || "?").slice(0, 2).toUpperCase();
+    const minsLeft   = creditsToMinutes(u.credits);
+    const totalHrs   = (u.total_session_seconds / 3600).toFixed(1);
+    const totalSpent = purchases.reduce((s, p) => s + (p.price_usd || 0), 0);
 
     document.getElementById("so-profile-title").textContent = u.email;
 
@@ -2681,8 +2732,9 @@ async function openUserProfile(userId, emailHint) {
           <div class="up-stat-val">${fmtN(Math.round(u.total_credits_used))} cr</div>
         </div>
         <div class="up-stat-card">
-          <div class="up-stat-label">Session Time</div>
-          <div class="up-stat-val">${totalHrs}h</div>
+          <div class="up-stat-label">Total Spent</div>
+          <div class="up-stat-val">${fmt$(totalSpent)}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">${totalHrs}h session time</div>
         </div>
       </div>
 
@@ -2697,6 +2749,9 @@ async function openUserProfile(userId, emailHint) {
         </button>
         <button class="btn btn-red btn-sm" onclick="Modal.banUser('${esc(u.email)}','${esc(u.id)}',${u.is_banned},()=>apiPost('${u.is_banned ? '/admin/api/unban-user' : '/admin/api/ban-user'}',{userId:'${esc(u.id)}'}).then(()=>{toast('${u.is_banned ? 'Unbanned' : 'Banned'}');openUserProfile('${esc(u.id)}','${esc(u.email)}')}).catch(e=>toast(e.message,'error')))">
           ${u.is_banned ? "&#9989; Unban" : "&#128683; Ban"}
+        </button>
+        <button class="btn btn-ghost btn-sm" onclick="window.open('mailto:${esc(u.email)}')">
+          &#9993; Email
         </button>
       </div>
 
@@ -3935,7 +3990,7 @@ function renderCreditPacks(packs) {
       <td>${esc(p.name)}</td>
       <td>$${p.price_usd}</td>
       <td>${p.credits} cr</td>
-      <td>≈${Math.floor(p.credits / 13.08)}m</td>
+      <td>≈${creditsToMinutes(p.credits)}m</td>
       <td>${p.is_popular ? '<span class="badge badge-accent">★ Popular</span>' : '<span style="color:#444">—</span>'}</td>
       <td><span class="status-dot ${p.is_active ? 'dot-green' : 'dot-red'}"></span> ${p.is_active ? 'Active' : 'Archived'}</td>
       <td>
@@ -3953,7 +4008,7 @@ function showNewPackModal(pack = null) {
     body: `
       <div class="modal-field"><label>Name</label><input class="modal-input" id="pack-name" value="${pack?.name || ''}" placeholder="e.g. Starter"></div>
       <div class="modal-field"><label>Price (USD)</label><input class="modal-input" id="pack-price" type="number" value="${pack?.price_usd || ''}" placeholder="20"></div>
-      <div class="modal-field"><label>Credits</label><input class="modal-input" id="pack-credits" type="number" value="${pack?.credits || ''}" placeholder="42" oninput="document.getElementById('pack-minutes').textContent = Math.floor(this.value/13.08) + ' min'"><small id="pack-minutes" style="color:var(--muted)">${pack ? Math.floor(pack.credits/13.08) + ' min' : '0 min'}</small></div>
+      <div class="modal-field"><label>Credits</label><input class="modal-input" id="pack-credits" type="number" value="${pack?.credits || ''}" placeholder="42" oninput="document.getElementById('pack-minutes').textContent = creditsToMinutes(this.value) + ' min'"><small id="pack-minutes" style="color:var(--muted)">${pack ? creditsToMinutes(pack.credits) + ' min' : '0 min'}</small></div>
       <div class="modal-field"><label>Stripe Price ID</label><input class="modal-input" id="pack-stripe" value="${pack?.stripe_price_id || ''}" placeholder="price_xxx (optional)"></div>
       <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px"><label style="width:auto">Popular badge</label><input type="checkbox" id="pack-popular" ${pack?.is_popular ? 'checked' : ''}></div>
       <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px"><label style="width:auto">Active</label><input type="checkbox" id="pack-active" ${pack?.is_active !== false ? 'checked' : ''}></div>
