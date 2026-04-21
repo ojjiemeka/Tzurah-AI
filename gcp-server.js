@@ -707,6 +707,7 @@ app.get("/admin/api/users", adminAuth, async (req, res) => {
 
 // ── Admin: users active today (with session stats) ────────────────
 app.get("/admin/api/users/active-today", adminAuth, async (_req, res) => {
+  res.set("Cache-Control", "no-store");
   const oneDayAgo = new Date(Date.now() - 86400000).toISOString();
   try {
     const { data: rows } = await supabaseAdmin
@@ -722,20 +723,35 @@ app.get("/admin/api/users/active-today", adminAuth, async (_req, res) => {
       byUser[u.user_id].seconds  += u.session_seconds || 0;
     });
 
+    const userIds = Object.keys(byUser);
+    if (!userIds.length) return res.json({ ok: true, users: [] });
+
+    // Bulk fetch profiles (one query, always fresh from DB)
+    const { data: profiles } = await supabaseAdmin
+      .from("profiles")
+      .select("id, email, full_name, credits, last_seen, is_banned")
+      .in("id", userIds);
+
+    const profileMap = {};
+    (profiles || []).forEach(p => { profileMap[p.id] = p; });
+
+    // Auth emails for any profiles missing email
     const enriched = await Promise.all(
-      Object.entries(byUser).map(async ([userId, stats]) => {
-        const [{ data: au }, { data: profile }] = await Promise.all([
-          supabaseAdmin.auth.admin.getUserById(userId),
-          supabaseAdmin.from("profiles").select("name, credits, last_seen, is_banned").eq("id", userId).single(),
-        ]);
+      userIds.map(async (userId) => {
+        const prof = profileMap[userId] || {};
+        let email = prof.email || null;
+        if (!email) {
+          const { data: au } = await supabaseAdmin.auth.admin.getUserById(userId);
+          email = au?.user?.email || "unknown";
+        }
         return {
           user_id:   userId,
-          email:     au?.user?.email || "unknown",
-          name:      profile?.name   || null,
-          balance:   profile?.credits ?? 0,
-          last_seen: profile?.last_seen || au?.user?.last_sign_in_at || null,
-          is_banned: profile?.is_banned || false,
-          ...stats,
+          email,
+          name:      prof.full_name || null,
+          balance:   typeof prof.credits === "number" ? prof.credits : 0,
+          last_seen: prof.last_seen || null,
+          is_banned: prof.is_banned || false,
+          ...byUser[userId],
         };
       })
     );
@@ -1496,6 +1512,93 @@ app.post("/admin/api/feature-flags/:key", adminAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Public: active credit packs (for topup UI) ───────────────────
+app.get("/api/credit-packs", async (_req, res) => {
+  const { data, error } = await supabaseAdmin
+    .from("credit_packs").select("id, name, price_usd, credits, is_popular, sort_order")
+    .eq("is_active", true).order("sort_order");
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ packs: data || [] });
+});
+
+// ── Mock Purchase (shared logic) ──────────────────────────────────
+async function doMockPurchase(userId, userEmail, packId) {
+  // Check flag
+  const { data: flagRow } = await supabaseAdmin
+    .from("feature_flags").select("enabled").eq("key", "mock_payments").single();
+  if (!flagRow?.enabled) throw new Error("Mock payments are not enabled");
+
+  // Fetch pack
+  const { data: pack, error: packErr } = await supabaseAdmin
+    .from("credit_packs").select("id, name, price_usd, credits").eq("id", packId).single();
+  if (packErr || !pack) throw new Error("Pack not found");
+
+  // Add credits to profile
+  const { data: profile } = await supabaseAdmin
+    .from("profiles").select("credits, total_credits_purchased").eq("id", userId).single();
+  if (!profile) throw new Error("User profile not found");
+
+  const newBalance = (profile.credits || 0) + pack.credits;
+  await supabaseAdmin.from("profiles").update({
+    credits:                 newBalance,
+    total_credits_purchased: (profile.total_credits_purchased || 0) + pack.credits,
+  }).eq("id", userId);
+
+  // Insert purchase record
+  const mockPaymentId = "mock_" + Date.now();
+  await supabaseAdmin.from("purchases").insert({
+    user_id:           userId,
+    pack_id:           packId,
+    pack_name:         pack.name,
+    price_usd:         pack.price_usd,
+    credits_added:     pack.credits,
+    stripe_payment_id: mockPaymentId,
+    created_at:        new Date().toISOString(),
+  });
+
+  // Admin notification
+  await supabaseAdmin.from("admin_notifications").insert({
+    type:       "purchase",
+    message:    `Mock purchase: ${pack.name} by ${userEmail} ($${pack.price_usd})`,
+    created_at: new Date().toISOString(),
+  }).catch(() => {});
+
+  // Admin action log
+  await supabaseAdmin.from("admin_actions").insert({
+    action:      "mock_purchase",
+    target_user: userId,
+    details:     JSON.stringify({ pack_id: packId, credits: pack.credits, price: pack.price_usd }),
+    created_at:  new Date().toISOString(),
+  }).catch(() => {});
+
+  console.log(`[MOCK] Purchase: ${pack.name} → ${userEmail} (+${pack.credits} cr)`);
+  return { success: true, credits_added: pack.credits, new_balance: newBalance, pack_name: pack.name };
+}
+
+// POST /mock/purchase — authenticated via Supabase JWT (used by Electron app)
+app.post("/mock/purchase", requireAuth, async (req, res) => {
+  const { pack_id } = req.body || {};
+  if (!pack_id) return res.status(400).json({ error: "pack_id required" });
+  try {
+    const result = await doMockPurchase(req.userId, req.user.email, pack_id);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /admin/api/mock-purchase — authenticated via admin session (used by admin panel)
+app.post("/admin/api/mock-purchase", adminAuth, async (req, res) => {
+  const { user_id, pack_id, user_email } = req.body || {};
+  if (!user_id || !pack_id) return res.status(400).json({ error: "user_id and pack_id required" });
+  try {
+    const result = await doMockPurchase(user_id, user_email || user_id, pack_id);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ── C2: Credit Packs ─────────────────────────────────────────────
 app.get("/admin/api/credit-packs", adminAuth, async (_req, res) => {
   const { data, error } = await supabaseAdmin.from("credit_packs").select("*").order("sort_order");
@@ -2228,6 +2331,12 @@ app.post("/admin/api/tests/run", adminAuth, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════
 // START
 // ═══════════════════════════════════════════════════════════════════
+
+// Ensure mock_payments flag exists (enabled=true for testing; admin can toggle off before live)
+supabaseAdmin.from("feature_flags")
+  .upsert({ key: "mock_payments", enabled: true, updated_at: new Date().toISOString() }, { onConflict: "key", ignoreDuplicates: true })
+  .then(() => console.log("[FLAGS] mock_payments flag ensured"))
+  .catch((e) => console.warn("[FLAGS] mock_payments init error:", e.message));
 
 app.listen(PORT, () => {
   console.log("═══════════════════════════════════════════════════════");

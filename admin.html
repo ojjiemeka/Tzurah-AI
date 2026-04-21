@@ -2849,7 +2849,11 @@ async function openUserProfile(userId, emailHint) {
   openSlideOver("so-user-profile");
 
   try {
-    const d = await api(`/admin/api/users/${userId}`);
+    const [d, flagsRes] = await Promise.all([
+      api(`/admin/api/users/${userId}`),
+      adminFetch("/api/feature-flags").then(r => r?.json()).catch(() => ({})),
+    ]);
+    const mockEnabled = !!flagsRes?.mock_payments;
     const u = d.user;
     const sessions  = d.sessions  || [];
     const purchases = d.purchases || [];
@@ -2918,6 +2922,7 @@ async function openUserProfile(userId, emailHint) {
         <button class="btn btn-ghost btn-sm" onclick="window.open('mailto:${esc(u.email)}')">
           &#9993; Email
         </button>
+        ${mockEnabled ? `<button class="btn btn-sm" style="background:rgba(245,158,11,.15);color:#f59e0b;border:1px solid rgba(245,158,11,.4)" onclick="openMockPurchaseModal('${esc(u.id)}','${esc(u.email)}')">&#129514; Mock Purchase</button>` : ""}
       </div>
 
       <!-- Session history -->
@@ -2960,6 +2965,49 @@ async function openUserProfile(userId, emailHint) {
     document.getElementById("so-profile-body").innerHTML =
       `<div class="empty"><div class="eicon">⚠️</div>${esc(e.message)}</div>`;
   }
+}
+
+// ══════════════════════════════════════════════════════════════════
+// MOCK PURCHASE MODAL
+// ══════════════════════════════════════════════════════════════════
+async function openMockPurchaseModal(userId, email) {
+  let packs = [];
+  try {
+    const res = await adminFetch("/admin/api/credit-packs");
+    const data = await res?.json();
+    packs = (data?.packs || []).filter(p => p.is_active);
+  } catch (e) {
+    toast("Failed to load packs: " + e.message, "error");
+    return;
+  }
+
+  showModal({
+    title: `🧪 Mock Purchase for ${email}`,
+    body: `
+      <div class="modal-field">
+        <label>Credit Pack</label>
+        <select class="modal-input" id="mock-pack-select">
+          ${packs.map(p => `<option value="${esc(p.id)}">${esc(p.name)} — ${fmtN(p.credits)} cr — $${p.price_usd}</option>`).join("")}
+        </select>
+      </div>
+      <div style="padding:8px 12px;border-radius:6px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);font-size:11px;color:#f59e0b">
+        ⚠ Mock purchase — credits are added instantly, no real payment is charged.
+      </div>
+    `,
+    confirmLabel: "Confirm Mock Purchase",
+    onConfirm: async () => {
+      const packId = document.getElementById("mock-pack-select")?.value;
+      if (!packId) { toast("Select a pack", "error"); return false; }
+      try {
+        const d = await apiPost("/admin/api/mock-purchase", { user_id: userId, pack_id: packId, user_email: email });
+        toast(`✅ Added ${d.credits_added} credits to ${email}`, "success");
+        openUserProfile(userId, email);
+      } catch (e) {
+        toast("Mock purchase failed: " + e.message, "error");
+        return false;
+      }
+    },
+  });
 }
 
 // ══════════════════════════════════════════════════════════════════
