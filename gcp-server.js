@@ -1522,7 +1522,7 @@ app.get("/api/credit-packs", async (_req, res) => {
 });
 
 // ── Mock Purchase (shared logic) ──────────────────────────────────
-async function doMockPurchase(userId, userEmail, packId) {
+async function doMockPurchase(userId, packId, email) {
   // Check flag
   const { data: flagRow } = await supabaseAdmin
     .from("feature_flags").select("enabled").eq("key", "mock_payments").single();
@@ -1533,36 +1533,63 @@ async function doMockPurchase(userId, userEmail, packId) {
     .from("credit_packs").select("id, name, price_usd, credits").eq("id", packId).single();
   if (packErr || !pack) throw new Error("Pack not found");
 
-  // Fetch profile with debug logging
-  console.log("[MOCK] Looking up user_id:", userId);
-  let { data: profile, error: profileErr } = await supabaseAdmin
-    .from("profiles").select("id, credits, total_credits_purchased, email").eq("id", userId).single();
-  console.log("[MOCK] Profile lookup result:", { profile, profileErr: profileErr?.message });
+  // Multi-strategy profile lookup
+  console.log("[MOCK] Looking up profile — user_id:", userId, "email:", email);
+  let profile = null;
 
-  // Fallback: if no profile found by id and user_id looks like an email, try by email
-  if ((profileErr?.code === "PGRST116" || !profile) && userId.includes("@")) {
-    console.log("[MOCK] Trying email fallback lookup for:", userId);
-    const { data: byEmail, error: emailErr } = await supabaseAdmin
-      .from("profiles").select("id, credits, total_credits_purchased, email").eq("email", userId).single();
-    console.log("[MOCK] Email fallback result:", { byEmail, emailErr: emailErr?.message });
-    if (byEmail) { profile = byEmail; profileErr = null; }
+  // Strategy 1: id column (standard Supabase auth UUID)
+  const { data: p1 } = await supabaseAdmin
+    .from("profiles").select("*").eq("id", userId).maybeSingle();
+  if (p1) profile = p1;
+
+  // Strategy 2: user_id column
+  if (!profile) {
+    const { data: p2 } = await supabaseAdmin
+      .from("profiles").select("*").eq("user_id", userId).maybeSingle();
+    if (p2) profile = p2;
   }
 
-  if (profileErr || !profile) throw new Error(`User profile not found (id: ${userId})`);
+  // Strategy 3: auth_id column
+  if (!profile) {
+    const { data: p3 } = await supabaseAdmin
+      .from("profiles").select("*").eq("auth_id", userId).maybeSingle();
+    if (p3) profile = p3;
+  }
 
+  // Strategy 4: email fallback
+  if (!profile && email) {
+    const { data: p4 } = await supabaseAdmin
+      .from("profiles").select("*").eq("email", email).maybeSingle();
+    if (p4) profile = p4;
+  }
 
-  const email = userEmail || profile.email;
-  const newBalance = (profile.credits || 0) + pack.credits;
+  console.log("[MOCK] Profile found:", profile ? "yes" : "no",
+              profile ? Object.keys(profile) : "none");
 
-  // Update credits
+  // Diagnostic: dump sample rows so we can see the real column structure
+  if (!profile) {
+    const { data: allProfiles, error: listErr } = await supabaseAdmin
+      .from("profiles").select("*").limit(3);
+    console.log("[MOCK] Sample profiles rows:", JSON.stringify(allProfiles));
+    console.log("[MOCK] List error:", listErr);
+    throw new Error(`User profile not found (id: ${userId})`);
+  }
+
+  // Determine actual PK column and value
+  const profilePKCol = profile.id !== undefined ? "id"
+                     : profile.user_id !== undefined ? "user_id"
+                     : "auth_id";
+  const profilePK      = profile[profilePKCol];
+  const currentCredits = profile.credits || 0;
+  const newBalance     = currentCredits + pack.credits;
+  const resolvedEmail  = email || profile.email || userId;
+
+  // Update credits using whichever PK column was found
   const { error: updateErr } = await supabaseAdmin
     .from("profiles")
-    .update({
-      credits:                 newBalance,
-      total_credits_purchased: (profile.total_credits_purchased || 0) + pack.credits,
-    })
-    .eq("id", userId);
-  if (updateErr) throw new Error(updateErr.message);
+    .update({ credits: newBalance })
+    .eq(profilePKCol, profilePK);
+  if (updateErr) throw new Error("Credits update failed: " + updateErr.message);
 
   // Insert purchase record
   const { error: purchaseErr } = await supabaseAdmin.from("purchases").insert({
@@ -1579,7 +1606,7 @@ async function doMockPurchase(userId, userEmail, packId) {
   // Admin notification (non-fatal)
   const { error: notifErr } = await supabaseAdmin.from("admin_notifications").insert({
     type:       "purchase",
-    message:    `Mock purchase: ${pack.name} by ${email} ($${pack.price_usd})`,
+    message:    `Mock purchase: ${pack.name} by ${resolvedEmail} ($${pack.price_usd})`,
     created_at: new Date().toISOString(),
   });
   if (notifErr) console.warn("[MOCK] Notification insert error:", notifErr.message);
@@ -1593,7 +1620,7 @@ async function doMockPurchase(userId, userEmail, packId) {
   });
   if (logErr) console.warn("[MOCK] Action log insert error:", logErr.message);
 
-  console.log(`[MOCK] Purchase: ${pack.name} → ${email} (+${pack.credits} cr)`);
+  console.log(`[MOCK] Purchase: ${pack.name} → ${resolvedEmail} (+${pack.credits} cr)`);
   return { success: true, credits_added: pack.credits, new_balance: newBalance, pack_name: pack.name };
 }
 
@@ -1602,7 +1629,7 @@ app.post("/mock/purchase", requireAuth, async (req, res) => {
   const { pack_id } = req.body || {};
   if (!pack_id) return res.status(400).json({ error: "pack_id required" });
   try {
-    const result = await doMockPurchase(req.userId, req.user.email, pack_id);
+    const result = await doMockPurchase(req.userId, pack_id, req.user.email);
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1612,10 +1639,10 @@ app.post("/mock/purchase", requireAuth, async (req, res) => {
 // POST /admin/api/mock-purchase — authenticated via admin session (used by admin panel)
 app.post("/admin/api/mock-purchase", adminAuth, async (req, res) => {
   console.log("[MOCK] Admin mock-purchase request body:", req.body);
-  const { user_id, pack_id, user_email } = req.body || {};
+  const { user_id, pack_id, email } = req.body || {};
   if (!user_id || !pack_id) return res.status(400).json({ error: "user_id and pack_id required" });
   try {
-    const result = await doMockPurchase(user_id, user_email || user_id, pack_id);
+    const result = await doMockPurchase(user_id, pack_id, email);
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });

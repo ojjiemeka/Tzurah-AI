@@ -3045,7 +3045,7 @@ async function openMockPurchaseModal(userId, email) {
     confirmBtn.disabled = true;
     confirmBtn.textContent = "Processing…";
     try {
-      const d = await apiPost("/admin/api/mock-purchase", { user_id: userId, pack_id: selectedPackId, user_email: email });
+      const d = await apiPost("/admin/api/mock-purchase", { user_id: userId, pack_id: selectedPackId, email });
       toast(`✅ Added ${d.credits_added} credits to ${email}`, "success");
       ov.remove();
       openUserProfile(userId, email);
