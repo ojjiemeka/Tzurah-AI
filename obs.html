@@ -2,79 +2,89 @@
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tzurah OBS Output</title>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
-    body {
-      background:#000;
+    html, body {
       width:1280px; height:720px;
-      overflow:hidden;
+      overflow:hidden; background:#000;
     }
     #frame {
       width:1280px; height:720px;
-      object-fit:cover;
-      display:none;
+      object-fit:cover; display:none;
       position:absolute; top:0; left:0;
     }
     #status {
       position:absolute; top:50%; left:50%;
       transform:translate(-50%,-50%);
-      color:rgba(255,255,255,0.6); font-size:14px;
-      font-family:sans-serif; text-align:center;
+      color:rgba(255,255,255,0.5);
+      font:14px/1.6 sans-serif;
+      text-align:center;
       pointer-events:none;
     }
+    /* Preview mode — only shown when ?preview in URL */
     #preview-badge {
       display:none;
-      position:absolute; top:12px; left:50%; transform:translateX(-50%);
-      background:rgba(99,102,241,0.85); color:#fff;
-      font-family:sans-serif; font-size:12px; font-weight:700;
-      letter-spacing:0.08em; padding:4px 12px; border-radius:20px;
-      pointer-events:none;
+      position:absolute; top:12px; left:12px;
+      background:#7c3aed; color:#fff;
+      font:11px sans-serif; padding:4px 10px;
+      border-radius:4px; letter-spacing:1px;
     }
-    body.preview-mode { outline:2px solid rgba(99,102,241,0.7); }
     body.preview-mode #preview-badge { display:block; }
+    body.preview-mode { outline: 2px solid #7c3aed; }
   </style>
 </head>
 <body>
   <img id="frame" alt="" />
-  <div id="status">Waiting for Tzurah output…<br><small>Make sure the app is running and OBS mode is on</small></div>
+  <div id="status">
+    Waiting for Tzurah stream...<br>
+    <small>Start a session and enable OBS mode in the app</small>
+  </div>
   <div id="preview-badge">PREVIEW MODE</div>
   <script>
-    if (location.search.includes("preview")) {
-      document.body.classList.add("preview-mode");
+    // Enable preview mode if ?preview in URL
+    if (location.search.includes('preview')) {
+      document.body.classList.add('preview-mode')
     }
 
-    const img    = document.getElementById("frame");
-    const status = document.getElementById("status");
+    const img = document.getElementById('frame')
+    const status = document.getElementById('status')
 
     function connect() {
-      const ws = new WebSocket("ws://localhost:3000");
+      const ws = new WebSocket('ws://localhost:3000')
+      let hasFrame = false
 
       ws.onopen = () => {
-        ws.send(JSON.stringify({ type: "obs-source" }));
-      };
+        ws.send(JSON.stringify({ type: 'obs-source' }))
+      }
 
       ws.onmessage = (e) => {
         try {
-          const msg = JSON.parse(e.data);
-          if (msg.type === "frame" && msg.data) {
-            img.src = msg.data;
-            img.style.display = "block";
-            status.style.display = "none";
+          const msg = JSON.parse(e.data)
+          if (msg.type === 'frame' && msg.data) {
+            if (!hasFrame) {
+              hasFrame = true
+              img.style.display = 'block'
+              status.style.display = 'none'
+            }
+            img.src = msg.data
           }
-        } catch (_) {}
-      };
+        } catch(err) {}
+      }
 
       ws.onclose = () => {
-        img.style.display = "none";
-        status.style.display = "block";
-        status.innerHTML = "Connection lost. Reconnecting…<br><small>Make sure Tzurah Live is running</small>";
-        setTimeout(connect, 2000);
-      };
+        hasFrame = false
+        img.style.display = 'none'
+        status.style.display = 'block'
+        status.innerHTML = 'Stream disconnected.<br><small>Reconnecting...</small>'
+        setTimeout(connect, 2000)
+      }
 
-      ws.onerror = () => ws.close();
+      ws.onerror = () => ws.close()
     }
 
-    connect();
+    connect()
   </script>
 </body>
 </html>
