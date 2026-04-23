@@ -998,21 +998,29 @@ app.delete("/admin/api/users/:id", adminAuth, async (req, res) => {
       return res.status(403).json({ error: "Only super admins can delete users" });
     }
 
-    // Delete in order to satisfy FK constraints — each is non-fatal if table missing
-    await supabaseAdmin.from("usage").delete().eq("user_id", userId).catch(() => {});
-    await supabaseAdmin.from("sessions").delete().eq("user_id", userId).catch(() => {});
-    await supabaseAdmin.from("purchases").delete().eq("user_id", userId).catch(() => {});
-    await supabaseAdmin.from("profiles").delete().eq("id", userId).catch(() => {});
+    // Delete in order to satisfy FK constraints — each is non-fatal
+    const { error: e1 } = await supabaseAdmin.from("usage").delete().eq("user_id", userId);
+    if (e1) console.warn("[Admin] usage delete:", e1.message);
 
-    // Auth user must be deleted last
+    const { error: e2 } = await supabaseAdmin.from("sessions").delete().eq("user_id", userId);
+    if (e2) console.warn("[Admin] sessions delete:", e2.message);
+
+    const { error: e3 } = await supabaseAdmin.from("purchases").delete().eq("user_id", userId);
+    if (e3) console.warn("[Admin] purchases delete:", e3.message);
+
+    const { error: e4 } = await supabaseAdmin.from("profiles").delete().eq("id", userId);
+    if (e4) console.warn("[Admin] profiles delete:", e4.message);
+
+    // Auth user must be deleted last — fatal if it fails
     const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(userId);
     if (authErr) throw new Error("Auth delete failed: " + authErr.message);
 
-    await supabaseAdmin.from("admin_actions").insert({
+    const { error: logErr } = await supabaseAdmin.from("admin_actions").insert({
       action: "delete_user",
-      performed_by: req.session.adminEmail || "admin",
+      performed_by: req.session?.adminEmail || "admin",
       created_at: new Date().toISOString(),
-    }).catch(() => {});
+    });
+    if (logErr) console.warn("[Admin] action log:", logErr.message);
 
     console.log("[Admin] User deleted:", userId);
     return res.json({ success: true, deleted: userId });
