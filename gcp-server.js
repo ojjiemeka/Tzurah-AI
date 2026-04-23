@@ -101,7 +101,7 @@ async function logAction(action, adminEmail, adminRole, targetUser, details, req
     action,
     performed_by:      adminEmail  || "unknown",
     performed_by_role: adminRole   || "unknown",
-    target_user:       targetUser  || null,
+    target_user_id:    targetUser  || null,
     ip_address:        ip,
     user_agent:        req?.headers?.["user-agent"] || "unknown",
     details:           detailsStr,
@@ -109,13 +109,13 @@ async function logAction(action, adminEmail, adminRole, targetUser, details, req
   };
   const { error } = await supabaseAdmin.from("admin_actions").insert(fullEntry);
   if (error) {
-    // Fallback: old schema (action, performed_by, target_user, details, created_at)
+    // Fallback: old schema (action, performed_by, target_user_id, details, created_at)
     const simpleEntry = {
       action,
-      performed_by: adminEmail || "unknown",
-      target_user:  targetUser || null,
-      details:      detailsStr,
-      created_at:   now,
+      performed_by:   adminEmail || "unknown",
+      target_user_id: targetUser || null,
+      details:        detailsStr,
+      created_at:     now,
     };
     const { error: e2 } = await supabaseAdmin.from("admin_actions").insert(simpleEntry);
     if (e2) console.warn("[AUDIT] Log failed (both schemas):", e2.message);
