@@ -1646,9 +1646,66 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   </div>
   <div class="table-wrap">
     <table class="mobile-cards">
-      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Last Login</th><th>Status</th><th>Actions</th></tr></thead>
-      <tbody id="subadmins-tbody"><tr><td colspan="6" class="loading-cell"><div class="spinner"></div></td></tr></tbody>
+      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Created</th><th>Last Login</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody id="subadmins-tbody"><tr><td colspan="7" class="loading-cell"><div class="spinner"></div></td></tr></tbody>
     </table>
+  </div>
+
+  <!-- Permissions Guide -->
+  <div style="margin-top:24px;border:1px solid rgba(255,255,255,0.08);border-radius:8px;overflow:hidden" id="perms-guide-card">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;cursor:pointer;user-select:none;background:var(--surface2)" onclick="togglePermsGuide()">
+      <span style="font-size:13px;font-weight:600">📋 Role Permissions Guide</span>
+      <span id="perms-guide-toggle" style="font-size:11px;color:var(--muted)">▼ Show</span>
+    </div>
+    <div id="perms-guide-body" style="display:none;padding:16px">
+      <div style="display:grid;grid-template-columns:1fr repeat(4,80px);gap:0;font-size:12px">
+        <!-- Header -->
+        <div style="padding:8px 0;font-weight:700;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border)">Permission</div>
+        <div style="padding:8px 4px;text-align:center;border-bottom:1px solid var(--border)"><span style="display:inline-block;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700;background:#7f1d1d;color:#fca5a5">Super Admin</span></div>
+        <div style="padding:8px 4px;text-align:center;border-bottom:1px solid var(--border)"><span style="display:inline-block;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700;background:#78350f;color:#fcd34d">Admin</span></div>
+        <div style="padding:8px 4px;text-align:center;border-bottom:1px solid var(--border)"><span style="display:inline-block;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700;background:#1e3a5f;color:#93c5fd">Support</span></div>
+        <div style="padding:8px 4px;text-align:center;border-bottom:1px solid var(--border)"><span style="display:inline-block;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700;background:#14532d;color:#86efac">Analyst</span></div>
+        <!-- Rows -->
+        <div style="padding:1px 0;color:var(--text2);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:8px 0 4px;color:var(--muted);grid-column:1/-1;margin-top:6px">User Management</div>
+        ${[
+          ['View Users',           1,1,1,0],
+          ['View Revenue',         1,1,0,1],
+          ['View Purchases',       1,1,1,1],
+          ['View Sessions',        1,1,1,0],
+          ['Gift Credits',         1,1,1,0],
+          ['Deduct Credits',       1,1,0,0],
+          ['Ban / Unban User',     1,1,0,0],
+          ['Delete User',          1,0,0,0],
+          ['Kill Session',         1,1,0,0],
+          ['divider','System Actions'],
+          ['Send Emails',          1,1,0,0],
+          ['Manage Announcements', 1,1,0,0],
+          ['Manage Packs',         1,1,0,0],
+          ['Manage IP Blocks',     1,1,0,0],
+          ['Mock Purchase',        1,1,0,0],
+          ['divider','Admin Controls'],
+          ['Toggle Feature Flags', 1,0,0,0],
+          ['Manage Sub-admins',    1,0,0,0],
+          ['View Audit Log',       1,0,0,0],
+          ['Change Settings/Keys', 1,0,0,0],
+        ].map((r,i) => {
+          if (r[0] === 'divider') return `<div style="padding:8px 0 4px;color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;grid-column:1/-1;margin-top:6px;border-top:1px solid var(--border)">${r[1]}</div>`;
+          const bg = i % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent';
+          const cell = (v) => v ? '<span style="color:#22c55e;font-size:14px">✅</span>' : '<span style="color:#475569;font-size:14px">❌</span>';
+          return `<div style="padding:6px 0;background:${bg}">${r[0]}</div><div style="text-align:center;background:${bg}">${cell(r[1])}</div><div style="text-align:center;background:${bg}">${cell(r[2])}</div><div style="text-align:center;background:${bg}">${cell(r[3])}</div><div style="text-align:center;background:${bg}">${cell(r[4])}</div>`;
+        }).join('')}
+      </div>
+      <!-- Role descriptions -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+        <div><div style="margin-bottom:4px"><span style="display:inline-block;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700;background:#7f1d1d;color:#fca5a5">👑 Super Admin</span></div><div style="font-size:11px;color:var(--muted)">Full access, all actions, no restrictions</div></div>
+        <div><div style="margin-bottom:4px"><span style="display:inline-block;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700;background:#78350f;color:#fcd34d">🟡 Admin</span></div><div style="font-size:11px;color:var(--muted)">Day-to-day operations, cannot change system settings</div></div>
+        <div><div style="margin-bottom:4px"><span style="display:inline-block;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700;background:#1e3a5f;color:#93c5fd">🔵 Support</span></div><div style="font-size:11px;color:var(--muted)">Customer support only: read + gift credits</div></div>
+        <div><div style="margin-bottom:4px"><span style="display:inline-block;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700;background:#14532d;color:#86efac">🟢 Analyst</span></div><div style="font-size:11px;color:var(--muted)">Read-only access to revenue and purchase data</div></div>
+      </div>
+      <div style="margin-top:12px;font-size:11px;color:var(--muted);padding:8px 12px;background:rgba(255,255,255,0.03);border-radius:6px;border-left:3px solid var(--border)">
+        Role permissions are enforced server-side. UI elements are hidden based on role but all API endpoints are independently protected.
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1674,29 +1731,32 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 
   <!-- Filters -->
   <div class="filter-row" style="margin-bottom:14px">
-    <select id="audit-filter-action" style="min-width:160px" onchange="renderAuditLog(1)">
+    <select id="audit-filter-action" style="min-width:175px" onchange="renderAuditLog(1)">
       <option value="">All actions</option>
-      <option value="admin_login">admin_login</option>
-      <option value="admin_login_failed">admin_login_failed</option>
-      <option value="gift_credits">gift_credits</option>
-      <option value="deduct_credits">deduct_credits</option>
-      <option value="ban_user">ban_user</option>
-      <option value="unban_user">unban_user</option>
-      <option value="delete_user">delete_user</option>
-      <option value="kill_session">kill_session</option>
-      <option value="send_email">send_email</option>
-      <option value="create_announcement">create_announcement</option>
-      <option value="ip_block">ip_block</option>
-      <option value="ip_unblock">ip_unblock</option>
-      <option value="create_subadmin">create_subadmin</option>
-      <option value="toggle_flag">toggle_flag</option>
-      <option value="settings_change">settings_change</option>
-      <option value="unauthorized_attempt">unauthorized_attempt</option>
+      <option value="admin_login">🔵 admin_login</option>
+      <option value="admin_login_failed">🔴 admin_login_failed</option>
+      <option value="gift_credits">🟢 gift_credits</option>
+      <option value="deduct_credits">🟠 deduct_credits</option>
+      <option value="ban_user">🔴 ban_user</option>
+      <option value="unban_user">🟢 unban_user</option>
+      <option value="delete_user">🔴 delete_user</option>
+      <option value="kill_session">🟠 kill_session</option>
+      <option value="mock_purchase">🔵 mock_purchase</option>
+      <option value="send_email">🔵 send_email</option>
+      <option value="create_announcement">🔵 create_announcement</option>
+      <option value="ip_block">🔴 ip_block</option>
+      <option value="ip_unblock">🟢 ip_unblock</option>
+      <option value="create_subadmin">🔵 create_subadmin</option>
+      <option value="delete_subadmin">🔴 delete_subadmin</option>
+      <option value="toggle_flag">🟣 toggle_flag</option>
+      <option value="settings_change">⚪ settings_change</option>
+      <option value="unauthorized_attempt">🔴 unauthorized_attempt</option>
     </select>
     <input id="audit-filter-admin" type="text" placeholder="Filter by admin email…" oninput="renderAuditLog(1)" style="min-width:200px">
     <input id="audit-filter-from"  type="date" onchange="renderAuditLog(1)">
     <input id="audit-filter-to"    type="date" onchange="renderAuditLog(1)">
-    <button class="btn btn-ghost btn-sm" onclick="document.getElementById('audit-filter-action').value='';document.getElementById('audit-filter-admin').value='';document.getElementById('audit-filter-from').value='';document.getElementById('audit-filter-to').value='';renderAuditLog(1)">Clear</button>
+    <button class="btn btn-ghost btn-sm" onclick="auditFilterToday()">Today</button>
+    <button class="btn btn-ghost btn-sm" onclick="auditFilterClear()">Clear</button>
   </div>
 
   <div class="table-wrap">
@@ -4683,24 +4743,58 @@ async function loadSubAdmins() {
   renderSubAdmins(admins);
 }
 
+const SA_ROLE_BADGE = {
+  super_admin: ['#7f1d1d','#fca5a5'],
+  admin:       ['#78350f','#fcd34d'],
+  support:     ['#1e3a5f','#93c5fd'],
+  analyst:     ['#14532d','#86efac'],
+};
+
+function saRoleBadge(role) {
+  const [bg, text] = SA_ROLE_BADGE[role] || ['#374151','#9ca3af'];
+  return `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;background:${bg};color:${text}">${esc(role)}</span>`;
+}
+
 function renderSubAdmins(admins) {
   const tbody = document.getElementById('subadmins-tbody');
   if (!tbody) return;
-  if (!admins?.length) { tbody.innerHTML = `<tr><td colspan="6" class="td-empty">No sub-admins yet</td></tr>`; return; }
+  if (!admins?.length) { tbody.innerHTML = `<tr><td colspan="7" class="td-empty">No sub-admins yet</td></tr>`; return; }
   const isSuperAdmin = window._adminRole === 'super_admin';
-  tbody.innerHTML = admins.map(a => `
-    <tr id="sa-row-${a.id}">
+  tbody.innerHTML = admins.map(a => {
+    const createdAt = a.created_at
+      ? new Date(a.created_at).toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric' })
+      : '—';
+    const lastLogin = a.last_login
+      ? timeAgo(new Date(a.last_login))
+      : '<em style="color:var(--muted)">Never</em>';
+    const statusDot  = a.is_active ? 'dot-green' : 'dot-red';
+    const statusText = a.is_active
+      ? '<span style="color:var(--success)">Active</span>'
+      : '<span style="color:var(--warning)">Suspended</span>';
+    const suspendBtn = a.is_active
+      ? `<button class="btn btn-xs btn-ghost" style="border-color:var(--border)" onclick="toggleSubAdmin('${a.id}', false)">⏸ Suspend</button>`
+      : `<button class="btn btn-xs btn-ghost" style="border-color:var(--success);color:var(--success)" onclick="toggleSubAdmin('${a.id}', true)">▶ Restore</button>`;
+    const deleteBtn = isSuperAdmin
+      ? `<button class="btn btn-xs btn-red" onclick="deleteSubAdmin('${esc(a.id)}','${esc(a.email)}','${esc(a.role)}')">🗑 Delete</button>`
+      : '';
+    return `<tr id="sa-row-${a.id}" style="transition:background .1s">
       <td data-label="Name">${esc(a.name || '—')}</td>
-      <td data-label="Email">${esc(a.email)}</td>
-      <td data-label="Role"><span class="badge ${a.role === 'admin' ? 'badge-accent' : a.role === 'support' ? 'badge-warning' : 'badge-muted'}">${a.role}</span></td>
-      <td data-label="Last Login" style="color:var(--muted);font-size:0.78rem">${a.last_login ? timeAgo(new Date(a.last_login)) : 'Never'}</td>
-      <td data-label="Status"><span class="status-dot ${a.is_active ? 'dot-green':'dot-red'}"></span> ${a.is_active ? 'Active' : 'Suspended'}</td>
-      <td data-label="⋯" style="display:flex;gap:6px;align-items:center">
-        <button class="btn btn-xs btn-ghost" onclick="toggleSubAdmin('${a.id}', ${!a.is_active})">${a.is_active ? 'Suspend' : 'Restore'}</button>
-        ${isSuperAdmin ? `<button class="btn btn-xs" style="background:transparent;border:1px solid var(--danger);color:var(--danger)" onclick="deleteSubAdmin('${esc(a.id)}','${esc(a.email)}','${esc(a.role)}')">🗑 Delete</button>` : ''}
-      </td>
-    </tr>
-  `).join('');
+      <td data-label="Email" style="font-size:12px">${esc(a.email)}</td>
+      <td data-label="Role">${saRoleBadge(a.role)}</td>
+      <td data-label="Created" style="color:var(--muted);font-size:12px">${createdAt}</td>
+      <td data-label="Last Login" style="font-size:12px">${lastLogin}</td>
+      <td data-label="Status"><span class="status-dot ${statusDot}"></span> ${statusText}</td>
+      <td data-label="⋯" style="display:flex;gap:8px;align-items:center">${suspendBtn}${deleteBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+function togglePermsGuide() {
+  const body   = document.getElementById('perms-guide-body');
+  const toggle = document.getElementById('perms-guide-toggle');
+  const open   = body.style.display === 'none';
+  body.style.display  = open ? '' : 'none';
+  toggle.textContent  = open ? '▲ Hide' : '▼ Show';
 }
 
 function deleteSubAdmin(id, email, role) {
@@ -4951,17 +5045,135 @@ async function updateFlag(key, enabled) {
 window._auditPage = 1;
 window._auditCache = null;
 
-const AUDIT_ROW_COLORS = {
-  delete_user:          'audit-row-delete',
-  ban_user:             'audit-row-ban',
-  gift_credits:         'audit-row-gift',
-  unauthorized_attempt: 'audit-row-warn',
+// Row background tints
+const AUDIT_ROW_BG = {
+  delete_user:          'rgba(127,29,29,0.15)',
+  ban_user:             'rgba(127,29,29,0.15)',
+  unauthorized_attempt: 'rgba(127,29,29,0.15)',
+  admin_login_failed:   'rgba(127,29,29,0.15)',
+  gift_credits:         'rgba(20,83,45,0.15)',
+  unban_user:           'rgba(20,83,45,0.15)',
+  mock_purchase:        'rgba(20,83,45,0.15)',
+  deduct_credits:       'rgba(124,45,18,0.12)',
+  kill_session:         'rgba(124,45,18,0.12)',
 };
 
+// Action badge colours: [bg, text, weight]
+const AUDIT_ACTION_STYLE = {
+  admin_login:          ['#1e3a5f','#9ca3af',''],
+  admin_login_failed:   ['#7f1d1d','#fca5a5',''],
+  gift_credits:         ['#14532d','#86efac',''],
+  deduct_credits:       ['#7c2d12','#fdba74',''],
+  ban_user:             ['#7f1d1d','#fca5a5',''],
+  unban_user:           ['#14532d','#86efac',''],
+  delete_user:          ['#7f1d1d','#fca5a5','font-weight:700'],
+  kill_session:         ['#7c2d12','#fdba74',''],
+  mock_purchase:        ['#1e3a5f','#93c5fd',''],
+  toggle_flag:          ['#4c1d95','#c4b5fd',''],
+  create_announcement:  ['#1e3a5f','#93c5fd',''],
+  ip_block:             ['#7f1d1d','#fca5a5',''],
+  ip_unblock:           ['#14532d','#86efac',''],
+  unauthorized_attempt: ['#7f1d1d','#fca5a5',''],
+  delete_subadmin:      ['#7f1d1d','#fca5a5',''],
+  create_subadmin:      ['#1e3a5f','#93c5fd',''],
+  send_email:           ['#1e3a5f','#93c5fd',''],
+  settings_change:      ['#374151','#9ca3af',''],
+};
+
+// Role badge colours
+const AUDIT_ROLE_STYLE = {
+  super_admin: ['#7f1d1d','#fca5a5'],
+  admin:       ['#78350f','#fcd34d'],
+  support:     ['#1e3a5f','#93c5fd'],
+  analyst:     ['#14532d','#86efac'],
+};
+
+function auditFmtTs(ts) {
+  if (!ts) return '—';
+  return new Date(ts).toLocaleString('en-GB', {
+    day:'2-digit', month:'short', year:'numeric',
+    hour:'2-digit', minute:'2-digit', second:'2-digit', hour12: false,
+  });
+}
+
+function auditRoleBadge(role) {
+  if (!role || role === '—') return '<span style="color:var(--muted)">—</span>';
+  const [bg, text] = AUDIT_ROLE_STYLE[role] || ['#374151','#9ca3af'];
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;background:${bg};color:${text}">${esc(role)}</span>`;
+}
+
 function auditActionBadge(action) {
-  const cls = AUDIT_ROW_COLORS[action] ? 'audit-action' : 'audit-action';
-  const icon = action === 'unauthorized_attempt' ? '⚠️ ' : '';
-  return `<span class="${cls}">${icon}${esc(action)}</span>`;
+  if (!action || action === '—') return '<span style="color:var(--muted)">—</span>';
+  const [bg, text, extra] = AUDIT_ACTION_STYLE[action] || ['#374151','#9ca3af',''];
+  const prefix = action === 'unauthorized_attempt' ? '⚠️ ' : '';
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;background:${bg};color:${text};${extra}">${prefix}${esc(action)}</span>`;
+}
+
+function auditFmtTarget(val) {
+  if (!val) return '<span style="color:var(--muted);text-align:center">—</span>';
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (UUID_RE.test(val)) {
+    return `<span title="${esc(val)}" style="font-family:monospace;font-size:11px;cursor:default">${val.slice(0,8)}…</span>`;
+  }
+  return `<span style="font-size:11px">${esc(val)}</span>`;
+}
+
+function auditFmtIP(ip) {
+  if (!ip || ip === 'unknown') return '<span style="color:var(--muted)">—</span>';
+  if (ip === '::1') return '<span style="color:var(--muted);font-size:11px">localhost</span>';
+  const clean = ip.replace(/^::ffff:/, '');
+  return `<span style="font-size:11px">${esc(clean)}</span>`;
+}
+
+function auditFmtDetails(action, rawDetails) {
+  if (!rawDetails) return '<span style="color:var(--muted)">—</span>';
+  let d = rawDetails;
+  if (typeof d === 'string') {
+    try { d = JSON.parse(d); } catch { /* keep as string */ }
+  }
+  let text = '';
+  if (typeof d === 'string') {
+    text = d;
+  } else if (d && typeof d === 'object') {
+    if (d.success === true && !d.amount)         text = 'Login successful';
+    else if (d.attempted_email)                  text = `Attempted: ${d.attempted_email}`;
+    else if (d.amount != null && d.new_balance != null) {
+      const sign = action === 'deduct_credits' ? '−' : '+';
+      text = `${sign}${d.amount} cr → ${d.new_balance} cr`;
+      if (d.reason) text += ` · ${d.reason}`;
+    }
+    else if (d.flag != null && d.value != null)  text = `${d.flag}: ${d.value ? 'ON' : 'OFF'}`;
+    else if (d.pack_name && d.credits != null)   text = `${d.pack_name} · ${d.credits} cr · $${d.price || 0}`;
+    else if (d.reason && Object.keys(d).length === 1) text = `Reason: ${d.reason}`;
+    else if (d.endpoint)                         text = `Blocked: ${d.endpoint}`;
+    else if (d.ip)                               text = `IP: ${d.ip}${d.reason ? ' · '+d.reason : ''}`;
+    else if (d.deleted_email)                    text = `Deleted: ${d.deleted_email} (${d.deleted_role || ''})`;
+    else if (d.new_admin_email)                  text = `Created: ${d.new_admin_email} as ${d.role_assigned || ''}`;
+    else if (d.subject)                          text = `"${d.subject}" → ${d.sent || 0} sent`;
+    else if (d.field_changed)                    text = `Changed: ${d.field_changed}`;
+    else if (d.title)                            text = `"${d.title}"${d.type ? ' ('+d.type+')' : ''}`;
+    else text = Object.entries(d).map(([k,v]) => `${k}: ${v}`).join(' · ');
+  }
+  const full = esc(typeof rawDetails === 'string' ? rawDetails : JSON.stringify(rawDetails));
+  if (text.length > 60) {
+    return `<span class="audit-detail" title="${full}" style="cursor:default">${esc(text.slice(0,57))}…</span>`;
+  }
+  return `<span class="audit-detail" title="${full}" style="cursor:default">${esc(text)}</span>`;
+}
+
+function auditFilterToday() {
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('audit-filter-from').value = today;
+  document.getElementById('audit-filter-to').value   = today;
+  renderAuditLog(1);
+}
+
+function auditFilterClear() {
+  document.getElementById('audit-filter-action').value = '';
+  document.getElementById('audit-filter-admin').value  = '';
+  document.getElementById('audit-filter-from').value   = '';
+  document.getElementById('audit-filter-to').value     = '';
+  renderAuditLog(1);
 }
 
 async function renderAuditLog(page = 1) {
@@ -4990,23 +5202,26 @@ async function renderAuditLog(page = 1) {
   window._auditCache = { entries, total, totalPages };
 
   if (!entries.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="td-empty">No entries match your filters</td></tr>';
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:32px 16px;color:var(--muted)">
+      <div style="font-size:24px;margin-bottom:8px">📋</div>
+      <div style="font-size:13px">No audit entries found</div>
+      <div style="font-size:11px;margin-top:4px">Try adjusting your filters</div>
+    </td></tr>`;
     document.getElementById('audit-pager').style.display = 'none';
     return;
   }
 
   tbody.innerHTML = entries.map(e => {
-    const rowCls = AUDIT_ROW_COLORS[e.action] || '';
-    const ts = e.created_at ? new Date(e.created_at).toLocaleString() : '—';
-    const details = e.details ? (typeof e.details === 'string' ? e.details : JSON.stringify(e.details)) : '';
-    return `<tr class="${rowCls}">
-      <td style="font-size:11px;white-space:nowrap">${ts}</td>
+    const bg = AUDIT_ROW_BG[e.action] || '';
+    const rowStyle = bg ? `style="background:${bg}"` : '';
+    return `<tr ${rowStyle}>
+      <td style="font-size:11px;white-space:nowrap;font-family:monospace">${auditFmtTs(e.created_at)}</td>
       <td style="font-size:12px">${esc(e.performed_by || '—')}</td>
-      <td style="font-size:11px;color:var(--muted)">${esc(e.performed_by_role || '—')}</td>
-      <td>${auditActionBadge(e.action || '—')}</td>
-      <td style="font-size:11px;color:var(--muted)">${esc(e.target_user || '—')}</td>
-      <td style="font-size:11px;color:var(--muted)">${esc(e.ip_address || '—')}</td>
-      <td class="audit-detail" title="${esc(details)}">${esc(details)}</td>
+      <td>${auditRoleBadge(e.performed_by_role)}</td>
+      <td>${auditActionBadge(e.action)}</td>
+      <td>${auditFmtTarget(e.target_user_id || e.target_user)}</td>
+      <td>${auditFmtIP(e.ip_address)}</td>
+      <td>${auditFmtDetails(e.action, e.details)}</td>
     </tr>`;
   }).join('');
 
@@ -5027,9 +5242,9 @@ function exportAuditCSV() {
     e.performed_by || '',
     e.performed_by_role || '',
     e.action || '',
-    e.target_user || '',
+    e.target_user_id || e.target_user || '',
     e.ip_address || '',
-    (e.details || '').replace(/"/g, '""'),
+    (typeof e.details === 'string' ? e.details : JSON.stringify(e.details || '')).replace(/"/g, '""'),
   ].map(v => `"${v}"`).join(','));
   const csv = [header.join(','), ...rows].join('\n');
   const blob = new Blob([csv], { type: 'text/csv' });
