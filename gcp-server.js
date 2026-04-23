@@ -989,6 +989,39 @@ app.post("/admin/api/unban-user", adminAuth, async (req, res) => {
   }
 });
 
+// ── Admin: delete user ────────────────────────────────────────────
+app.delete("/admin/api/users/:id", adminAuth, async (req, res) => {
+  try {
+    const userId = req.params.id;
+
+    if (req.session.adminRole !== "super_admin") {
+      return res.status(403).json({ error: "Only super admins can delete users" });
+    }
+
+    // Delete in order to satisfy FK constraints — each is non-fatal if table missing
+    await supabaseAdmin.from("usage").delete().eq("user_id", userId).catch(() => {});
+    await supabaseAdmin.from("sessions").delete().eq("user_id", userId).catch(() => {});
+    await supabaseAdmin.from("purchases").delete().eq("user_id", userId).catch(() => {});
+    await supabaseAdmin.from("profiles").delete().eq("id", userId).catch(() => {});
+
+    // Auth user must be deleted last
+    const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(userId);
+    if (authErr) throw new Error("Auth delete failed: " + authErr.message);
+
+    await supabaseAdmin.from("admin_actions").insert({
+      action: "delete_user",
+      performed_by: req.session.adminEmail || "admin",
+      created_at: new Date().toISOString(),
+    }).catch(() => {});
+
+    console.log("[Admin] User deleted:", userId);
+    return res.json({ success: true, deleted: userId });
+  } catch (err) {
+    console.error("[Admin] Delete user error:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════
 // USER SESSIONS  (live session tracking for admin dashboard)
 //

@@ -2410,6 +2410,10 @@ function openMenu(btn) {
     ${banned
       ? `<button class="item-green" onclick="doUnban('${esc(uid)}','${esc(email)}')">&#9989; Unban User</button>`
       : `<button class="item-red"   onclick="doBan('${esc(uid)}','${esc(email)}')">&#128683; Ban User</button>`}
+    ${window._adminRole === 'super_admin' ? `
+    <div class="sep"></div>
+    <button class="item-red" onclick="doDeleteUser('${esc(uid)}','${esc(email)}')">&#128465; Delete User</button>
+    ` : ''}
   `;
   menu.style.position = "fixed";
   menu.style.top   = (rect.bottom + 4) + "px";
@@ -2465,6 +2469,89 @@ function doUnban(uid, email) {
       if (u) u.is_banned = false;
     } catch(e) { toast("Error: "+e.message,"error"); }
   });
+}
+
+function doDeleteUser(uid, email) {
+  document.getElementById("delete-user-modal")?.remove();
+
+  const ov = document.createElement("div");
+  ov.id = "delete-user-modal";
+  ov.className = "admin-modal-overlay";
+  ov.innerHTML = `
+    <div class="admin-modal-card" style="max-width:420px;border-color:rgba(239,68,68,.4)">
+      <div class="modal-header" style="color:#ef4444">⚠️ Delete User</div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:16px">
+        This will permanently delete <strong style="color:var(--text)">${esc(email)}</strong>
+        and <strong style="color:#ef4444">ALL</strong> their data: sessions, purchases,
+        usage history, and their account.<br><br>
+        <strong style="color:#ef4444">This cannot be undone.</strong>
+      </div>
+      <div style="margin-bottom:12px">
+        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:6px">
+          Type <strong style="color:var(--text);font-family:monospace">${esc(email)}</strong> to confirm
+        </label>
+        <input id="delete-confirm-input" type="text" autocomplete="off" spellcheck="false"
+          placeholder="${esc(email)}"
+          style="width:100%;background:var(--bg);border:1px solid rgba(239,68,68,.4);
+                 color:var(--text);padding:8px 10px;border-radius:6px;font-size:12px;
+                 font-family:monospace;outline:none">
+      </div>
+      <div class="modal-footer" style="gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('delete-user-modal').remove()">Cancel</button>
+        <button id="delete-confirm-btn" class="btn btn-sm" disabled
+          style="background:#7f1d1d;color:#fca5a5;border:1px solid #ef4444;opacity:.4;cursor:not-allowed">
+          Delete Permanently
+        </button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(ov);
+
+  const input = document.getElementById("delete-confirm-input");
+  const btn   = document.getElementById("delete-confirm-btn");
+
+  input.addEventListener("input", () => {
+    const match = input.value.trim() === email;
+    btn.disabled = !match;
+    btn.style.opacity = match ? "1" : ".4";
+    btn.style.cursor  = match ? "pointer" : "not-allowed";
+  });
+
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    btn.textContent = "Deleting…";
+    try {
+      const r = await fetch(`/admin/api/users/${encodeURIComponent(uid)}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (r.status === 401) { window.location.href = "/admin/login"; return; }
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "Delete failed");
+
+      ov.remove();
+      closeSlideOver();
+
+      // Flash red then remove the row
+      const row = document.querySelector(`tr[data-uid="${CSS.escape(uid)}"]`);
+      if (row) {
+        row.style.transition = "background .3s";
+        row.style.background = "#7f1d1d";
+        setTimeout(() => row.remove(), 500);
+      }
+
+      // Remove from cache
+      if (cache.users) cache.users = cache.users.filter(u => u.id !== uid);
+
+      toast(`✅ User ${email} deleted permanently`);
+    } catch(e) {
+      toast("Delete failed: " + e.message, "error");
+      btn.disabled = false;
+      btn.textContent = "Delete Permanently";
+    }
+  });
+
+  ov.addEventListener("click", (e) => { if (e.target === ov) ov.remove(); });
 }
 
 // Bulk actions
@@ -3023,6 +3110,19 @@ async function openUserProfile(userId, emailHint) {
           }).join("")}
         </tbody>
       </table>` : `<div style="color:var(--muted);font-size:12px">No purchases yet</div>`}
+
+      ${window._adminRole === 'super_admin' ? `
+      <!-- Danger zone — super admin only -->
+      <div style="margin-top:24px;padding-top:16px;border-top:1px solid rgba(239,68,68,.2)">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#ef4444;margin-bottom:10px">Danger Zone</div>
+        <button class="btn btn-sm"
+          style="background:transparent;border:1px solid #ef4444;color:#ef4444;width:100%"
+          onmouseover="this.style.background='#7f1d1d'"
+          onmouseout="this.style.background='transparent'"
+          onclick="doDeleteUser('${esc(u.id)}','${esc(u.email)}')">
+          &#128465; Delete User Permanently
+        </button>
+      </div>` : ""}
     `;
   } catch(e) {
     document.getElementById("so-profile-body").innerHTML =
@@ -4733,7 +4833,8 @@ async function init() {
     const meRes = await adminFetch('/admin/api/me');
     if (meRes?.ok) {
       const me = await meRes.json();
-      applyRoleVisibility(me.role || 'super_admin');
+      window._adminRole = me.role || 'super_admin';
+      applyRoleVisibility(window._adminRole);
       const nameEl = document.getElementById('admin-name');
       if (nameEl) nameEl.textContent = me.name || me.email || 'Admin';
     }
