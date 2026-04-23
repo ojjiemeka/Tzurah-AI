@@ -945,6 +945,67 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
                       border-radius:4px; background:var(--surface2); white-space:nowrap; }
 .audit-detail       { max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
                       color:var(--muted); font-size:11px; }
+
+/* ── User stats bar ────────────────────────────────────────────── */
+.user-stats-bar {
+  display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:14px;
+}
+@media(max-width:768px) { .user-stats-bar { grid-template-columns:repeat(2,1fr); } }
+.ust-card {
+  background:#13131f; border:1px solid rgba(255,255,255,0.06);
+  border-radius:8px; padding:10px 16px; cursor:pointer; transition:all .15s; position:relative;
+}
+.ust-card:hover { filter:brightness(1.15); }
+.ust-card.active { border-color:var(--accent); background:rgba(99,102,241,0.1); }
+.ust-val  { font-size:22px; font-weight:700; color:#fff; line-height:1.1; }
+.ust-lbl  { font-size:11px; color:#6b7280; text-transform:uppercase; letter-spacing:.6px; margin-top:3px; }
+
+/* ── Toast v2 ──────────────────────────────────────────────────── */
+.toast {
+  position:relative; padding:10px 36px 10px 14px; border-radius:8px; font-size:12px; font-weight:600;
+  opacity:0; transform:translateX(100%);
+  transition:opacity .25s ease, transform .25s ease;
+  pointer-events:auto; max-width:320px; min-width:200px; overflow:hidden;
+}
+.toast.show { opacity:1; transform:translateX(0); }
+.toast.hide { opacity:0; transform:translateX(100%); }
+.toast-progress {
+  position:absolute; bottom:0; left:0; height:2px;
+  background:rgba(255,255,255,0.35); border-radius:0 0 0 8px;
+  animation:toastProg 4s linear forwards;
+}
+@keyframes toastProg { from { width:100%; } to { width:0%; } }
+.toast-close {
+  position:absolute; top:6px; right:8px; background:none; border:none;
+  color:rgba(255,255,255,.5); font-size:14px; cursor:pointer; line-height:1; padding:2px;
+}
+.toast-close:hover { color:#fff; }
+
+/* ── Tab panel transition ──────────────────────────────────────── */
+.tab-panel { animation:none; }
+.tab-panel.tab-entering { animation:tabFadeIn .2s ease; }
+@keyframes tabFadeIn { from{opacity:.4} to{opacity:1} }
+
+/* ── Keyboard shortcut modal ───────────────────────────────────── */
+.kbd-shortcuts-grid { display:grid; grid-template-columns:1fr 1fr; gap:0 20px; }
+.kbd-section-title { font-size:10px; text-transform:uppercase; letter-spacing:.8px; color:var(--muted); font-weight:700; margin:12px 0 6px; }
+.kbd-row { display:flex; align-items:center; justify-content:space-between; padding:4px 0; font-size:12px; color:var(--text2); }
+kbd {
+  background:#1f2937; border:1px solid #374151; border-radius:4px;
+  padding:2px 6px; font-family:monospace; font-size:11px; color:var(--text2);
+  white-space:nowrap;
+}
+
+/* ── Live dot pulse ─────────────────────────────────────────────── */
+@keyframes livePulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.3)} }
+.live-dot-active { animation:livePulse 2s infinite !important; }
+
+/* ── Auth provider badge ────────────────────────────────────────── */
+.auth-badge {
+  display:inline-flex; align-items:center; justify-content:center;
+  width:14px; height:14px; border-radius:50%; font-size:9px; font-weight:700;
+  flex-shrink:0; margin-right:5px; vertical-align:middle;
+}
 </style>
 </head>
 <body>
@@ -1134,10 +1195,53 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
       </div>
     </div>
   </div>
+
+  <!-- System Status card -->
+  <div class="panel-card" style="margin-top:16px">
+    <div class="panel-hdr"><span class="ptitle">⚡ System Status</span></div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;padding:0">
+      <div style="padding:12px 16px;border-right:1px solid var(--border)">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">GCP Server</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="status-dot dot-green" id="sys-gcp-dot"></span>
+          <span id="sys-gcp-val" style="font-size:12px;font-weight:600;color:var(--success)">Online</span>
+        </div>
+      </div>
+      <div style="padding:12px 16px;border-right:1px solid var(--border)">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Supabase</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="status-dot dot-green" id="sys-db-dot"></span>
+          <span id="sys-db-val" style="font-size:12px;font-weight:600;color:var(--success)">Connected</span>
+        </div>
+      </div>
+      <div style="padding:12px 16px;border-right:1px solid var(--border)">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Decart API</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="status-dot dot-amber" id="sys-decart-dot"></span>
+          <span id="sys-decart-val" style="font-size:12px;color:var(--muted)">—</span>
+        </div>
+      </div>
+      <div style="padding:12px 16px">
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Last Update</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="status-dot dot-green" id="sys-upd-dot"></span>
+          <span id="sys-upd-val" style="font-size:12px;color:var(--muted)">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ══ USERS ═════════════════════════════════════════════════════ -->
 <div class="tab-panel" id="tab-users">
+  <!-- Quick stats bar -->
+  <div class="user-stats-bar" id="user-stats-bar">
+    <div class="ust-card" id="ust-total"      onclick="userStatFilter('total')">      <div class="ust-val" id="ust-v-total">—</div>     <div class="ust-lbl">&#128101; Total Users</div></div>
+    <div class="ust-card" id="ust-active"     onclick="userStatFilter('activeToday')"><div class="ust-val" id="ust-v-active">—</div>    <div class="ust-lbl">&#128994; Active Today</div></div>
+    <div class="ust-card" id="ust-paid"       onclick="userStatFilter('paid')">       <div class="ust-val" id="ust-v-paid">—</div>      <div class="ust-lbl">&#128176; Paid Users</div></div>
+    <div class="ust-card" id="ust-banned"     onclick="userStatFilter('banned')">     <div class="ust-val" id="ust-v-banned">—</div>    <div class="ust-lbl">&#128683; Banned</div></div>
+    <div class="ust-card" id="ust-newweek"    onclick="userStatFilter('newThisWeek')"><div class="ust-val" id="ust-v-newweek">—</div>   <div class="ust-lbl">&#128293; New This Week</div></div>
+  </div>
   <div class="filter-row">
     <input id="user-search" type="text" placeholder="Search email or name…" oninput="debounceSearch()"/>
     <select id="credit-filter" onchange="applyUserFilters()">
@@ -1150,21 +1254,30 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
       <option value="recent">Sort: Recently Joined</option>
       <option value="lastActive">Sort: Last Active</option>
       <option value="mostCredits">Sort: Most Credits</option>
+      <option value="leastCredits">Sort: Least Credits</option>
       <option value="mostSpent">Sort: Most Spent</option>
+      <option value="mostSessions">Sort: Most Sessions</option>
+      <option value="alpha">Sort: A–Z</option>
     </select>
     <button class="btn btn-accent" onclick="applyUserFilters()">Search</button>
   </div>
   <div class="chip-row">
-    <span class="chip" data-chip="activeToday" onclick="toggleChip(this)">&#128994; Active today</span>
-    <span class="chip" data-chip="lowCredits"  onclick="toggleChip(this)">&#128308; Low credits (&lt;10)</span>
-    <span class="chip" data-chip="noCredits"   onclick="toggleChip(this)">&#9899; Zero credits</span>
-    <span class="chip" data-chip="highUsage"   onclick="toggleChip(this)">&#128200; High usage</span>
+    <span class="chip" data-chip="activeToday"   onclick="toggleChip(this)">&#128994; Active today</span>
+    <span class="chip" data-chip="lowCredits"    onclick="toggleChip(this)">&#128308; Low credits (&lt;10)</span>
+    <span class="chip" data-chip="noCredits"     onclick="toggleChip(this)">&#9899; Zero credits</span>
+    <span class="chip" data-chip="highUsage"     onclick="toggleChip(this)">&#128200; High usage</span>
+    <span class="chip" data-chip="newThisWeek"   onclick="toggleChip(this)">&#128293; New this week</span>
+    <span class="chip" data-chip="paid"          onclick="toggleChip(this)">&#128176; Paid</span>
+    <span class="chip" data-chip="banned"        onclick="toggleChip(this)">&#128683; Banned</span>
+    <span class="chip" data-chip="neverStreamed" onclick="toggleChip(this)">&#128123; Never streamed</span>
+    <span class="chip" data-chip="highValue"     onclick="toggleChip(this)">&#11088; High value</span>
   </div>
   <div class="bulk-bar" id="bulk-bar">
     <span class="bulk-count" id="bulk-count">0 selected</span>
-    <button class="btn btn-green btn-sm" onclick="doBulkGift()">&#127873; Gift 10 credits</button>
-    <button class="btn btn-red btn-sm"   onclick="doBulkBan()">&#128683; Ban selected</button>
-    <button class="btn btn-ghost btn-sm" onclick="doExportCSV()">&#128196; Export CSV</button>
+    <button class="btn btn-ghost btn-sm"  onclick="doBulkEmail()">&#128231; Email Selected</button>
+    <button class="btn btn-green btn-sm"  onclick="doBulkGift()">&#127873; Gift Credits</button>
+    <button class="btn btn-red btn-sm"    onclick="doBulkBan()">&#128683; Ban Selected</button>
+    <button class="btn btn-accent btn-sm" onclick="doBulkSelectAll()">&#10003; Select All</button>
     <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="clearSelection()">&#215; Clear</button>
   </div>
   <div class="table-wrap">
@@ -1925,6 +2038,15 @@ function flashUserRow(userId, updates, action = "default") {
   }
 }
 
+// ── Button loading state ──────────────────────────────────────────
+function btnLoading(btn, label = "…") {
+  if (!btn) return () => {};
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner" style="width:12px;height:12px;border-width:1.5px"></span> ${label}`;
+  return () => { btn.disabled = false; btn.innerHTML = orig; };
+}
+
 // ── API helpers ───────────────────────────────────────────────────
 async function api(path) {
   const r = await fetch(path, { credentials: "include" });
@@ -1944,14 +2066,40 @@ async function apiPost(path, body) {
   return r.json();
 }
 
-// ── Toast ─────────────────────────────────────────────────────────
+// ── Toast v2 — stacking, progress bar, error persistence ─────────
+const _toastQueue = [];
 function toast(msg, type="success") {
+  const container = document.getElementById("toast-container");
+  const isError = type === "error" || type === "danger";
+  const MAX = 3;
+
+  // Trim oldest non-error if at cap
+  const active = container.querySelectorAll(".toast.show");
+  if (active.length >= MAX) {
+    const oldest = Array.from(active).find(t => !t.dataset.persistent);
+    if (oldest) _dismissToast(oldest);
+  }
+
   const t = document.createElement("div");
   t.className = `toast toast-${type}`;
-  t.textContent = msg;
-  document.getElementById("toast-container").appendChild(t);
-  setTimeout(() => t.classList.add("show"), 10);
-  setTimeout(() => { t.classList.remove("show"); setTimeout(() => t.remove(), 300); }, 3500);
+  if (isError) t.dataset.persistent = "1";
+  t.innerHTML = `<span>${String(msg).replace(/</g,'&lt;')}</span>
+    ${!isError ? '<div class="toast-progress"></div>' : ''}
+    <button class="toast-close" onclick="_dismissToast(this.closest('.toast'))">×</button>`;
+  container.appendChild(t);
+  requestAnimationFrame(() => requestAnimationFrame(() => t.classList.add("show")));
+
+  if (!isError) {
+    const dur = 4000;
+    t._timer = setTimeout(() => _dismissToast(t), dur);
+  }
+}
+function _dismissToast(t) {
+  if (!t) return;
+  clearTimeout(t._timer);
+  t.classList.remove("show");
+  t.classList.add("hide");
+  setTimeout(() => t.remove(), 300);
 }
 
 // ── Modal system ──────────────────────────────────────────────────
@@ -2111,9 +2259,12 @@ document.querySelectorAll(".tab-btn").forEach(b => {
 });
 function switchTab(tab) {
   document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
-  document.querySelectorAll(".tab-panel").forEach(p => p.style.display = p.id === `tab-${tab}` ? '' : 'none');
-  // also handle legacy .active class for overview initial state
-  document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === `tab-${tab}`));
+  document.querySelectorAll(".tab-panel").forEach(p => {
+    const show = p.id === `tab-${tab}`;
+    p.style.display = show ? '' : 'none';
+    p.classList.toggle("active", show);
+    if (show) { p.classList.remove("tab-entering"); void p.offsetWidth; p.classList.add("tab-entering"); }
+  });
   switch(tab) {
     case 'overview':      if (!cache.stats) loadStats(); break;
     case 'users':         if (!cache.users.length) loadUsersData(); break;
@@ -2177,11 +2328,28 @@ async function loadStats() {
     const estDecartCr      = Math.round(totalSecsUsed * DECART_CR_PER_SEC);
     const estDecartCost    = d.estimatedDecartCost || 0;
 
+    // Trend indicators — compare today vs yesterday from available data
+    const now = Date.now();
+    const DAY = 86400000;
+    const usersArr = cache.users.length ? cache.users : [];
+    const todayNew  = usersArr.filter(u => u.created_at && (now - new Date(u.created_at)) < DAY).length;
+    const ystrdNew  = usersArr.filter(u => { const t = now - new Date(u.created_at||0); return t >= DAY && t < 2*DAY; }).length;
+    const todayAct  = usersArr.filter(u => u.last_seen_at && (now - new Date(u.last_seen_at)) < DAY).length;
+    const ystrdAct  = usersArr.filter(u => { const t = now - new Date(u.last_seen_at||0); return t >= DAY && t < 2*DAY; }).length;
+    function trendHtml(today, yesterday) {
+      if (yesterday === 0 || today === 0) return '';
+      const diff = today - yesterday;
+      if (diff === 0) return '';
+      const col = diff > 0 ? '#22c55e' : '#ef4444';
+      const arrow = diff > 0 ? '↑' : '↓';
+      return `<div style="font-size:10px;color:${col};margin-top:2px">${arrow} ${Math.abs(diff)} vs yesterday</div>`;
+    }
+
     // Stats cards — IDs on sval divs allow SSE to update values in place
     document.getElementById("stats-grid").innerHTML = [
       { label:"Total Users",     val:fmtN(d.totalUsers),      sub:"All accounts",                  hi:true,  id:"sval-total-users" },
-      { label:"Active Today",    val:fmtN(d.activeToday),     sub:"Sessions today",                click:"openActiveToday",  id:"sval-active-today" },
-      { label:"New This Week",   val:fmtN(d.newThisWeek),     sub:"Last 7 days",                   click:"openNewThisWeek", id:"sval-new-week" },
+      { label:"Active Today",    val:fmtN(d.activeToday),     sub:"Sessions today",                click:"openActiveToday",  id:"sval-active-today", trend: trendHtml(todayAct, ystrdAct) },
+      { label:"New This Week",   val:fmtN(d.newThisWeek),     sub:"Last 7 days",                   click:"openNewThisWeek", id:"sval-new-week",     trend: trendHtml(todayNew, ystrdNew) },
       { label:"Total Revenue",   val:fmt$(d.revenueTotal),    sub:`${fmt$(d.revenueMonth)} this month · ${fmt$(d.revenueToday)} today`, hi:true, click:"openRevenue", id:"sval-revenue" },
       { label:"Credits Used",    val:fmtN(d.creditsUsed),     sub:"Across all users",              id:"sval-credits-used" },
       { label:"Est. Decart Cost",val:fmt$(estDecartCost),     sub:`~${fmtN(estDecartCr)} Decart cr consumed`, warn:estDecartCost>400, id:"sval-decart-cost" },
@@ -2190,6 +2358,7 @@ async function loadStats() {
         <div class="slabel">${c.label}</div>
         <div class="sval" id="${c.id}">${c.val}</div>
         <div class="ssub">${c.sub}</div>
+        ${c.trend||''}
       </div>`).join("");
 
     // Decart cost alert
@@ -2220,10 +2389,11 @@ async function loadLiveSessions() {
     countEl.textContent = n;
     sCountEl.textContent = `${n} active`;
     [dot, sdot].forEach(el => el.classList.toggle("none", n===0));
+    if (dot) dot.classList.toggle("live-dot-active", n > 0);
 
     const tbody = document.getElementById("live-tbody");
     if (!n) {
-      tbody.innerHTML = `<tr><td colspan="4" class="loading-cell" style="color:var(--muted)">No active sessions</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:28px;color:var(--muted);font-size:13px">😴 No active sessions right now</td></tr>`;
       document.getElementById("live-burn").textContent = "Total burning: 0 cr/min";
       return;
     }
@@ -2335,7 +2505,7 @@ async function _doEndSession(userId, email, reason, adminNote) {
 
       if (remaining === 0) {
         document.getElementById("live-tbody").innerHTML =
-          `<tr><td colspan="4" class="loading-cell" style="color:var(--muted)">No active sessions</td></tr>`;
+          `<tr><td colspan="4" style="text-align:center;padding:28px;color:var(--muted);font-size:13px">😴 No active sessions right now</td></tr>`;
         if (burnEl) burnEl.textContent = "Total burning: 0 cr/min";
         if (durationTickInterval) { clearInterval(durationTickInterval); durationTickInterval = null; }
       } else {
@@ -2356,16 +2526,19 @@ async function loadActivity() {
       list.innerHTML = `<li><span class="act-icon">&#8987;</span><span class="act-body" style="color:var(--muted)">No recent activity</span></li>`;
       return;
     }
-    const icons = { purchase:"&#128179;", gift:"&#127873;", session:"&#128247;", signup:"&#128100;" };
-    list.innerHTML = events.map(e => `
-      <li>
+    const icons  = { purchase:"&#128179;", gift:"&#127873;", session:"&#128247;", signup:"&#128100;" };
+    const border = { purchase:"#1e3a5f", gift:"#166534", ban:"#7f1d1d", session:"#374151", signup:"#374151" };
+    list.innerHTML = events.map(e => {
+      const bl = border[e.type] ? `border-left:3px solid ${border[e.type]};padding-left:10px` : '';
+      return `<li style="${bl}">
         <span class="act-icon">${icons[e.type]||"&#8226;"}</span>
         <span class="act-body">
           <span class="act-email">${esc(e.email||"unknown")}</span>
           <span class="act-detail"> ${esc(e.detail)}</span>
         </span>
         <span class="act-time">${relTime(e.ts)}</span>
-      </li>`).join("");
+      </li>`;
+    }).join("");
   } catch(e) { console.error("loadActivity:", e.message); }
 }
 
@@ -2399,6 +2572,7 @@ async function loadUsersData() {
   try {
     const d = await api("/admin/api/users?limit=1000");
     cache.users = d.users || [];
+    renderUsersStatsBar();
     applyUserFilters();
   } catch(e) {
     document.getElementById("users-tbody").innerHTML =
@@ -2416,6 +2590,8 @@ function applyUserFilters() {
   const credit = document.getElementById("credit-filter")?.value || "all";
   const sort   = document.getElementById("sort-by")?.value || "recent";
   const now    = Date.now();
+  const WEEK   = 7 * 86400000;
+  const DAY    = 86400000;
 
   let list = [...cache.users];
 
@@ -2431,22 +2607,78 @@ function applyUserFilters() {
   if (credit==="zero") list = list.filter(u => u.credits_balance === 0);
 
   // Quick filter chips
-  if (activeChips.has("activeToday"))  list = list.filter(u => u.last_seen_at && (now - new Date(u.last_seen_at)) < 86400000);
-  if (activeChips.has("lowCredits"))   list = list.filter(u => u.credits_balance > 0 && u.credits_balance < 10);
-  if (activeChips.has("noCredits"))    list = list.filter(u => u.credits_balance === 0);
-  if (activeChips.has("highUsage"))    list = list.filter(u => u.credits_used > 100);
+  if (activeChips.has("activeToday"))   list = list.filter(u => u.last_seen_at && (now - new Date(u.last_seen_at)) < DAY);
+  if (activeChips.has("lowCredits"))    list = list.filter(u => u.credits_balance > 0 && u.credits_balance < 10);
+  if (activeChips.has("noCredits"))     list = list.filter(u => u.credits_balance === 0);
+  if (activeChips.has("highUsage"))     list = list.filter(u => (u.credits_used||0) > 100);
+  if (activeChips.has("newThisWeek"))   list = list.filter(u => u.created_at && (now - new Date(u.created_at)) < WEEK);
+  if (activeChips.has("paid"))          list = list.filter(u => (u.credits_purchased||0) > 0 || (u.total_spent||0) > 0);
+  if (activeChips.has("banned"))        list = list.filter(u => u.is_banned === true);
+  if (activeChips.has("neverStreamed")) list = list.filter(u => (u.credits_used||0) === 0 && (u.credits_balance||0) <= 6);
+  if (activeChips.has("highValue"))     list = list.filter(u => (u.total_spent||0) > 100 || (u.credits_purchased||0) * 0.46 > 100);
 
   // Sort
-  if (sort==="recent")      list.sort((a,b) => new Date(b.created_at||0) - new Date(a.created_at||0));
-  if (sort==="lastActive")  list.sort((a,b) => new Date(b.last_seen_at||0) - new Date(a.last_seen_at||0));
-  if (sort==="mostCredits") list.sort((a,b) => (b.credits_balance||0) - (a.credits_balance||0));
-  if (sort==="mostSpent")   list.sort((a,b) => (b.credits_purchased||0) - (a.credits_purchased||0));
+  if (sort==="recent")       list.sort((a,b) => new Date(b.created_at||0) - new Date(a.created_at||0));
+  if (sort==="lastActive")   list.sort((a,b) => new Date(b.last_seen_at||0) - new Date(a.last_seen_at||0));
+  if (sort==="mostCredits")  list.sort((a,b) => (b.credits_balance||0) - (a.credits_balance||0));
+  if (sort==="leastCredits") list.sort((a,b) => (a.credits_balance||0) - (b.credits_balance||0));
+  if (sort==="mostSpent")    list.sort((a,b) => (b.credits_purchased||0) - (a.credits_purchased||0));
+  if (sort==="mostSessions") list.sort((a,b) => (b.session_count||0) - (a.session_count||0));
+  if (sort==="alpha")        list.sort((a,b) => (a.email||"").localeCompare(b.email||""));
 
   usersFiltered = list;
   usersPage = 1;
   selectedUsers.clear();
   updateBulkBar();
+  renderUsersStatsBar();
   renderUsersPage();
+}
+
+// ── User stats bar ─────────────────────────────────────────────────
+function renderUsersStatsBar() {
+  const now  = Date.now();
+  const WEEK = 7 * 86400000;
+  const DAY  = 86400000;
+  const all  = cache.users;
+  const stats = {
+    total:       all.length,
+    activeToday: all.filter(u => u.last_seen_at && (now - new Date(u.last_seen_at)) < DAY).length,
+    paid:        all.filter(u => (u.credits_purchased||0) > 0).length,
+    banned:      all.filter(u => u.is_banned).length,
+    newThisWeek: all.filter(u => u.created_at && (now - new Date(u.created_at)) < WEEK).length,
+  };
+  document.getElementById("ust-v-total").textContent   = fmtN(stats.total);
+  document.getElementById("ust-v-active").textContent  = fmtN(stats.activeToday);
+  document.getElementById("ust-v-paid").textContent    = fmtN(stats.paid);
+  document.getElementById("ust-v-banned").textContent  = fmtN(stats.banned);
+  document.getElementById("ust-v-newweek").textContent = fmtN(stats.newThisWeek);
+}
+
+// ── Stat card filter trigger ──────────────────────────────────────
+function userStatFilter(chip) {
+  if (chip === 'total') {
+    // Clear all chips and show all
+    activeChips.clear();
+    document.querySelectorAll('.chip').forEach(c => c.classList.remove('on'));
+    document.querySelectorAll('.ust-card').forEach(c => c.classList.remove('active'));
+    document.getElementById('ust-total')?.classList.add('active');
+    applyUserFilters();
+    document.getElementById('tab-users')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+  const chipMap = { activeToday: 'activeToday', paid: 'paid', banned: 'banned', newThisWeek: 'newThisWeek' };
+  const chipKey = chipMap[chip];
+  if (!chipKey) return;
+  const chipEl = document.querySelector(`.chip[data-chip="${chipKey}"]`);
+  if (chipEl) {
+    const wasActive = activeChips.has(chipKey);
+    if (!wasActive) { chipEl.classList.add('on'); activeChips.add(chipKey); }
+    else            { chipEl.classList.remove('on'); activeChips.delete(chipKey); }
+  }
+  document.querySelectorAll('.ust-card').forEach(c => c.classList.remove('active'));
+  if (activeChips.has(chipKey)) document.getElementById(`ust-${chip === 'activeToday' ? 'active' : chip === 'newThisWeek' ? 'newweek' : chip}`)?.classList.add('active');
+  applyUserFilters();
+  document.getElementById('tab-users')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function toggleChip(el) {
@@ -2476,13 +2708,23 @@ function renderUsersPage() {
 
   document.getElementById("users-tbody").innerHTML = slice.map(u => {
     const minsLeft = creditsToMinutes(u.credits_balance);
-    return `<tr data-uid="${esc(u.id)}" data-email="${esc(u.email)}" data-banned="${u.is_banned}">
+    const cr = u.credits_balance || 0;
+    const crColor = cr < 10 ? '#ef4444' : cr < 30 ? '#f59e0b' : '#fff';
+    const spent = (u.credits_purchased || 0) * 0.46;  // rough $/credit estimate
+    const rowBorder = spent > 200 ? 'border-left:3px solid #78350f' :
+                      spent > 50  ? 'border-left:3px solid #4c1d95' :
+                      spent > 0   ? 'border-left:3px solid #1e3a5f' : '';
+    const isGoogle = (u.email||"").endsWith("gmail.com") || (u.provider||"").includes("google");
+    const authBadge = `<span class="auth-badge" style="background:${isGoogle?'#4285f4':'#374151'};color:#fff">${isGoogle?'G':'✉'}</span>`;
+    const neverStreamed = (u.credits_used||0) === 0 && cr <= 6;
+    const ghostEmoji = neverStreamed ? '👻 ' : '';
+    return `<tr data-uid="${esc(u.id)}" data-email="${esc(u.email)}" data-banned="${u.is_banned}" style="${rowBorder}">
       <td data-label=""><input type="checkbox" class="row-check" data-id="${esc(u.id)}" onchange="toggleRowSelect(this)"></td>
-      <td data-label="Email" class="td-email" title="${esc(u.email)}" style="cursor:pointer;color:var(--accent)" onclick="openUserProfile('${esc(u.id)}','${esc(u.email)}')">${esc(u.email)}</td>
-      <td data-label="Name">${esc(u.name||"—")}</td>
-      <td data-label="Credits" data-col="credits"><strong>${fmtN(u.credits_balance)}</strong></td>
+      <td data-label="Email" class="td-email" title="${esc(u.email)}" style="cursor:pointer;color:var(--accent);display:flex;align-items:center" onclick="openUserProfile('${esc(u.id)}','${esc(u.email)}')">${authBadge}${esc(u.email)}</td>
+      <td data-label="Name">${ghostEmoji}${esc(u.name||"—")}</td>
+      <td data-label="Credits" data-col="credits"><strong style="color:${crColor}">${fmtN(cr)}</strong></td>
       <td data-label="Time Left" data-col="time-left" style="color:var(--muted)">&approx;${minsLeft}m</td>
-      <td data-label="Spent" data-col="spent">${fmt$(u.credits_purchased * 100 / 216)}</td>
+      <td data-label="Spent" data-col="spent">${fmt$(spent)}</td>
       <td data-label="Joined">${fmtDate(u.created_at)}</td>
       <td data-label="Last Seen" data-col="last-seen">${relTime(u.last_seen_at)}</td>
       <td data-label="Status" data-col="status">${u.is_banned
@@ -2510,6 +2752,10 @@ function updateBulkBar() {
   const bar = document.getElementById("bulk-bar");
   bar.classList.toggle("show", n > 0);
   document.getElementById("bulk-count").textContent = `${n} selected`;
+  // Update live dot active state
+  const liveCount = parseInt(document.getElementById("live-count")?.textContent || "0", 10);
+  const dot = document.getElementById("live-dot");
+  if (dot) dot.classList.toggle("live-dot-active", liveCount > 0);
 }
 function clearSelection() {
   selectedUsers.clear();
@@ -2565,6 +2811,8 @@ function closeMenu() { document.querySelectorAll(".action-dropdown").forEach(d=>
 // User actions
 function doGift(uid, email) {
   Modal.giftCredits(email, uid, async (amount, reason) => {
+    const btn = document.querySelector('.modal-btn-confirm');
+    const restore = btnLoading(btn, "Gifting…");
     try {
       const d = await apiPost("/admin/api/gift-credits", { userId:uid, amount, reason });
       toast(`&#127873; Gifted ${amount} credits to ${email}`);
@@ -2572,22 +2820,26 @@ function doGift(uid, email) {
       const u = cache.users.find(u=>u.id===uid);
       if (u) u.credits_balance = d.new_balance ?? (u.credits_balance + amount);
       triggerAlert("gift", `Gifted ${amount}cr to ${email}`);
-    } catch(e) { toast("Error: "+e.message,"error"); }
+    } catch(e) { toast("Error: "+e.message,"error"); restore(); }
   });
 }
 function doDeduct(uid, email) {
   Modal.deductCredits(email, uid, async (amount, reason) => {
+    const btn = document.querySelector('.modal-btn-confirm');
+    const restore = btnLoading(btn, "Deducting…");
     try {
       const d = await apiPost("/admin/api/deduct-credits", { userId:uid, amount, reason });
       toast(`Deducted ${amount} credits from ${email}`);
       flashUserRow(uid, { credits: d.new_balance }, "deduct");
       const u = cache.users.find(u=>u.id===uid);
       if (u) u.credits_balance = d.new_balance;
-    } catch(e) { toast("Error: "+e.message,"error"); }
+    } catch(e) { toast("Error: "+e.message,"error"); restore(); }
   });
 }
 function doBan(uid, email) {
   Modal.banUser(email, uid, false, async () => {
+    const btn = document.querySelector('.modal-btn-confirm');
+    const restore = btnLoading(btn, "Banning…");
     try {
       await apiPost("/admin/api/ban-user", { userId:uid });
       toast(`Banned ${email}`, "warning");
@@ -2595,18 +2847,20 @@ function doBan(uid, email) {
       const u = cache.users.find(u=>u.id===uid);
       if (u) u.is_banned = true;
       triggerAlert("ban", `Banned user: ${email}`);
-    } catch(e) { toast("Error: "+e.message,"error"); }
+    } catch(e) { toast("Error: "+e.message,"error"); restore(); }
   });
 }
 function doUnban(uid, email) {
   Modal.banUser(email, uid, true, async () => {
+    const btn = document.querySelector('.modal-btn-confirm');
+    const restore = btnLoading(btn, "Unbanning…");
     try {
       await apiPost("/admin/api/unban-user", { userId:uid });
       toast(`Unbanned ${email}`, "success");
       flashUserRow(uid, { status: "Active" }, "unban");
       const u = cache.users.find(u=>u.id===uid);
       if (u) u.is_banned = false;
-    } catch(e) { toast("Error: "+e.message,"error"); }
+    } catch(e) { toast("Error: "+e.message,"error"); restore(); }
   });
 }
 
@@ -2694,36 +2948,103 @@ function doDeleteUser(uid, email) {
 }
 
 // Bulk actions
+function doBulkEmail() {
+  if (!selectedUsers.size) return;
+  window._bulkEmailTargets = [...selectedUsers];
+  switchTab('email');
+  toast(`${selectedUsers.size} users set as email recipients`, 'info');
+}
+
+function doBulkSelectAll() {
+  usersFiltered.forEach(u => selectedUsers.add(u.id));
+  document.querySelectorAll(".row-check").forEach(c => c.checked = selectedUsers.has(c.dataset.id));
+  document.getElementById("select-all").checked = true;
+  updateBulkBar();
+}
+
 async function doBulkGift() {
   if (!selectedUsers.size) return;
-  Modal.confirm("Gift 10 Credits", `Gift 10 credits to ${selectedUsers.size} selected user(s)?`, async () => {
-    let ok=0, fail=0;
-    for (const uid of selectedUsers) {
+  const ids = [...selectedUsers];
+  const ov = document.createElement("div");
+  ov.className = "admin-modal-overlay";
+  ov.innerHTML = `
+    <div class="admin-modal-card" style="max-width:420px">
+      <div class="modal-header">&#127873; Gift Credits</div>
+      <div class="modal-body">
+        <p style="color:var(--text2);margin-bottom:14px">Gift to <strong style="color:var(--text)">${ids.length} selected users</strong></p>
+        <div class="modal-field">
+          <label>Credits to gift</label>
+          <input id="bulk-gift-amount" class="modal-input" type="number" min="1" max="100000" value="50">
+        </div>
+        <p class="modal-hint" id="bulk-gift-hint">&#8776; 8.3 mins of streaming</p>
+        <div id="bulk-gift-progress" style="display:none;margin-top:10px;font-size:12px;color:var(--muted)"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn-cancel">Cancel</button>
+        <button class="modal-btn-confirm btn-purple" id="bulk-gift-confirm">Gift Credits</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  ov.querySelector(".modal-btn-cancel").addEventListener("click", () => ov.remove());
+  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+  const amtEl = ov.querySelector("#bulk-gift-amount");
+  amtEl.addEventListener("input", () => {
+    const mins = ((parseInt(amtEl.value)||0)*10/60).toFixed(1);
+    const h = ov.querySelector("#bulk-gift-hint");
+    if (h) h.textContent = `≈ ${mins} mins of streaming`;
+  });
+  ov.querySelector("#bulk-gift-confirm").addEventListener("click", async (ev) => {
+    const amount = parseInt(amtEl.value, 10);
+    if (!amount || amount < 1) { toast("Enter a valid amount", "error"); return; }
+    ev.target.disabled = true; ev.target.textContent = "Gifting…";
+    const prog = ov.querySelector("#bulk-gift-progress");
+    prog.style.display = "";
+    let ok = 0, fail = 0;
+    for (const uid of ids) {
+      prog.textContent = `Gifting… ${ok + fail + 1}/${ids.length}`;
       try {
-        await apiPost("/admin/api/gift-credits", { userId:uid, amount:10, reason:"bulk gift" });
-        const u = cache.users.find(u=>u.id===uid);
-        if (u) u.credits_balance += 10;
+        await apiPost("/admin/api/gift-credits", { userId: uid, amount, reason: "bulk gift" });
+        const u = cache.users.find(u => u.id === uid);
+        if (u) u.credits_balance = (u.credits_balance || 0) + amount;
+        // Flash row green
+        const row = document.querySelector(`tr[data-uid="${CSS.escape(uid)}"]`);
+        if (row) { row.style.transition = "background .3s"; row.style.background = "#14532d"; setTimeout(() => { row.style.background = ""; }, 1200); }
         ok++;
       } catch { fail++; }
     }
-    toast(`Gifted 10 credits to ${ok} users${fail?`, ${fail} failed`:""}`, fail?"warning":"success");
+    ov.remove();
+    toast(`Gifted ${amount} credits to ${ok} users${fail ? `, ${fail} failed` : ""}`, fail ? "warning" : "success");
     clearSelection(); renderUsersPage();
   });
+  setTimeout(() => amtEl.focus(), 80);
 }
+
 async function doBulkBan() {
   if (!selectedUsers.size) return;
-  Modal.confirm("Ban Users", `Ban ${selectedUsers.size} selected user(s)? They will lose access immediately.`, async () => {
-    let ok=0;
-    for (const uid of selectedUsers) {
-      try {
-        await apiPost("/admin/api/ban-user", { userId:uid });
-        const u = cache.users.find(u=>u.id===uid);
-        if (u) u.is_banned = true;
-        ok++;
-      } catch(_) {}
-    }
-    toast(`Banned ${ok} users`, "warning");
-    clearSelection(); renderUsersPage();
+  const ids = [...selectedUsers];
+  const emails = ids.map(uid => { const u = cache.users.find(u => u.id === uid); return u?.email || uid.slice(0, 8); });
+  const emailList = emails.slice(0, 8).map(e => `• ${e}`).join('<br>') + (emails.length > 8 ? `<br>… and ${emails.length - 8} more` : '');
+  showModal({
+    title: '&#128683; Ban Users',
+    body: `<p style="color:var(--text2);margin-bottom:10px">Ban <strong style="color:var(--text)">${ids.length} users</strong>? They will lose access immediately.</p>
+           <div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--text2);line-height:1.8">${emailList}</div>`,
+    confirmLabel: `Ban ${ids.length} users`,
+    confirmClass: 'btn-red',
+    onConfirm: async () => {
+      let ok = 0;
+      for (const uid of ids) {
+        try {
+          await apiPost("/admin/api/ban-user", { userId: uid });
+          const u = cache.users.find(u => u.id === uid);
+          if (u) u.is_banned = true;
+          const row = document.querySelector(`tr[data-uid="${CSS.escape(uid)}"]`);
+          if (row) { row.style.transition = "background .3s"; row.style.background = "#7f1d1d"; setTimeout(() => { row.style.background = ""; }, 1200); }
+          ok++;
+        } catch(_) {}
+      }
+      toast(`Banned ${ok} users`, "warning");
+      clearSelection(); renderUsersPage();
+    },
   });
 }
 function doExportCSV() {
@@ -3486,8 +3807,7 @@ async function sendEmail() {
     `Send "${esc(subject)}" to <strong>${recipients.length}</strong> recipient(s)?`,
     async () => {
       const btn = document.getElementById("btn-send-email");
-      btn.disabled = true;
-      btn.textContent = "Sending…";
+      const restore = btnLoading(btn, "Sending…");
       try {
         const d = await apiPost("/admin/api/email/send", { recipients, subject, body });
         toast(`✓ Sent ${d.sent} emails${d.failed?`, ${d.failed} failed`:""}`, d.failed?"warning":"success");
@@ -3495,7 +3815,7 @@ async function sendEmail() {
       } catch(e) {
         toast("Error: " + e.message, "error");
       } finally {
-        btn.disabled = false;
+        restore();
         updateEmailSendCount();
         btn.innerHTML = `Send to <span id="email-send-count">${recipients.length}</span> recipients`;
       }
@@ -3663,9 +3983,10 @@ function updateLiveSessions(sessions) {
   if (countEl)  countEl.textContent  = n;
   if (sCountEl) sCountEl.textContent = `${n} active`;
   [dot, sdot].forEach(el => el && el.classList.toggle("none", n === 0));
+  if (dot) dot.classList.toggle("live-dot-active", n > 0);
 
   if (!n) {
-    tbody.innerHTML = `<tr><td colspan="4" class="loading-cell" style="color:var(--muted)">No active sessions</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:28px;color:var(--muted);font-size:13px">😴 No active sessions right now</td></tr>`;
     if (burnEl) burnEl.textContent = "Total burning: 0 cr/min";
     Object.keys(sessionStartTimes).forEach(k => delete sessionStartTimes[k]);
     if (durationTickInterval) { clearInterval(durationTickInterval); durationTickInterval = null; }
@@ -4611,14 +4932,47 @@ function renderCreditPacks(packs) {
   `).join('');
 }
 
+function calcPackCredits(price) {
+  return Math.round(price * (2.0 + (price / 1000)));
+}
+
+function calcPackSummary(price, credits) {
+  const secs        = Math.round(credits / 2.18);
+  const mins        = Math.floor(secs / 60);
+  const remSecs     = secs % 60;
+  const costPerMin  = secs > 0 ? (price / (secs / 60)).toFixed(2) : '—';
+  const actualCost  = (credits * 0.0136).toFixed(2);
+  const margin      = price > 0 ? Math.round((1 - (actualCost / price)) * 100) : 0;
+  return { mins, remSecs, costPerMin, actualCost, margin };
+}
+
+function _packUpdateSummary() {
+  const price   = parseFloat(document.getElementById('pack-price')?.value)   || 0;
+  const credits = parseInt(document.getElementById('pack-credits')?.value)   || 0;
+  const el      = document.getElementById('pack-summary');
+  if (!el || !credits) { if (el) el.textContent = ''; return; }
+  const { mins, remSecs, costPerMin, margin } = calcPackSummary(price, credits);
+  el.textContent = `${credits} cr · ${mins}m ${remSecs}s · $${costPerMin}/min · ~${margin}% margin`;
+}
+
 function showNewPackModal(pack = null) {
   const isEdit = !!pack;
   showModal({
     title: isEdit ? 'Edit Credit Pack' : 'New Credit Pack',
     body: `
       <div class="modal-field"><label>Name</label><input class="modal-input" id="pack-name" value="${pack?.name || ''}" placeholder="e.g. Starter"></div>
-      <div class="modal-field"><label>Price (USD)</label><input class="modal-input" id="pack-price" type="number" value="${pack?.price_usd || ''}" placeholder="20"></div>
-      <div class="modal-field"><label>Credits</label><input class="modal-input" id="pack-credits" type="number" value="${pack?.credits || ''}" placeholder="42" oninput="updatePackMinutes(this.value)"><small id="pack-minutes" style="color:var(--muted)">${pack ? packMinutesLabel(pack.credits) : '0 min'}</small></div>
+      <div class="modal-field">
+        <label>Price (USD)</label>
+        <input class="modal-input" id="pack-price" type="number" value="${pack?.price_usd || ''}" placeholder="20">
+      </div>
+      <div class="modal-field">
+        <label style="display:flex;align-items:center;gap:6px">
+          Credits
+          <span onclick="_packSuggestCredits()" style="font-size:10px;color:var(--accent);cursor:pointer;font-weight:400">↺ Suggest</span>
+        </label>
+        <input class="modal-input" id="pack-credits" type="number" value="${pack?.credits || ''}" placeholder="42">
+        <small id="pack-summary" style="color:var(--muted);font-size:11px;margin-top:4px">${pack ? (() => { const {mins,remSecs,costPerMin,margin} = calcPackSummary(pack.price_usd||0,pack.credits||0); return `${pack.credits} cr · ${mins}m ${remSecs}s · $${costPerMin}/min · ~${margin}% margin`; })() : ''}</small>
+      </div>
       <div class="modal-field"><label>Stripe Price ID</label><input class="modal-input" id="pack-stripe" value="${pack?.stripe_price_id || ''}" placeholder="price_xxx (optional)"></div>
       <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px"><label style="width:auto">Popular badge</label><input type="checkbox" id="pack-popular" ${pack?.is_popular ? 'checked' : ''}></div>
       <div class="modal-field" style="flex-direction:row;align-items:center;gap:10px"><label style="width:auto">Active</label><input type="checkbox" id="pack-active" ${pack?.is_active !== false ? 'checked' : ''}></div>
@@ -4626,22 +4980,50 @@ function showNewPackModal(pack = null) {
     `,
     onConfirm: async () => {
       const body = {
-        name: document.getElementById('pack-name').value,
-        price_usd: parseFloat(document.getElementById('pack-price').value),
-        credits: parseInt(document.getElementById('pack-credits').value),
-        stripe_price_id: document.getElementById('pack-stripe').value || null,
-        is_popular: document.getElementById('pack-popular').checked,
-        is_active: document.getElementById('pack-active').checked,
-        sort_order: parseInt(document.getElementById('pack-order').value) || 0,
+        name:           document.getElementById('pack-name').value,
+        price_usd:      parseFloat(document.getElementById('pack-price').value),
+        credits:        parseInt(document.getElementById('pack-credits').value),
+        stripe_price_id:document.getElementById('pack-stripe').value || null,
+        is_popular:     document.getElementById('pack-popular').checked,
+        is_active:      document.getElementById('pack-active').checked,
+        sort_order:     parseInt(document.getElementById('pack-order').value) || 0,
       };
       if (!body.name || !body.price_usd || !body.credits) { toast('Fill in all required fields', 'error'); return false; }
-      const url = isEdit ? `/admin/api/credit-packs/${pack.id}` : '/admin/api/credit-packs';
+      const url    = isEdit ? `/admin/api/credit-packs/${pack.id}` : '/admin/api/credit-packs';
       const method = isEdit ? 'PATCH' : 'POST';
-      const res = await adminFetch(url, { method, body: JSON.stringify(body) });
+      const res    = await adminFetch(url, { method, body: JSON.stringify(body) });
       if (res?.ok) { toast(`Pack ${isEdit ? 'updated' : 'created'} ✓`, 'success'); loadCreditPacks(); }
-      else { const err = await res?.json().catch(()=>{}); toast(err?.error || 'Failed', 'error'); return false; }
+      else { const err = await res?.json().catch(() => {}); toast(err?.error || 'Failed', 'error'); return false; }
     },
   });
+  // Wire up live calculations after modal DOM is ready
+  setTimeout(() => {
+    document.getElementById('pack-price')?.addEventListener('input', e => {
+      const price = parseFloat(e.target.value) || 0;
+      const credEl = document.getElementById('pack-credits');
+      if (credEl && !credEl._manuallyEdited) {
+        credEl.value = price ? calcPackCredits(price) : '';
+      }
+      _packUpdateSummary();
+    });
+    const credEl = document.getElementById('pack-credits');
+    if (credEl) {
+      credEl.addEventListener('input', () => {
+        credEl._manuallyEdited = true;
+        _packUpdateSummary();
+      });
+    }
+  }, 50);
+}
+
+function _packSuggestCredits() {
+  const price = parseFloat(document.getElementById('pack-price')?.value) || 0;
+  const credEl = document.getElementById('pack-credits');
+  if (credEl && price) {
+    credEl.value = calcPackCredits(price);
+    credEl._manuallyEdited = false;
+    _packUpdateSummary();
+  }
 }
 
 async function editPack(id) {
@@ -4875,7 +5257,7 @@ async function loadIPBlocks() {
   const { blocks } = await res.json();
   const tbody = document.getElementById('ipblocks-tbody');
   if (!tbody) return;
-  if (!blocks?.length) { tbody.innerHTML = `<tr><td colspan="4" class="td-empty">No IP blocks — system open to all IPs</td></tr>`; return; }
+  if (!blocks?.length) { tbody.innerHTML = `<tr><td colspan="4"><div class="empty"><div class="eicon">&#128737;</div>No blocked IPs — system open to all</div></td></tr>`; return; }
   tbody.innerHTML = blocks.map(b => `
     <tr>
       <td data-label="IP" style="font-family:monospace">${esc(b.ip_address)}</td>
@@ -5021,21 +5403,68 @@ async function loadFeatureFlagsTab() {
   renderFeatureFlags(flags);
 }
 
+const FLAG_META = {
+  enable_recording:   { icon: '🎥', label: 'Session Recording',         danger: false },
+  enable_background:  { icon: '🖼️', label: 'Background Mode',           danger: false },
+  enable_auto_prompt: { icon: '✨', label: 'Auto-Describe (Florence-2)', danger: false },
+  enable_new_signups: { icon: '👤', label: 'New User Signups',           danger: false },
+  maintenance_mode:   { icon: '🔧', label: 'Maintenance Mode',           danger: true  },
+  beta_features:      { icon: '🧪', label: 'Beta Features',              danger: false },
+  mock_payments:      { icon: '💳', label: 'Mock Payments (Test Mode)',  danger: false },
+  enable_style_mode:  { icon: '🎨', label: 'Style Mode',                 danger: false },
+  enable_obs_output:  { icon: '📺', label: 'OBS Output',                 danger: false },
+  enable_kill_switch: { icon: '🚨', label: 'Emergency Kill Switch',      danger: true  },
+};
+
 function renderFeatureFlags(flags) {
   const container = document.getElementById('flags-list');
   if (!container) return;
   if (!flags?.length) { container.innerHTML = '<div class="td-empty">No feature flags configured</div>'; return; }
-  container.innerHTML = flags.map(f => `
-    <div class="flag-row">
-      <div class="flag-info"><div class="flag-key">${esc(f.key)}</div><div class="flag-desc">${esc(f.description || '')}</div></div>
-      <label class="toggle-switch"><input type="checkbox" ${f.enabled ? 'checked' : ''} onchange="updateFlag('${esc(f.key)}', this.checked)"><span class="toggle-slider"></span></label>
-    </div>
-  `).join('');
+  container.innerHTML = flags.map(f => {
+    const meta   = FLAG_META[f.key] || { icon: '⚙️', label: f.key, danger: false };
+    const rowBg  = meta.danger ? 'background:rgba(127,29,29,0.15);' : '';
+    const danger = meta.danger ? ' ⚠️' : '';
+    const status = f.enabled
+      ? `<span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;background:#14532d;color:#86efac">ON</span>`
+      : `<span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;background:#374151;color:#9ca3af">OFF</span>`;
+    return `
+    <div class="flag-row" style="${rowBg}">
+      <div class="flag-info">
+        <div class="flag-key" style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:16px">${meta.icon}</span>
+          <span style="font-weight:600;color:var(--text)">${esc(meta.label)}${danger}</span>
+        </div>
+        <div class="flag-desc" style="margin-top:2px">${esc(f.description || '')}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px;font-family:monospace">${esc(f.key)}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        ${status}
+        <label class="toggle-switch"><input type="checkbox" ${f.enabled ? 'checked' : ''} onchange="updateFlag('${esc(f.key)}', this.checked, ${meta.danger})"><span class="toggle-slider"></span></label>
+      </div>
+    </div>`;
+  }).join('');
 }
 
-async function updateFlag(key, enabled) {
+async function updateFlag(key, enabled, isDanger) {
+  if (isDanger && enabled) {
+    const meta = FLAG_META[key] || { label: key };
+    showModal({
+      title: '⚠️ Warning',
+      body: `<p style="color:var(--text2);line-height:1.6">Enabling <strong style="color:var(--text)">${esc(meta.label)}</strong> will affect ALL active users immediately.<br>Are you sure you want to continue?</p>`,
+      confirmLabel: 'Enable',
+      confirmClass: 'btn-red',
+      onConfirm: async () => {
+        const res = await adminFetch(`/admin/api/feature-flags/${key}`, { method: 'POST', body: JSON.stringify({ enabled: true }) });
+        if (res?.ok) { toast(`${key}: ON ✓`, 'success'); loadFeatureFlagsTab(); }
+        else { toast('Failed to update flag', 'error'); loadFeatureFlagsTab(); }
+      },
+    });
+    // Revert the checkbox immediately — confirmed callback will reload
+    loadFeatureFlagsTab();
+    return;
+  }
   const res = await adminFetch(`/admin/api/feature-flags/${key}`, { method: 'POST', body: JSON.stringify({ enabled }) });
-  if (res?.ok) { toast(`${key}: ${enabled ? 'ON' : 'OFF'} ✓`, 'success'); }
+  if (res?.ok) { toast(`${key}: ${enabled ? 'ON' : 'OFF'} ✓`, 'success'); loadFeatureFlagsTab(); }
   else { toast('Failed to update flag', 'error'); loadFeatureFlagsTab(); }
 }
 
@@ -5125,38 +5554,63 @@ function auditFmtIP(ip) {
   return `<span style="font-size:11px">${esc(clean)}</span>`;
 }
 
+function formatAuditDetails(action, rawDetails) {
+  try {
+    const d = typeof rawDetails === 'string' ? JSON.parse(rawDetails) : rawDetails;
+    if (!d) return '—';
+    switch (action) {
+      case 'gift_credits':
+        return `+${d.amount} cr → balance: ${d.new_balance} cr${d.note ? ' · "' + d.note + '"' : ''}`;
+      case 'deduct_credits':
+        return `-${d.amount} cr → balance: ${d.new_balance} cr${d.note ? ' · "' + d.note + '"' : ''}`;
+      case 'ban_user':
+        return `Reason: ${d.reason || 'No reason given'}`;
+      case 'unban_user':
+        return 'User reinstated';
+      case 'delete_user':
+        return `Deleted: ${d.user_email || d.deleted_email || 'unknown'}`;
+      case 'delete_subadmin':
+        return `Removed: ${d.deleted_email} (${d.deleted_role})`;
+      case 'create_subadmin':
+        return `Added: ${d.new_admin_email} as ${d.role_assigned}`;
+      case 'kill_session':
+        return `Session ${(d.session_id || '').substring(0, 8) || 'unknown'} · ${d.reason || 'No reason'}`;
+      case 'mock_purchase':
+        return `${d.pack || d.pack_name} · ${d.credits} cr · $${d.price || d.price_usd || 0}`;
+      case 'toggle_flag':
+        return `${d.flag}: ${d.value ? 'ON' : 'OFF'}`;
+      case 'ip_block':
+        return `${d.ip} · ${d.reason || 'No reason'}${d.expiry ? ' · expires ' + d.expiry : ''}`;
+      case 'ip_unblock':
+        return `${d.ip} unblocked`;
+      case 'create_announcement':
+        return `"${d.title}" (${d.type})`;
+      case 'settings_change':
+        return `Changed: ${d.field_changed || 'settings'}`;
+      case 'admin_login':
+        return 'Login successful';
+      case 'admin_login_failed':
+        return `Failed attempt: ${d.attempted_email || 'unknown'}`;
+      case 'unauthorized_attempt':
+        return `Blocked: ${d.endpoint} (needs ${d.required_permission || d.required || '?'})`;
+      default:
+        return Object.entries(d)
+          .filter(([, v]) => v !== null && v !== undefined && v !== '')
+          .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v}`)
+          .join(' · ')
+          .substring(0, 80);
+    }
+  } catch (e) {
+    return String(rawDetails || '—').substring(0, 80);
+  }
+}
+
 function auditFmtDetails(action, rawDetails) {
   if (!rawDetails) return '<span style="color:var(--muted)">—</span>';
-  let d = rawDetails;
-  if (typeof d === 'string') {
-    try { d = JSON.parse(d); } catch { /* keep as string */ }
-  }
-  let text = '';
-  if (typeof d === 'string') {
-    text = d;
-  } else if (d && typeof d === 'object') {
-    if (d.success === true && !d.amount)         text = 'Login successful';
-    else if (d.attempted_email)                  text = `Attempted: ${d.attempted_email}`;
-    else if (d.amount != null && d.new_balance != null) {
-      const sign = action === 'deduct_credits' ? '−' : '+';
-      text = `${sign}${d.amount} cr → ${d.new_balance} cr`;
-      if (d.reason) text += ` · ${d.reason}`;
-    }
-    else if (d.flag != null && d.value != null)  text = `${d.flag}: ${d.value ? 'ON' : 'OFF'}`;
-    else if (d.pack_name && d.credits != null)   text = `${d.pack_name} · ${d.credits} cr · $${d.price || 0}`;
-    else if (d.reason && Object.keys(d).length === 1) text = `Reason: ${d.reason}`;
-    else if (d.endpoint)                         text = `Blocked: ${d.endpoint}`;
-    else if (d.ip)                               text = `IP: ${d.ip}${d.reason ? ' · '+d.reason : ''}`;
-    else if (d.deleted_email)                    text = `Deleted: ${d.deleted_email} (${d.deleted_role || ''})`;
-    else if (d.new_admin_email)                  text = `Created: ${d.new_admin_email} as ${d.role_assigned || ''}`;
-    else if (d.subject)                          text = `"${d.subject}" → ${d.sent || 0} sent`;
-    else if (d.field_changed)                    text = `Changed: ${d.field_changed}`;
-    else if (d.title)                            text = `"${d.title}"${d.type ? ' ('+d.type+')' : ''}`;
-    else text = Object.entries(d).map(([k,v]) => `${k}: ${v}`).join(' · ');
-  }
+  const text = formatAuditDetails(action, rawDetails);
   const full = esc(typeof rawDetails === 'string' ? rawDetails : JSON.stringify(rawDetails));
   if (text.length > 60) {
-    return `<span class="audit-detail" title="${full}" style="cursor:default">${esc(text.slice(0,57))}…</span>`;
+    return `<span class="audit-detail" title="${full}" style="cursor:default">${esc(text.slice(0, 57))}…</span>`;
   }
   return `<span class="audit-detail" title="${full}" style="cursor:default">${esc(text)}</span>`;
 }
@@ -5252,6 +5706,104 @@ function exportAuditCSV() {
   const a    = document.createElement('a');
   a.href = url; a.download = `audit-log-${new Date().toISOString().split('T')[0]}.csv`;
   a.click(); URL.revokeObjectURL(url);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// SYSTEM STATUS CARD
+// ══════════════════════════════════════════════════════════════════
+function updateSystemStatus() {
+  const secs = Math.round((Date.now() - lastRefreshTime) / 1000);
+  const updEl = document.getElementById("sys-upd-val");
+  if (updEl) updEl.textContent = secs < 60 ? `${secs}s ago` : `${Math.floor(secs/60)}m ago`;
+  // GCP + Supabase always green if page loaded
+  const gcpDot = document.getElementById("sys-gcp-dot");
+  const dbDot  = document.getElementById("sys-db-dot");
+  if (gcpDot) gcpDot.className = "status-dot dot-green";
+  if (dbDot)  dbDot.className  = "status-dot dot-green";
+  // Decart balance
+  const bal   = parseInt(localStorage.getItem("tzurah_decart_balance") || "0", 10);
+  const decEl = document.getElementById("sys-decart-val");
+  const decDot = document.getElementById("sys-decart-dot");
+  if (decEl && decDot) {
+    if (bal > 0) {
+      decEl.textContent = `${fmtN(bal)} cr`;
+      decDot.className = bal < 5000 ? "status-dot dot-amber" : "status-dot dot-green";
+      decEl.style.color = bal < 5000 ? "var(--warning)" : "var(--success)";
+    } else {
+      decEl.textContent = "Not set";
+      decDot.className = "status-dot dot-amber";
+    }
+  }
+}
+setInterval(updateSystemStatus, 2000);
+
+// ══════════════════════════════════════════════════════════════════
+// KEYBOARD SHORTCUTS MODAL
+// ══════════════════════════════════════════════════════════════════
+document.addEventListener("keydown", (e) => {
+  // Don't fire when typing in inputs/textareas
+  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return;
+  if (e.key === "?" || (e.shiftKey && e.key === "/")) {
+    e.preventDefault();
+    showKeyboardShortcuts();
+  }
+  // Ctrl+R → refresh
+  if ((e.ctrlKey || e.metaKey) && e.key === "r") {
+    e.preventDefault();
+    manualRefresh();
+    toast("Refreshed", "info");
+  }
+  // G then letter nav
+  if (e.key === "g" && !e.ctrlKey && !e.metaKey) {
+    window._gKeyPending = true;
+    setTimeout(() => { window._gKeyPending = false; }, 1000);
+    return;
+  }
+  if (window._gKeyPending) {
+    window._gKeyPending = false;
+    const tabMap = { u: "users", r: "revenue", o: "overview", a: "audit", f: "flags", s: "settings" };
+    const tab = tabMap[e.key];
+    if (tab) { e.preventDefault(); switchTab(tab); }
+  }
+});
+
+function showKeyboardShortcuts() {
+  if (document.getElementById("kbd-shortcuts-modal")) return;
+  const ov = document.createElement("div");
+  ov.id = "kbd-shortcuts-modal";
+  ov.className = "admin-modal-overlay";
+  ov.innerHTML = `
+    <div class="admin-modal-card" style="max-width:580px;width:100%">
+      <div class="modal-header">⌨️ Keyboard Shortcuts</div>
+      <div class="modal-body">
+        <div class="kbd-shortcuts-grid">
+          <div>
+            <div class="kbd-section-title">Navigation</div>
+            <div class="kbd-row"><span>Global search</span><kbd>Ctrl+K</kbd></div>
+            <div class="kbd-row"><span>Go to Users</span><kbd>G</kbd> then <kbd>U</kbd></div>
+            <div class="kbd-row"><span>Go to Revenue</span><kbd>G</kbd> then <kbd>R</kbd></div>
+            <div class="kbd-row"><span>Go to Overview</span><kbd>G</kbd> then <kbd>O</kbd></div>
+            <div class="kbd-row"><span>Go to Audit Log</span><kbd>G</kbd> then <kbd>A</kbd></div>
+            <div class="kbd-row"><span>Go to Flags</span><kbd>G</kbd> then <kbd>F</kbd></div>
+            <div class="kbd-row"><span>Go to Settings</span><kbd>G</kbd> then <kbd>S</kbd></div>
+          </div>
+          <div>
+            <div class="kbd-section-title">Actions</div>
+            <div class="kbd-row"><span>Refresh current tab</span><kbd>Ctrl+R</kbd></div>
+            <div class="kbd-row"><span>Close modal / panel</span><kbd>Esc</kbd></div>
+            <div class="kbd-row"><span>Confirm (modal open)</span><kbd>Enter</kbd></div>
+            <div class="kbd-section-title" style="margin-top:16px">This modal</div>
+            <div class="kbd-row"><span>Open shortcuts</span><kbd>?</kbd></div>
+            <div class="kbd-row"><span>Close</span><kbd>Esc</kbd></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn-cancel" onclick="document.getElementById('kbd-shortcuts-modal').remove()">Close</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
 }
 
 // ══════════════════════════════════════════════════════════════════

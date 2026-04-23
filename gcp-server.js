@@ -2816,11 +2816,27 @@ app.post("/admin/api/tests/run", adminAuth, async (req, res) => {
   }
 })();
 
-// Ensure mock_payments flag exists (enabled=true for testing; admin can toggle off before live)
-supabaseAdmin.from("feature_flags")
-  .upsert({ key: "mock_payments", enabled: true, updated_at: new Date().toISOString() }, { onConflict: "key", ignoreDuplicates: true })
-  .then(() => console.log("[FLAGS] mock_payments flag ensured"))
-  .catch((e) => console.warn("[FLAGS] mock_payments init error:", e.message));
+// Ensure all feature flags exist on startup (ignoreDuplicates = never overwrite existing values)
+const STARTUP_FLAGS = [
+  { key: "enable_recording",   enabled: true,  description: "Allow users to record sessions"                },
+  { key: "enable_background",  enabled: true,  description: "Enable background replacement mode"            },
+  { key: "enable_auto_prompt", enabled: true,  description: "Enable Florence-2 auto-describe"               },
+  { key: "enable_new_signups", enabled: true,  description: "Allow new user registrations"                  },
+  { key: "maintenance_mode",   enabled: false, description: "Show maintenance banner to all users"          },
+  { key: "beta_features",      enabled: false, description: "Enable beta features for all users"            },
+  { key: "mock_payments",      enabled: true,  description: "Mock payment mode — disable before launch"     },
+  { key: "enable_style_mode",  enabled: true,  description: "Enable style transformation mode"              },
+  { key: "enable_obs_output",  enabled: true,  description: "Enable OBS output feature"                     },
+  { key: "enable_kill_switch", enabled: false, description: "Emergency: block all new sessions immediately" },
+];
+(async () => {
+  const now = new Date().toISOString();
+  const rows = STARTUP_FLAGS.map(f => ({ ...f, updated_at: now }));
+  const { error } = await supabaseAdmin.from("feature_flags")
+    .upsert(rows, { onConflict: "key", ignoreDuplicates: true });
+  if (error) console.warn("[FLAGS] Startup flags init error:", error.message);
+  else console.log(`[FLAGS] ${rows.length} feature flags ensured`);
+})();
 
 app.listen(PORT, () => {
   console.log("═══════════════════════════════════════════════════════");
