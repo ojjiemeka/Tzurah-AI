@@ -63,11 +63,83 @@ const PACKS = {
   max:      { name: "Max",      price: 500, credits: 1200, minutes: 200, priceId: process.env.STRIPE_PRICE_MAX      },
 };
 
+// ── Role permissions ──────────────────────────────────────────────
+const PERMISSIONS = {
+  super_admin: ["*"],
+  admin: [
+    "view_users", "view_sessions", "view_revenue", "view_purchases",
+    "gift_credits", "deduct_credits", "ban_user", "unban_user",
+    "kill_session", "send_email", "manage_announcements",
+    "manage_packs", "manage_ip_blocks", "view_logs",
+  ],
+  support: [
+    "view_users", "view_sessions", "view_purchases", "gift_credits",
+  ],
+  analyst: [
+    "view_revenue", "view_purchases", "view_overview",
+  ],
+};
+
+function can(role, action) {
+  if (!role) return false;
+  if (PERMISSIONS[role]?.includes("*")) return true;
+  return PERMISSIONS[role]?.includes(action) || false;
+}
+
+function maskKey(v) {
+  return v ? v.substring(0, 6) + "****" : "not set";
+}
+
+// ── Central audit logger ──────────────────────────────────────────
+async function logAction(action, adminEmail, adminRole, targetUser, details, req) {
+  const entry = {
+    action,
+    performed_by:      adminEmail  || "unknown",
+    performed_by_role: adminRole   || "unknown",
+    target_user:       targetUser  || null,
+    ip_address: req?.ip || (req?.headers?.["x-forwarded-for"] || "").split(",")[0].trim() || "unknown",
+    user_agent: req?.headers?.["user-agent"] || "unknown",
+    details: details ? (typeof details === "object" ? JSON.stringify(details) : details) : null,
+    created_at: new Date().toISOString(),
+  };
+  const { error } = await supabaseAdmin.from("admin_actions").insert(entry);
+  if (error) console.warn("[AUDIT] Log failed:", error.message);
+  console.log(`[AUDIT] ${entry.created_at} | ${adminRole}:${adminEmail} | ${action} | target:${targetUser || "n/a"}`);
+}
+
+// ── Admin login rate limit (in-memory, per IP) ────────────────────
+const _loginAttempts = new Map(); // ip → { count, lockUntil }
+
+function _checkLoginLock(ip) {
+  const r = _loginAttempts.get(ip);
+  if (!r) return false;
+  if (r.lockUntil > Date.now()) return true;
+  return false;
+}
+function _recordFailedLogin(ip) {
+  const now = Date.now();
+  const r = _loginAttempts.get(ip) || { count: 0, lockUntil: 0 };
+  r.count++;
+  if (r.count >= 5) { r.lockUntil = now + 15 * 60 * 1000; r.count = 0; }
+  _loginAttempts.set(ip, r);
+}
+function _clearLoginAttempts(ip) { _loginAttempts.delete(ip); }
+
 // ── Admin session auth ─────────────────────────────────────────────
 function adminAuth(req, res, next) {
-  if (req.session?.isAdmin) return next();
-  if (req.path.startsWith("/admin/api/")) return res.status(401).json({ error: "Unauthorized" });
-  res.redirect("/admin/login");
+  if (!req.session?.isAdmin) {
+    if (req.path.startsWith("/admin/api/")) return res.status(401).json({ error: "Unauthorized" });
+    return res.redirect("/admin/login");
+  }
+  // Session inactivity: expire after 8 hours
+  const now = Date.now();
+  if (req.session.lastActive && (now - req.session.lastActive > 8 * 60 * 60 * 1000)) {
+    req.session.destroy(() => {});
+    if (req.path.startsWith("/admin/api/")) return res.status(401).json({ error: "Session expired" });
+    return res.redirect("/admin/login");
+  }
+  req.session.lastActive = now;
+  next();
 }
 
 // ── User auth middleware (Supabase JWT) ────────────────────────────
@@ -129,7 +201,7 @@ app.use((req, res, next) => {
   if (req.path.startsWith("/admin")) {
     res.header("Access-Control-Allow-Origin",      req.headers.origin || "*");
     res.header("Access-Control-Allow-Credentials", "true");
-    res.header("Access-Control-Allow-Methods",     "GET,POST,OPTIONS");
+    res.header("Access-Control-Allow-Methods",     "GET,POST,PATCH,DELETE,OPTIONS");
     res.header("Access-Control-Allow-Headers",     "Content-Type,Authorization");
     if (req.method === "OPTIONS") return res.sendStatus(200);
     return next();
@@ -158,6 +230,27 @@ app.use(session({
   saveUninitialized: false,
   cookie:            { secure: false, httpOnly: true, sameSite: "lax", maxAge: 24 * 60 * 60 * 1000 },
 }));
+
+// ── Security headers ──────────────────────────────────────────────
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  next();
+});
+
+// ── Admin IP allowlist (optional — set ADMIN_IP_ALLOWLIST in .env) ─
+app.use("/admin", (req, res, next) => {
+  const list = process.env.ADMIN_IP_ALLOWLIST;
+  if (!list) return next();
+  const allowed = list.split(",").map(s => s.trim()).filter(Boolean);
+  const ip = req.ip || (req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  if (allowed.includes(ip)) return next();
+  console.warn(`[SECURITY] Admin access from non-allowlisted IP: ${ip}`);
+  if (req.path.startsWith("/api/")) return res.status(403).json({ error: "Access denied from this IP" });
+  return res.status(403).send("Access denied");
+});
 
 // ═══════════════════════════════════════════════════════════════════
 // PUBLIC ROUTES
@@ -421,13 +514,24 @@ app.get("/admin/login", (req, res) => {
 // Admin login POST
 app.post("/admin/login", async (req, res) => {
   const { email, password } = req.body || {};
+  const ip = req.ip || (req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+
+  // IP rate limit check
+  if (_checkLoginLock(ip)) {
+    await logAction("admin_login_failed", null, null, null, { attempted_email: email, reason: "ip_locked" }, req);
+    return res.status(429).json({ error: "Too many failed attempts — try again in 15 minutes" });
+  }
+
   const adminEmail = process.env.ADMIN_EMAIL    || "admin@tzurah.ai";
   const adminPass  = process.env.ADMIN_PASSWORD || "TzurahAdmin2025!";
   if (email === adminEmail && password === adminPass) {
-    req.session.isAdmin     = true;
-    req.session.adminEmail  = email;
-    req.session.adminRole   = "super_admin";
-    req.session.adminName   = "Super Admin";
+    req.session.isAdmin      = true;
+    req.session.adminEmail   = email;
+    req.session.adminRole    = "super_admin";
+    req.session.adminName    = "Super Admin";
+    req.session.lastActive   = Date.now();
+    _clearLoginAttempts(ip);
+    await logAction("admin_login", email, "super_admin", null, { success: true }, req);
     return res.json({ success: true });
   }
   // Try sub-admin login
@@ -438,12 +542,15 @@ app.post("/admin/login", async (req, res) => {
       const bcrypt = require("bcryptjs");
       const ok = await bcrypt.compare(password, admins.password_hash);
       if (ok) {
-        console.log("[LOGIN] Sub-admin:", admins.email, "must_change_password:", admins.must_change_password, "type:", typeof admins.must_change_password);
+        console.log("[LOGIN] Sub-admin:", admins.email, "role:", admins.role);
         req.session.isAdmin    = true;
         req.session.adminEmail = admins.email;
         req.session.adminRole  = admins.role;
         req.session.adminName  = admins.name;
+        req.session.lastActive = Date.now();
+        _clearLoginAttempts(ip);
         await supabaseAdmin.from("admin_users").update({ last_login: new Date().toISOString() }).eq("id", admins.id);
+        await logAction("admin_login", admins.email, admins.role, null, { success: true }, req);
         return res.json({
           success: true,
           mustChangePassword: admins.must_change_password === true,
@@ -453,6 +560,8 @@ app.post("/admin/login", async (req, res) => {
       }
     }
   } catch (_) {}
+  _recordFailedLogin(ip);
+  await logAction("admin_login_failed", null, null, null, { attempted_email: email }, req);
   res.status(401).json({ error: "Invalid credentials" });
 });
 
@@ -887,6 +996,12 @@ app.get("/admin/api/purchases", adminAuth, async (req, res) => {
 // ── Admin: gift credits ───────────────────────────────────────────
 // Accepts { userId, amount } (admin.html) OR legacy { user_id, credits }
 app.post("/admin/api/gift-credits", adminAuth, async (req, res) => {
+  const role = req.session.adminRole;
+  if (!can(role, "gift_credits")) {
+    await logAction("unauthorized_attempt", req.session.adminEmail, role, null, { endpoint: "gift-credits", required_permission: "gift_credits" }, req);
+    return res.status(403).json({ error: "Insufficient permissions", required: "gift_credits" });
+  }
+
   const body    = req.body || {};
   const userId  = body.userId  || body.user_id;
   const credits = body.amount  != null ? body.amount : body.credits;
@@ -920,7 +1035,7 @@ app.post("/admin/api/gift-credits", adminAuth, async (req, res) => {
       created_at:        new Date().toISOString(),
     });
 
-    console.log(`[Tzurah] Admin gifted ${credits} credits to ${userId}` + (reason ? ` (${reason})` : ""));
+    await logAction("gift_credits", req.session.adminEmail, role, userId, { amount: credits, new_balance: newBalance, reason }, req);
     res.json({ ok: true, new_balance: newBalance });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -929,6 +1044,12 @@ app.post("/admin/api/gift-credits", adminAuth, async (req, res) => {
 
 // ── Admin: deduct credits ─────────────────────────────────────────
 app.post("/admin/api/deduct-credits", adminAuth, async (req, res) => {
+  const role = req.session.adminRole;
+  if (!can(role, "deduct_credits")) {
+    await logAction("unauthorized_attempt", req.session.adminEmail, role, null, { endpoint: "deduct-credits", required_permission: "deduct_credits" }, req);
+    return res.status(403).json({ error: "Insufficient permissions", required: "deduct_credits" });
+  }
+
   const body    = req.body || {};
   const userId  = body.userId  || body.user_id;
   const credits = body.amount  != null ? body.amount : body.credits;
@@ -947,7 +1068,7 @@ app.post("/admin/api/deduct-credits", adminAuth, async (req, res) => {
     const newBalance = Math.max(0, profile.credits - credits);
     await supabaseAdmin.from("profiles").update({ credits: newBalance }).eq("id", userId);
 
-    console.log(`[Tzurah] Admin deducted ${credits} credits from ${userId}` + (reason ? ` (${reason})` : ""));
+    await logAction("deduct_credits", req.session.adminEmail, role, userId, { amount: credits, new_balance: newBalance, reason }, req);
     res.json({ ok: true, new_balance: newBalance });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -956,16 +1077,19 @@ app.post("/admin/api/deduct-credits", adminAuth, async (req, res) => {
 
 // ── Admin: ban user ───────────────────────────────────────────────
 app.post("/admin/api/ban-user", adminAuth, async (req, res) => {
+  const role = req.session.adminRole;
+  if (!can(role, "ban_user")) {
+    await logAction("unauthorized_attempt", req.session.adminEmail, role, null, { endpoint: "ban-user", required_permission: "ban_user" }, req);
+    return res.status(403).json({ error: "Insufficient permissions", required: "ban_user" });
+  }
   const body   = req.body || {};
   const userId = body.userId || body.user_id;
   if (!userId) return res.status(400).json({ error: "userId required" });
 
   try {
-    const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-      ban_duration: "87600h", // ~10 years
-    });
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: "87600h" });
     if (error) return res.status(500).json({ error: error.message });
-    console.log(`[Tzurah] Admin banned user ${userId}`);
+    await logAction("ban_user", req.session.adminEmail, role, userId, { reason: body.reason || null }, req);
     res.json({ ok: true, status: "banned" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -974,15 +1098,19 @@ app.post("/admin/api/ban-user", adminAuth, async (req, res) => {
 
 // ── Admin: unban user ─────────────────────────────────────────────
 app.post("/admin/api/unban-user", adminAuth, async (req, res) => {
+  const role = req.session.adminRole;
+  if (!can(role, "unban_user")) {
+    await logAction("unauthorized_attempt", req.session.adminEmail, role, null, { endpoint: "unban-user", required_permission: "unban_user" }, req);
+    return res.status(403).json({ error: "Insufficient permissions", required: "unban_user" });
+  }
   const body   = req.body || {};
   const userId = body.userId || body.user_id;
   if (!userId) return res.status(400).json({ error: "userId required" });
 
   try {
-    const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-      ban_duration: "none",
-    });
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, { ban_duration: "none" });
     if (error) return res.status(500).json({ error: error.message });
+    await logAction("unban_user", req.session.adminEmail, role, userId, {}, req);
     res.json({ ok: true, status: "active" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -991,10 +1119,12 @@ app.post("/admin/api/unban-user", adminAuth, async (req, res) => {
 
 // ── Admin: delete user ────────────────────────────────────────────
 app.delete("/admin/api/users/:id", adminAuth, async (req, res) => {
+  const role = req.session.adminRole;
   try {
     const userId = req.params.id;
 
-    if (req.session.adminRole !== "super_admin") {
+    if (!can(role, "*") || role !== "super_admin") {
+      await logAction("unauthorized_attempt", req.session.adminEmail, role, userId, { endpoint: "delete-user", required_permission: "super_admin" }, req);
       return res.status(403).json({ error: "Only super admins can delete users" });
     }
 
@@ -1015,13 +1145,7 @@ app.delete("/admin/api/users/:id", adminAuth, async (req, res) => {
     const { error: authErr } = await supabaseAdmin.auth.admin.deleteUser(userId);
     if (authErr) throw new Error("Auth delete failed: " + authErr.message);
 
-    const { error: logErr } = await supabaseAdmin.from("admin_actions").insert({
-      action: "delete_user",
-      performed_by: req.session?.adminEmail || "admin",
-      created_at: new Date().toISOString(),
-    });
-    if (logErr) console.warn("[Admin] action log:", logErr.message);
-
+    await logAction("delete_user", req.session.adminEmail, role, userId, {}, req);
     console.log("[Admin] User deleted:", userId);
     return res.json({ success: true, deleted: userId });
   } catch (err) {
@@ -1171,6 +1295,11 @@ app.get("/admin/api/live-sessions", adminAuth, async (_req, res) => {
 
 // POST /admin/api/end-session — force-end a user's active session via kill signal
 app.post("/admin/api/end-session", adminAuth, async (req, res) => {
+  const role = req.session.adminRole;
+  if (!can(role, "kill_session")) {
+    await logAction("unauthorized_attempt", req.session.adminEmail, role, null, { endpoint: "end-session", required_permission: "kill_session" }, req);
+    return res.status(403).json({ error: "Insufficient permissions", required: "kill_session" });
+  }
   const body       = req.body || {};
   const userId     = body.userId || body.user_id;
   const reason     = body.reason     || null;
@@ -1180,6 +1309,7 @@ app.post("/admin/api/end-session", adminAuth, async (req, res) => {
     await supabaseAdmin.from("sessions")
       .update({ is_active: false, kill_signal: true, kill_reason: reason, kill_note: adminNote })
       .eq("user_id", userId);
+    await logAction("kill_session", req.session.adminEmail, role, userId, { reason, admin_note: adminNote }, req);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1295,6 +1425,11 @@ app.get("/admin/api/email/sent", adminAuth, async (_req, res) => {
 
 // POST /admin/api/email/send — send email to recipient list
 app.post("/admin/api/email/send", adminAuth, async (req, res) => {
+  const role = req.session.adminRole;
+  if (!can(role, "send_email")) {
+    await logAction("unauthorized_attempt", req.session.adminEmail, role, null, { endpoint: "email/send", required_permission: "send_email" }, req);
+    return res.status(403).json({ error: "Insufficient permissions", required: "send_email" });
+  }
   const { recipients, subject, body, test_only } = req.body || {};
   if (!recipients?.length) return res.status(400).json({ error: "No recipients" });
   if (!subject?.trim())    return res.status(400).json({ error: "Subject required" });
@@ -1339,11 +1474,11 @@ app.post("/admin/api/email/send", adminAuth, async (req, res) => {
   await supabaseAdmin.from("sent_emails").insert({
     subject,
     recipient_count: results.sent,
-    sent_by:         "admin",
+    sent_by:         req.session.adminEmail || "admin",
     sent_at:         new Date().toISOString(),
   }).then(() => {}).catch(() => {});
 
-  console.log(`[Tzurah] Email sent: ${results.sent} ok, ${results.failed} failed`);
+  await logAction("send_email", req.session.adminEmail, req.session.adminRole, null, { subject, sent: results.sent, failed: results.failed }, req);
   res.json(results);
 });
 
@@ -1359,9 +1494,8 @@ const SETTINGS_ALLOWED_KEYS = [
 
 // Returns masked current values + server info
 app.get("/admin/api/settings", adminAuth, (req, res) => {
-  const mask = (val) => val
-    ? val.slice(0, 6) + "•".repeat(22) + val.slice(-4)
-    : "not set";
+  if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Insufficient permissions", required: "super_admin" });
+  const mask = (val) => val ? maskKey(val) : "not set";
   res.json({
     decart_key:   mask(process.env.DECART_API_KEY),
     supabase_url: process.env.SUPABASE_URL || "not set",
@@ -1381,6 +1515,7 @@ app.get("/admin/api/settings", adminAuth, (req, res) => {
 
 // Reveals the actual (unmasked) value of a specific env key
 app.post("/admin/api/settings/reveal-key", adminAuth, (req, res) => {
+  if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Insufficient permissions", required: "super_admin" });
   const { key_name } = req.body || {};
   const revealable = ["DECART_API_KEY", "SUPABASE_SERVICE_ROLE_KEY", "ADMIN_EMAIL"];
   if (!revealable.includes(key_name)) {
@@ -1390,7 +1525,8 @@ app.post("/admin/api/settings/reveal-key", adminAuth, (req, res) => {
 });
 
 // Updates a single env key in .env + live process.env
-app.post("/admin/api/settings/update-key", adminAuth, (req, res) => {
+app.post("/admin/api/settings/update-key", adminAuth, async (req, res) => {
+  if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Insufficient permissions", required: "super_admin" });
   const { key_name, value } = req.body || {};
   if (!SETTINGS_ALLOWED_KEYS.includes(key_name)) {
     return res.status(400).json({ error: "Key not allowed" });
@@ -1410,7 +1546,7 @@ app.post("/admin/api/settings/update-key", adminAuth, (req, res) => {
     }
     fs.writeFileSync(envPath, envContent);
     process.env[key_name] = value.trim();
-    console.log(`[SETTINGS] Updated ${key_name}`);
+    await logAction("settings_change", req.session.adminEmail, req.session.adminRole, null, { field_changed: key_name }, req);
     res.json({ success: true });
   } catch (err) {
     console.error("[SETTINGS] update-key error:", err.message);
@@ -1653,13 +1789,18 @@ app.get("/admin/api/feature-flags", adminAuth, async (_req, res) => {
 });
 
 app.post("/admin/api/feature-flags/:key", adminAuth, async (req, res) => {
+  const role = req.session.adminRole;
+  if (role !== "super_admin") {
+    await logAction("unauthorized_attempt", req.session.adminEmail, role, null, { endpoint: "feature-flags", required_permission: "super_admin" }, req);
+    return res.status(403).json({ error: "Insufficient permissions", required: "super_admin" });
+  }
   const { key } = req.params;
   const { enabled } = req.body;
   const { error } = await supabaseAdmin.from("feature_flags")
     .update({ enabled, updated_at: new Date().toISOString(), updated_by: req.session.adminEmail || "admin" })
     .eq("key", key);
   if (error) return res.status(500).json({ error: error.message });
-  console.log(`[FLAGS] ${key} = ${enabled}`);
+  await logAction("toggle_flag", req.session.adminEmail, role, null, { flag: key, value: enabled }, req);
   res.json({ ok: true });
 });
 
@@ -1807,25 +1948,7 @@ async function doMockPurchase(userId, packId, email) {
   });
   if (notifErr) console.warn("[MOCK] Notification insert error:", notifErr.message);
 
-  // Admin action log (non-fatal) — diagnose columns first
-  const { data: sampleAction } = await supabaseAdmin
-    .from("admin_actions").select("*").limit(1).maybeSingle();
-  console.log("[MOCK] admin_actions columns:",
-    sampleAction ? Object.keys(sampleAction).join(", ") : "no rows");
-
-  const actionRow = {
-    action:       "mock_purchase",
-    performed_by: "admin",
-    created_at:   new Date().toISOString(),
-  };
-  if (!sampleAction || Object.keys(sampleAction).includes("target_user"))
-    actionRow.target_user = profile.id || userId;
-  if (!sampleAction || Object.keys(sampleAction).includes("details"))
-    actionRow.details = JSON.stringify({ pack_id: packId, credits: pack.credits, price: pack.price_usd });
-
-  const { error: logErr } = await supabaseAdmin.from("admin_actions").insert(actionRow);
-  if (logErr) console.warn("[MOCK] Action log insert error:", logErr.message);
-
+  await logAction("mock_purchase", "system", "super_admin", profile.id || userId, { pack_id: packId, pack_name: pack.name, credits: pack.credits, price: pack.price_usd }, null);
   console.log(`[MOCK] Purchase: ${pack.name} → ${resolvedEmail} (+${pack.credits} cr)`);
   return { success: true, credits_added: pack.credits, new_balance: newBalance, pack_name: pack.name };
 }
@@ -1906,10 +2029,16 @@ app.get("/admin/api/announcements", adminAuth, async (_req, res) => {
 });
 
 app.post("/admin/api/announcements", adminAuth, async (req, res) => {
+  const role = req.session.adminRole;
+  if (!can(role, "manage_announcements")) {
+    await logAction("unauthorized_attempt", req.session.adminEmail, role, null, { endpoint: "announcements", required_permission: "manage_announcements" }, req);
+    return res.status(403).json({ error: "Insufficient permissions", required: "manage_announcements" });
+  }
   const { title, message, type, scheduled_at, expires_at } = req.body || {};
   if (!title || !message) return res.status(400).json({ error: "title and message required" });
   const { data, error } = await supabaseAdmin.from("announcements").insert({ title, message, type: type || "info", scheduled_at: scheduled_at || null, expires_at: expires_at || null, is_active: true }).select("*").single();
   if (error) return res.status(400).json({ error: error.message });
+  await logAction("create_announcement", req.session.adminEmail, role, null, { title, type: type || "info" }, req);
   res.json({ announcement: data });
 });
 
@@ -1933,14 +2062,18 @@ app.get("/admin/api/sub-admins", adminAuth, async (req, res) => {
 });
 
 app.post("/admin/api/sub-admins", adminAuth, async (req, res) => {
-  if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Super admin only" });
+  const adminRole = req.session.adminRole;
+  if (adminRole !== "super_admin") {
+    await logAction("unauthorized_attempt", req.session.adminEmail, adminRole, null, { endpoint: "sub-admins/create", required_permission: "super_admin" }, req);
+    return res.status(403).json({ error: "Super admin only" });
+  }
   const { name, email, role, password, must_change_password } = req.body;
   if (!name || !email || !password) return res.status(400).json({ error: "Name, email and password required" });
   const bcrypt = require("bcryptjs");
   const hash = await bcrypt.hash(password, 10);
   const { data, error } = await supabaseAdmin.from("admin_users").insert({ name, email, role: role || "support", password_hash: hash, must_change_password: must_change_password !== false, created_by: req.session.adminEmail }).select("id, email, name, role").single();
   if (error) return res.status(400).json({ error: error.message });
-  console.log(`[ADMIN] Sub-admin created: ${email} (${role}) by ${req.session.adminEmail}`);
+  await logAction("create_subadmin", req.session.adminEmail, adminRole, null, { new_admin_email: email, role_assigned: role || "support" }, req);
   res.json({ admin: data });
 });
 
@@ -1962,18 +2095,54 @@ app.get("/admin/api/ip-blocks", adminAuth, async (_req, res) => {
 });
 
 app.post("/admin/api/ip-blocks", adminAuth, async (req, res) => {
+  const role = req.session.adminRole;
+  if (!can(role, "manage_ip_blocks")) {
+    await logAction("unauthorized_attempt", req.session.adminEmail, role, null, { endpoint: "ip-blocks", required_permission: "manage_ip_blocks" }, req);
+    return res.status(403).json({ error: "Insufficient permissions", required: "manage_ip_blocks" });
+  }
   const { ip_address, reason, expires_in_days } = req.body;
   if (!ip_address) return res.status(400).json({ error: "IP address required" });
   const expires_at = expires_in_days ? new Date(Date.now() + expires_in_days * 86400000).toISOString() : null;
   const { error } = await supabaseAdmin.from("ip_blocks").upsert({ ip_address, reason: reason || "Manual block", blocked_by: req.session.adminEmail, expires_at }, { onConflict: "ip_address" });
   if (error) return res.status(400).json({ error: error.message });
-  console.log(`[SECURITY] IP blocked: ${ip_address} by ${req.session.adminEmail}`);
+  await logAction("ip_block", req.session.adminEmail, role, null, { ip: ip_address, reason, expires_at }, req);
   res.json({ ok: true });
 });
 
 app.delete("/admin/api/ip-blocks/:ip", adminAuth, async (req, res) => {
-  await supabaseAdmin.from("ip_blocks").delete().eq("ip_address", decodeURIComponent(req.params.ip));
+  const role = req.session.adminRole;
+  if (!can(role, "manage_ip_blocks")) {
+    await logAction("unauthorized_attempt", req.session.adminEmail, role, null, { endpoint: "ip-blocks/delete", required_permission: "manage_ip_blocks" }, req);
+    return res.status(403).json({ error: "Insufficient permissions", required: "manage_ip_blocks" });
+  }
+  const ip = decodeURIComponent(req.params.ip);
+  await supabaseAdmin.from("ip_blocks").delete().eq("ip_address", ip);
+  await logAction("ip_unblock", req.session.adminEmail, role, null, { ip }, req);
   res.json({ ok: true });
+});
+
+// ── Audit Log ─────────────────────────────────────────────────────
+app.get("/admin/api/audit-log", adminAuth, async (req, res) => {
+  if (req.session.adminRole !== "super_admin") {
+    return res.status(403).json({ error: "Insufficient permissions", required: "super_admin" });
+  }
+  const page   = Math.max(1, parseInt(req.query.page  || "1", 10));
+  const limit  = 50;
+  const offset = (page - 1) * limit;
+
+  let query = supabaseAdmin.from("admin_actions")
+    .select("*", { count: "exact" })
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (req.query.action) query = query.eq("action", req.query.action);
+  if (req.query.admin)  query = query.ilike("performed_by", `%${req.query.admin}%`);
+  if (req.query.from)   query = query.gte("created_at", req.query.from);
+  if (req.query.to)     query = query.lte("created_at", req.query.to);
+
+  const { data, count, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ entries: data || [], total: count || 0, page, totalPages: Math.ceil((count || 0) / limit) });
 });
 
 // ── C6: Admin Notifications ───────────────────────────────────────
@@ -2587,6 +2756,24 @@ app.post("/admin/api/tests/run", adminAuth, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════
 // START
 // ═══════════════════════════════════════════════════════════════════
+
+// Startup: verify admin_actions table has expected columns
+(async () => {
+  const required = ["details", "ip_address", "user_agent", "performed_by_role"];
+  const { data, error } = await supabaseAdmin.from("admin_actions").select("*").limit(1);
+  if (error) {
+    console.warn("[STARTUP] admin_actions table not found or inaccessible:", error.message);
+    return;
+  }
+  if (data && data.length > 0) {
+    const cols = Object.keys(data[0]);
+    const missing = required.filter(c => !cols.includes(c));
+    if (missing.length > 0) {
+      console.warn("[STARTUP] admin_actions table missing columns:", missing.join(", "));
+      console.warn("[STARTUP] Run: ALTER TABLE admin_actions ADD COLUMN IF NOT EXISTS <column> TEXT;");
+    }
+  }
+})();
 
 // Ensure mock_payments flag exists (enabled=true for testing; admin can toggle off before live)
 supabaseAdmin.from("feature_flags")

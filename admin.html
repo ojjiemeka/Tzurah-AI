@@ -935,6 +935,16 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   table.mobile-cards tbody td[data-label="⋯"]::before { display: none; }
   .table-wrap { border-radius: 0; border-left: none; border-right: none; }
 }
+
+/* ── Audit log ─────────────────────────────────────────────────── */
+.audit-row-delete   { background: rgba(239,68,68,.08); }
+.audit-row-ban      { background: rgba(245,158,11,.08); }
+.audit-row-gift     { background: rgba(34,197,94,.08);  }
+.audit-row-warn     { background: rgba(239,68,68,.12); }
+.audit-action       { font-family:monospace; font-size:11px; padding:2px 6px;
+                      border-radius:4px; background:var(--surface2); white-space:nowrap; }
+.audit-detail       { max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+                      color:var(--muted); font-size:11px; }
 </style>
 </head>
 <body>
@@ -968,6 +978,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
       </div>
       <div id="notif-list"><div class="notif-empty">No notifications</div></div>
     </div>
+    <span id="role-badge"></span>
     <span id="admin-name" style="font-size:11px;color:var(--muted)"></span>
     <button class="btn btn-ghost" onclick="logout()">Logout</button>
   </div>
@@ -988,6 +999,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   <button class="tab-btn" data-tab="tests">🧪 Tests</button>
   <button class="tab-btn" data-tab="flags">🚩 Flags</button>
   <button class="tab-btn" data-tab="settings">⚙ Settings</button>
+  <button class="tab-btn" data-tab="audit">📋 Audit Log</button>
 </div>
 
 <!-- Toast container -->
@@ -1650,6 +1662,72 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   </div>
 </div>
 
+<!-- ── Audit Log ──────────────────────────────────────────────── -->
+<div class="tab-panel" id="tab-audit">
+  <div class="sec-hdr">
+    <div>
+      <h3>📋 Audit Log</h3>
+      <div class="sub">All admin actions — super admin view only</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="exportAuditCSV()">⬇ Export CSV</button>
+  </div>
+
+  <!-- Filters -->
+  <div class="filter-row" style="margin-bottom:14px">
+    <select id="audit-filter-action" style="min-width:160px" onchange="renderAuditLog(1)">
+      <option value="">All actions</option>
+      <option value="admin_login">admin_login</option>
+      <option value="admin_login_failed">admin_login_failed</option>
+      <option value="gift_credits">gift_credits</option>
+      <option value="deduct_credits">deduct_credits</option>
+      <option value="ban_user">ban_user</option>
+      <option value="unban_user">unban_user</option>
+      <option value="delete_user">delete_user</option>
+      <option value="kill_session">kill_session</option>
+      <option value="send_email">send_email</option>
+      <option value="create_announcement">create_announcement</option>
+      <option value="ip_block">ip_block</option>
+      <option value="ip_unblock">ip_unblock</option>
+      <option value="create_subadmin">create_subadmin</option>
+      <option value="toggle_flag">toggle_flag</option>
+      <option value="settings_change">settings_change</option>
+      <option value="unauthorized_attempt">unauthorized_attempt</option>
+    </select>
+    <input id="audit-filter-admin" type="text" placeholder="Filter by admin email…" oninput="renderAuditLog(1)" style="min-width:200px">
+    <input id="audit-filter-from"  type="date" onchange="renderAuditLog(1)">
+    <input id="audit-filter-to"    type="date" onchange="renderAuditLog(1)">
+    <button class="btn btn-ghost btn-sm" onclick="document.getElementById('audit-filter-action').value='';document.getElementById('audit-filter-admin').value='';document.getElementById('audit-filter-from').value='';document.getElementById('audit-filter-to').value='';renderAuditLog(1)">Clear</button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Timestamp</th>
+          <th>Admin</th>
+          <th>Role</th>
+          <th>Action</th>
+          <th>Target User</th>
+          <th>IP</th>
+          <th>Details</th>
+        </tr>
+      </thead>
+      <tbody id="audit-tbody">
+        <tr><td colspan="7" class="td-empty">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  <div class="pager" id="audit-pager" style="display:none">
+    <span id="audit-pager-info" style="font-size:11px;color:var(--muted)"></span>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" id="audit-prev" onclick="renderAuditLog(window._auditPage-1)">← Prev</button>
+      <button class="btn btn-ghost btn-sm" id="audit-next" onclick="renderAuditLog(window._auditPage+1)">Next →</button>
+    </div>
+  </div>
+</div>
+
 </main>
 
 <script>
@@ -1990,6 +2068,7 @@ function switchTab(tab) {
     case 'email':         loadEmailTab(); break;
     case 'tests':         initTestsTab(); break;
     case 'settings':      loadSettings(); if (typeof loadDbStats === 'function') loadDbStats(); break;
+    case 'audit':         renderAuditLog(1); break;
   }
   sessionStorage.setItem('activeTab', tab);
 }
@@ -4416,13 +4495,30 @@ const TAB_PERMISSIONS = {
   tests:         ['super_admin', 'admin'],
   flags:         ['super_admin'],
   settings:      ['super_admin'],
+  audit:         ['super_admin'],
 };
 
-function applyRoleVisibility(role) {
+const ROLE_BADGE_CFG = {
+  super_admin: { label: 'SUPER ADMIN', color: '#ef4444', bg: 'rgba(239,68,68,.15)' },
+  admin:       { label: 'ADMIN',       color: '#f59e0b', bg: 'rgba(245,158,11,.15)' },
+  support:     { label: 'SUPPORT',     color: '#06b6d4', bg: 'rgba(6,182,212,.15)'  },
+  analyst:     { label: 'ANALYST',     color: '#22c55e', bg: 'rgba(34,197,94,.15)'  },
+};
+
+function applyRoleUI(role) {
+  // Hide/show tabs
   Object.entries(TAB_PERMISSIONS).forEach(([tab, roles]) => {
     const btn = document.querySelector(`[data-tab="${tab}"]`);
     if (btn) btn.style.display = roles.includes(role) ? '' : 'none';
   });
+  // Role badge
+  const badge = document.getElementById('role-badge');
+  if (badge) {
+    const cfg = ROLE_BADGE_CFG[role] || { label: role.toUpperCase(), color: '#94a3b8', bg: 'rgba(148,163,184,.15)' };
+    badge.textContent = cfg.label;
+    badge.style.cssText = `font-size:9px;font-weight:700;letter-spacing:1px;padding:2px 8px;border-radius:4px;` +
+      `color:${cfg.color};background:${cfg.bg};border:1px solid ${cfg.color}40;text-transform:uppercase`;
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -4822,8 +4918,99 @@ async function updateFlag(key, enabled) {
 }
 
 // ══════════════════════════════════════════════════════════════════
-// C9-C11: UPDATED switchTab + TAB_PERMISSIONS applied
+// AUDIT LOG
 // ══════════════════════════════════════════════════════════════════
+window._auditPage = 1;
+window._auditCache = null;
+
+const AUDIT_ROW_COLORS = {
+  delete_user:          'audit-row-delete',
+  ban_user:             'audit-row-ban',
+  gift_credits:         'audit-row-gift',
+  unauthorized_attempt: 'audit-row-warn',
+};
+
+function auditActionBadge(action) {
+  const cls = AUDIT_ROW_COLORS[action] ? 'audit-action' : 'audit-action';
+  const icon = action === 'unauthorized_attempt' ? '⚠️ ' : '';
+  return `<span class="${cls}">${icon}${esc(action)}</span>`;
+}
+
+async function renderAuditLog(page = 1) {
+  window._auditPage = page;
+  const tbody = document.getElementById('audit-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="7" class="td-empty">Loading…</td></tr>';
+
+  const action = document.getElementById('audit-filter-action')?.value || '';
+  const admin  = document.getElementById('audit-filter-admin')?.value  || '';
+  const from   = document.getElementById('audit-filter-from')?.value   || '';
+  const to     = document.getElementById('audit-filter-to')?.value     || '';
+
+  const params = new URLSearchParams({ page });
+  if (action) params.set('action', action);
+  if (admin)  params.set('admin', admin);
+  if (from)   params.set('from', from + 'T00:00:00Z');
+  if (to)     params.set('to',   to   + 'T23:59:59Z');
+
+  const res = await adminFetch(`/admin/api/audit-log?${params}`);
+  if (!res?.ok) {
+    tbody.innerHTML = '<tr><td colspan="7" class="td-empty" style="color:var(--danger)">Failed to load audit log</td></tr>';
+    return;
+  }
+  const { entries, total, totalPages } = await res.json();
+  window._auditCache = { entries, total, totalPages };
+
+  if (!entries.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="td-empty">No entries match your filters</td></tr>';
+    document.getElementById('audit-pager').style.display = 'none';
+    return;
+  }
+
+  tbody.innerHTML = entries.map(e => {
+    const rowCls = AUDIT_ROW_COLORS[e.action] || '';
+    const ts = e.created_at ? new Date(e.created_at).toLocaleString() : '—';
+    const details = e.details ? (typeof e.details === 'string' ? e.details : JSON.stringify(e.details)) : '';
+    return `<tr class="${rowCls}">
+      <td style="font-size:11px;white-space:nowrap">${ts}</td>
+      <td style="font-size:12px">${esc(e.performed_by || '—')}</td>
+      <td style="font-size:11px;color:var(--muted)">${esc(e.performed_by_role || '—')}</td>
+      <td>${auditActionBadge(e.action || '—')}</td>
+      <td style="font-size:11px;color:var(--muted)">${esc(e.target_user || '—')}</td>
+      <td style="font-size:11px;color:var(--muted)">${esc(e.ip_address || '—')}</td>
+      <td class="audit-detail" title="${esc(details)}">${esc(details)}</td>
+    </tr>`;
+  }).join('');
+
+  const pager = document.getElementById('audit-pager');
+  pager.style.display = '';
+  document.getElementById('audit-pager-info').textContent =
+    `Page ${page} of ${totalPages} · ${total} entries`;
+  document.getElementById('audit-prev').disabled = page <= 1;
+  document.getElementById('audit-next').disabled = page >= totalPages;
+}
+
+function exportAuditCSV() {
+  const entries = window._auditCache?.entries;
+  if (!entries?.length) { toast('Load audit log first', 'error'); return; }
+  const header = ['Timestamp','Admin','Role','Action','Target User','IP','Details'];
+  const rows = entries.map(e => [
+    e.created_at || '',
+    e.performed_by || '',
+    e.performed_by_role || '',
+    e.action || '',
+    e.target_user || '',
+    e.ip_address || '',
+    (e.details || '').replace(/"/g, '""'),
+  ].map(v => `"${v}"`).join(','));
+  const csv = [header.join(','), ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = `audit-log-${new Date().toISOString().split('T')[0]}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
 // ══════════════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════════════
@@ -4834,7 +5021,7 @@ async function init() {
     if (meRes?.ok) {
       const me = await meRes.json();
       window._adminRole = me.role || 'super_admin';
-      applyRoleVisibility(window._adminRole);
+      applyRoleUI(window._adminRole);
       const nameEl = document.getElementById('admin-name');
       if (nameEl) nameEl.textContent = me.name || me.email || 'Admin';
     }
