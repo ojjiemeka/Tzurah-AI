@@ -92,19 +92,36 @@ function maskKey(v) {
 
 // ── Central audit logger ──────────────────────────────────────────
 async function logAction(action, adminEmail, adminRole, targetUser, details, req) {
-  const entry = {
+  const now = new Date().toISOString();
+  const detailsStr = details ? (typeof details === "object" ? JSON.stringify(details) : details) : null;
+  const ip = req?.ip || (req?.headers?.["x-forwarded-for"] || "").split(",")[0].trim() || "unknown";
+
+  // Try full schema first (with extended columns added by mega prompt migration)
+  const fullEntry = {
     action,
     performed_by:      adminEmail  || "unknown",
     performed_by_role: adminRole   || "unknown",
     target_user:       targetUser  || null,
-    ip_address: req?.ip || (req?.headers?.["x-forwarded-for"] || "").split(",")[0].trim() || "unknown",
-    user_agent: req?.headers?.["user-agent"] || "unknown",
-    details: details ? (typeof details === "object" ? JSON.stringify(details) : details) : null,
-    created_at: new Date().toISOString(),
+    ip_address:        ip,
+    user_agent:        req?.headers?.["user-agent"] || "unknown",
+    details:           detailsStr,
+    created_at:        now,
   };
-  const { error } = await supabaseAdmin.from("admin_actions").insert(entry);
-  if (error) console.warn("[AUDIT] Log failed:", error.message);
-  console.log(`[AUDIT] ${entry.created_at} | ${adminRole}:${adminEmail} | ${action} | target:${targetUser || "n/a"}`);
+  const { error } = await supabaseAdmin.from("admin_actions").insert(fullEntry);
+  if (error) {
+    // Fallback: old schema (action, performed_by, target_user, details, created_at)
+    const simpleEntry = {
+      action,
+      performed_by: adminEmail || "unknown",
+      target_user:  targetUser || null,
+      details:      detailsStr,
+      created_at:   now,
+    };
+    const { error: e2 } = await supabaseAdmin.from("admin_actions").insert(simpleEntry);
+    if (e2) console.warn("[AUDIT] Log failed (both schemas):", e2.message);
+    else    console.warn("[AUDIT] Logged with basic schema — add migration columns for full audit data");
+  }
+  console.log(`[AUDIT] ${now} | ${adminRole}:${adminEmail} | ${action} | target:${targetUser || "n/a"}`);
 }
 
 // ── Admin login rate limit (in-memory, per IP) ────────────────────
@@ -2086,6 +2103,30 @@ app.patch("/admin/api/sub-admins/:id", adminAuth, async (req, res) => {
   if (name) updates.name = name;
   await supabaseAdmin.from("admin_users").update(updates).eq("id", req.params.id);
   res.json({ ok: true });
+});
+
+app.delete("/admin/api/sub-admins/:id", adminAuth, async (req, res) => {
+  if (req.session.adminRole !== "super_admin") {
+    await logAction("unauthorized_attempt", req.session.adminEmail, req.session.adminRole, null,
+      { endpoint: "delete_subadmin", required: "super_admin" }, req);
+    return res.status(403).json({ error: "Super admin only" });
+  }
+  const { id } = req.params;
+  try {
+    const { data: subAdmin } = await supabaseAdmin
+      .from("admin_users").select("email, role").eq("id", id).maybeSingle();
+    if (!subAdmin) return res.status(404).json({ error: "Sub-admin not found" });
+
+    const { error: deleteErr } = await supabaseAdmin.from("admin_users").delete().eq("id", id);
+    if (deleteErr) throw new Error(deleteErr.message);
+
+    await logAction("delete_subadmin", req.session.adminEmail, req.session.adminRole, null,
+      { deleted_email: subAdmin.email, deleted_role: subAdmin.role }, req);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("[Admin] Delete sub-admin error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // ── C5: IP Blocks ─────────────────────────────────────────────────

@@ -4687,16 +4687,44 @@ function renderSubAdmins(admins) {
   const tbody = document.getElementById('subadmins-tbody');
   if (!tbody) return;
   if (!admins?.length) { tbody.innerHTML = `<tr><td colspan="6" class="td-empty">No sub-admins yet</td></tr>`; return; }
+  const isSuperAdmin = window._adminRole === 'super_admin';
   tbody.innerHTML = admins.map(a => `
-    <tr>
+    <tr id="sa-row-${a.id}">
       <td data-label="Name">${esc(a.name || '—')}</td>
       <td data-label="Email">${esc(a.email)}</td>
       <td data-label="Role"><span class="badge ${a.role === 'admin' ? 'badge-accent' : a.role === 'support' ? 'badge-warning' : 'badge-muted'}">${a.role}</span></td>
       <td data-label="Last Login" style="color:var(--muted);font-size:0.78rem">${a.last_login ? timeAgo(new Date(a.last_login)) : 'Never'}</td>
       <td data-label="Status"><span class="status-dot ${a.is_active ? 'dot-green':'dot-red'}"></span> ${a.is_active ? 'Active' : 'Suspended'}</td>
-      <td data-label="⋯"><button class="btn btn-xs btn-ghost" onclick="toggleSubAdmin('${a.id}', ${!a.is_active})">${a.is_active ? 'Suspend' : 'Restore'}</button></td>
+      <td data-label="⋯" style="display:flex;gap:6px;align-items:center">
+        <button class="btn btn-xs btn-ghost" onclick="toggleSubAdmin('${a.id}', ${!a.is_active})">${a.is_active ? 'Suspend' : 'Restore'}</button>
+        ${isSuperAdmin ? `<button class="btn btn-xs" style="background:transparent;border:1px solid var(--danger);color:var(--danger)" onclick="deleteSubAdmin('${esc(a.id)}','${esc(a.email)}','${esc(a.role)}')">🗑 Delete</button>` : ''}
+      </td>
     </tr>
   `).join('');
+}
+
+function deleteSubAdmin(id, email, role) {
+  showModal({
+    title: '🗑 Delete Sub-Admin',
+    body: `
+      <p style="color:var(--text2);line-height:1.6">Remove <strong style="color:var(--text)">${esc(email)}</strong> (<span style="color:var(--muted)">${esc(role)}</span>) from the admin panel?</p>
+      <p style="margin-top:10px;color:#f87171;font-size:12px">They will immediately lose all access.</p>
+    `,
+    onConfirm: async () => {
+      const res = await adminFetch(`/admin/api/sub-admins/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (res?.ok) {
+        toast(`Sub-admin ${email} deleted ✓`, 'success');
+        const row = document.getElementById(`sa-row-${id}`);
+        if (row) row.remove();
+      } else {
+        const err = await res?.json().catch(() => ({}));
+        toast(err?.error || 'Failed to delete sub-admin', 'error');
+        return false;
+      }
+    },
+    confirmLabel: 'Delete',
+    confirmClass: 'btn-red',
+  });
 }
 
 function showCreateSubAdminModal() {
