@@ -2567,7 +2567,7 @@ async function loadUsersData() {
   try {
     const d = await api("/admin/api/users?limit=1000");
     cache.users = d.users || [];
-    renderUsersStatsBar();
+    try { renderUsersStatsBar(); } catch(e) { console.warn('[StatsBar]', e); }
     applyUserFilters();
   } catch(e) {
     document.getElementById("users-tbody").innerHTML =
@@ -2588,7 +2588,7 @@ function applyUserFilters() {
   const WEEK   = 7 * 86400000;
   const DAY    = 86400000;
 
-  let list = [...cache.users];
+  let list = [...(cache.users || [])];
 
   // Text search
   if (search) list = list.filter(u =>
@@ -2634,7 +2634,7 @@ function renderUsersStatsBar() {
   const now  = Date.now();
   const WEEK = 7 * 86400000;
   const DAY  = 86400000;
-  const all  = cache.users;
+  const all  = cache.users || [];
   const stats = {
     total:       all.length,
     activeToday: all.filter(u => u.last_seen_at && (now - new Date(u.last_seen_at)) < DAY).length,
@@ -2642,11 +2642,12 @@ function renderUsersStatsBar() {
     banned:      all.filter(u => u.is_banned).length,
     newThisWeek: all.filter(u => u.created_at && (now - new Date(u.created_at)) < WEEK).length,
   };
-  document.getElementById("ust-v-total").textContent   = fmtN(stats.total);
-  document.getElementById("ust-v-active").textContent  = fmtN(stats.activeToday);
-  document.getElementById("ust-v-paid").textContent    = fmtN(stats.paid);
-  document.getElementById("ust-v-banned").textContent  = fmtN(stats.banned);
-  document.getElementById("ust-v-newweek").textContent = fmtN(stats.newThisWeek);
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set("ust-v-total",   fmtN(stats.total));
+  set("ust-v-active",  fmtN(stats.activeToday));
+  set("ust-v-paid",    fmtN(stats.paid));
+  set("ust-v-banned",  fmtN(stats.banned));
+  set("ust-v-newweek", fmtN(stats.newThisWeek));
 }
 
 // ── Stat card filter trigger ──────────────────────────────────────
@@ -2715,7 +2716,7 @@ function renderUsersPage() {
     const ghostEmoji = neverStreamed ? '👻 ' : '';
     return `<tr data-uid="${esc(u.id)}" data-email="${esc(u.email)}" data-banned="${u.is_banned}" style="${rowBorder}">
       <td data-label=""><input type="checkbox" class="row-check" data-id="${esc(u.id)}" onchange="toggleRowSelect(this)"></td>
-      <td data-label="Email" class="td-email" title="${esc(u.email)}" style="cursor:pointer;color:var(--accent);display:flex;align-items:center" onclick="openUserProfile('${esc(u.id)}','${esc(u.email)}')">${authBadge}${esc(u.email)}</td>
+      <td data-label="Email" class="td-email" title="${esc(u.email)}" style="cursor:pointer;color:var(--accent)" onclick="openUserProfile('${esc(u.id)}','${esc(u.email)}')">${authBadge}${esc(u.email)}</td>
       <td data-label="Name">${ghostEmoji}${esc(u.name||"—")}</td>
       <td data-label="Credits" data-col="credits"><strong style="color:${crColor}">${fmtN(cr)}</strong></td>
       <td data-label="Time Left" data-col="time-left" style="color:var(--muted)">&approx;${minsLeft}m</td>
@@ -2745,6 +2746,7 @@ function toggleRowSelect(chk) {
 function updateBulkBar() {
   const n = selectedUsers.size;
   const bar = document.getElementById("bulk-bar");
+  if (!bar) return;
   bar.classList.toggle("show", n > 0);
   document.getElementById("bulk-count").textContent = `${n} selected`;
   // Update live dot active state
@@ -5735,29 +5737,41 @@ setInterval(updateSystemStatus, 2000);
 // ══════════════════════════════════════════════════════════════════
 // KEYBOARD SHORTCUTS MODAL
 // ══════════════════════════════════════════════════════════════════
+let _gKeyPressed = false;
+let _gKeyTimer = null;
+
 document.addEventListener("keydown", (e) => {
-  // Don't fire when typing in inputs/textareas
-  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable) return;
+  const tag = e.target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.target.isContentEditable) return;
+
+  // ? → keyboard shortcuts modal
   if (e.key === "?" || (e.shiftKey && e.key === "/")) {
     e.preventDefault();
     showKeyboardShortcuts();
+    return;
   }
+
   // Ctrl+R → refresh
   if ((e.ctrlKey || e.metaKey) && e.key === "r") {
     e.preventDefault();
     manualRefresh();
     toast("Refreshed", "info");
-  }
-  // G then letter nav
-  if (e.key === "g" && !e.ctrlKey && !e.metaKey) {
-    window._gKeyPending = true;
-    setTimeout(() => { window._gKeyPending = false; }, 1000);
     return;
   }
-  if (window._gKeyPending) {
-    window._gKeyPending = false;
+
+  // G+key tab navigation
+  const k = e.key.toLowerCase();
+  if (k === "g" && !e.ctrlKey && !e.metaKey) {
+    clearTimeout(_gKeyTimer);
+    _gKeyPressed = true;
+    _gKeyTimer = setTimeout(() => { _gKeyPressed = false; }, 1000);
+    return;
+  }
+  if (_gKeyPressed) {
+    clearTimeout(_gKeyTimer);
+    _gKeyPressed = false;
     const tabMap = { u: "users", r: "revenue", o: "overview", a: "audit", f: "flags", s: "settings" };
-    const tab = tabMap[e.key];
+    const tab = tabMap[k];
     if (tab) { e.preventDefault(); switchTab(tab); }
   }
 });
@@ -5818,6 +5832,7 @@ async function init() {
   } catch (_) {}
 
   initDecartBalance();
+  updateSystemStatus();
   loadStats();       // initial full render (sets sval IDs for SSE to update)
   loadActivity();
   connectSSE();      // real-time stats + live sessions every 5s
