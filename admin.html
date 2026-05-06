@@ -274,6 +274,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   background:var(--surface2); border:1px solid var(--border);
   border-radius:8px; padding:4px; min-width:180px;
   box-shadow:0 8px 32px rgba(0,0,0,.6);
+  max-height:300px; overflow-y:auto;
 }
 .action-dropdown button {
   display:flex; align-items:center; gap:8px; width:100%;
@@ -2981,6 +2982,14 @@ function openMenu(btn) {
   menu.style.top   = (rect.bottom + 4) + "px";
   menu.style.right = (window.innerWidth - rect.right) + "px";
   document.body.appendChild(menu);
+
+  // Flip upward if the menu would overflow the viewport bottom
+  const menuRect = menu.getBoundingClientRect();
+  if (menuRect.bottom > window.innerHeight - 20) {
+    menu.style.top    = "auto";
+    menu.style.bottom = (window.innerHeight - rect.top + 4) + "px";
+  }
+
   setTimeout(() => document.addEventListener("click", closeMenu, {once:true}), 0);
 }
 function closeMenu() { document.querySelectorAll(".action-dropdown").forEach(d=>d.remove()); }

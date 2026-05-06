@@ -1683,26 +1683,48 @@ app.get("/admin/api/sessions/history", adminAuth, async (req, res) => {
 
     let query = supabaseAdmin
       .from("sessions")
-      .select("id, user_id, email, started_at, last_ping, credits_used, kill_signal, kill_reason, session_id", { count: "exact" })
+      .select(`
+        session_id,
+        user_id,
+        is_active,
+        started_at,
+        last_ping,
+        kill_signal,
+        kill_reason,
+        last_sync_at,
+        profiles(email, display_name, credits)
+      `, { count: "exact" })
       .eq("is_active", false)
       .order("started_at", { ascending: false })
       .range(offset, offset + limit - 1);
 
-    if (email) query = query.ilike("email", `%${email}%`);
-    if (from)  query = query.gte("started_at", from);
-    if (to)    query = query.lte("started_at", to);
+    if (from) query = query.gte("started_at", from);
+    if (to)   query = query.lte("started_at", to);
 
     const { data, count, error } = await query;
     if (error) throw error;
 
-    // Enrich with server-calculated duration
-    const now = Date.now();
-    const sessions = (data || []).map(s => {
-      const start    = s.started_at ? new Date(s.started_at).getTime() : now;
-      const end      = s.last_ping  ? new Date(s.last_ping).getTime()  : now;
-      const durSecs  = Math.max(0, Math.round((end - start) / 1000));
-      return { ...s, duration_secs: durSecs };
+    // Enrich with duration, credits estimate, and flattened email
+    let sessions = (data || []).map(s => {
+      const start        = new Date(s.started_at);
+      const end          = new Date(s.last_ping || s.started_at);
+      const duration_secs = Math.max(0, Math.round((end - start) / 1000));
+      const credits_used  = Math.round(duration_secs * 2.18);
+      return {
+        ...s,
+        email:        s.profiles?.email        || "Unknown",
+        display_name: s.profiles?.display_name || "",
+        duration_secs,
+        credits_used,
+        status: s.kill_signal ? "Killed" : "Completed",
+      };
     });
+
+    // Email filter in JS (avoids complex join-filter syntax)
+    if (email) {
+      const q = email.toLowerCase();
+      sessions = sessions.filter(s => s.email.toLowerCase().includes(q));
+    }
 
     return res.json({ sessions, total: count || 0, page, pages: Math.ceil((count || 0) / limit) });
   } catch (err) {
