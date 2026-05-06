@@ -1317,13 +1317,15 @@ app.post("/admin/api/gift-credits", adminAuth, async (req, res) => {
   try {
     const { data: profile, error: fetchErr } = await supabaseAdmin
       .from("profiles")
-      .select("credits, total_credits_purchased")
+      .select("credits, total_credits_purchased, email")
       .eq("id", userId)
       .single();
 
     if (fetchErr || !profile) return res.status(404).json({ error: "User not found" });
 
-    const newBalance = profile.credits + credits;
+    const newBalance  = profile.credits + credits;
+    const userEmail   = profile.email || userId;
+
     await supabaseAdmin.from("profiles").update({
       credits:                 newBalance,
       total_credits_purchased: (profile.total_credits_purchased || 0) + credits,
@@ -1336,6 +1338,13 @@ app.post("/admin/api/gift-credits", adminAuth, async (req, res) => {
       credits_added:     credits,
       stripe_payment_id: "gift_" + Date.now(),
       created_at:        new Date().toISOString(),
+    });
+
+    await supabaseAdmin.from("admin_notifications").insert({
+      title:      "🎁 Credits Gifted",
+      message:    `${credits} credits gifted to ${userEmail} by ${req.session.adminEmail}. New balance: ${newBalance}`,
+      type:       "gift",
+      created_at: new Date().toISOString(),
     });
 
     await logAction("gift_credits", req.session.adminEmail, role, userId, { amount: credits, new_balance: newBalance, reason }, req);
