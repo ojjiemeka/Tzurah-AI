@@ -50,9 +50,10 @@ const supabaseAdmin = createClient(
 );
 
 // ── Config ─────────────────────────────────────────────────────────
-const PORT             = parseInt(process.env.PORT || "4000", 10);
-const DECART_KEY       = process.env.DECART_API_KEY;
-const BOOTSTRAP_SECRET = process.env.BOOTSTRAP_SECRET || "tzurah-app-v1-secret";
+const PORT                  = parseInt(process.env.PORT || "4000", 10);
+const DECART_KEY            = process.env.DECART_API_KEY;
+const BOOTSTRAP_SECRET      = process.env.BOOTSTRAP_SECRET || "tzurah-app-v1-secret";
+const DECART_COST_PER_SECOND = 1.36; // Decart credits burned per second of streaming
 
 // Credit packs (1 credit = 10 seconds)
 const PACKS = {
@@ -90,6 +91,89 @@ function can(role, action) {
 function maskKey(v) {
   return v ? v.substring(0, 6) + "****" : "not set";
 }
+
+// ── app_settings helpers (Supabase table with process.env fallback) ─
+let _appSettingsAvailable = null; // null = unknown, true/false after first check
+
+async function _checkAppSettings() {
+  if (_appSettingsAvailable !== null) return _appSettingsAvailable;
+  try {
+    const { error } = await supabaseAdmin.from("app_settings").select("key").limit(1);
+    _appSettingsAvailable = !error;
+    if (!_appSettingsAvailable) {
+      console.warn("[SETTINGS] app_settings table not found — run SQL migration to enable Decart balance tracking");
+    }
+  } catch (_) {
+    _appSettingsAvailable = false;
+  }
+  return _appSettingsAvailable;
+}
+
+async function getSettingValue(key, defaultVal) {
+  try {
+    if (await _checkAppSettings()) {
+      const { data } = await supabaseAdmin.from("app_settings").select("value").eq("key", key).maybeSingle();
+      if (data?.value !== undefined) return data.value;
+    }
+  } catch (_) {}
+  return process.env[key.toUpperCase()] ?? defaultVal;
+}
+
+async function setSettingValue(key, value) {
+  try {
+    if (await _checkAppSettings()) {
+      await supabaseAdmin.from("app_settings")
+        .upsert({ key, value: String(value), updated_at: new Date().toISOString() }, { onConflict: "key" });
+      return;
+    }
+  } catch (_) {}
+  console.warn("[SETTINGS] Could not persist setting:", key);
+}
+
+// ── Decart credit deduction (called on session end / kill) ─────────
+async function deductDecartCredits(durationSeconds, sessionId) {
+  try {
+    const decartCost = Math.ceil(durationSeconds * DECART_COST_PER_SECOND);
+    if (decartCost <= 0) return;
+
+    const currentBalance = parseFloat(await getSettingValue("decart_balance", "1000"));
+    const threshold      = parseFloat(await getSettingValue("decart_alert_threshold", "200"));
+    const newBalance     = Math.max(0, currentBalance - decartCost);
+
+    await setSettingValue("decart_balance", newBalance.toFixed(2));
+    invalidateDecartCache();
+    console.log(`[DECART] Session ${sessionId || "?"}: -${decartCost} cr  ${currentBalance.toFixed(0)} → ${newBalance.toFixed(0)}`);
+
+    // Fire low-balance alert only when crossing below threshold
+    if (newBalance < threshold && currentBalance >= threshold) {
+      await supabaseAdmin.from("admin_notifications").insert({
+        title:      "⚠️ Low Decart Balance",
+        message:    `Decart balance dropped to ${Math.round(newBalance)} credits (threshold: ${threshold}). Top up at decart.ai`,
+        type:       "alert",
+        created_at: new Date().toISOString(),
+      });
+      console.warn("[DECART] Low balance alert fired! Balance:", newBalance);
+    }
+  } catch (err) {
+    console.error("[DECART] Failed to deduct credits:", err.message);
+  }
+}
+
+// Cache for SSE Decart balance (refreshed every 30 s to avoid per-tick DB reads)
+let _decartBalanceCache = null;
+let _decartBalanceCachedAt = 0;
+
+async function getCachedDecartBalance() {
+  if (_decartBalanceCache !== null && Date.now() - _decartBalanceCachedAt < 30000) {
+    return _decartBalanceCache;
+  }
+  _decartBalanceCache = parseFloat(await getSettingValue("decart_balance", "1000"));
+  _decartBalanceCachedAt = Date.now();
+  return _decartBalanceCache;
+}
+
+// Called by deductDecartCredits to invalidate the SSE cache immediately
+function invalidateDecartCache() { _decartBalanceCachedAt = 0; }
 
 // ── Central audit logger ──────────────────────────────────────────
 async function logAction(action, adminEmail, adminRole, targetUser, details, req) {
@@ -726,15 +810,16 @@ app.get("/admin/api/stream", adminAuth, (req, res) => {
         credits_per_min: 130.8,
       }));
 
-      const { count: unreadNotifs } = await supabaseAdmin
-        .from("admin_notifications")
-        .select("id", { count: "exact", head: true })
-        .eq("is_read", false);
+      const [{ count: unreadNotifs }, decartBalance] = await Promise.all([
+        supabaseAdmin.from("admin_notifications").select("id", { count: "exact", head: true }).eq("is_read", false),
+        getCachedDecartBalance(),
+      ]);
 
       const payload = {
         type:      "update",
         timestamp: Date.now(),
         unreadNotifications: unreadNotifs || 0,
+        decart_balance: decartBalance,
         stats: {
           totalUsers:       profiles.length,
           activeToday,
@@ -1408,6 +1493,11 @@ app.post("/session/ping", async (req, res) => {
     // Kill signal takes priority
     if (existing?.kill_signal) {
       console.log("[PING] KILL SIGNAL for user:", user_id, "reason:", existing.kill_reason);
+      // Deduct Decart credits for session time before marking ended
+      if (existing.started_at) {
+        const durationSecs = Math.max(0, Math.floor((Date.now() - new Date(existing.started_at).getTime()) / 1000));
+        deductDecartCredits(durationSecs, existing.id).catch(() => {});
+      }
       await supabaseAdmin.from("sessions")
         .update({ kill_signal: false, is_active: false })
         .eq("id", existing.id);
@@ -1466,10 +1556,26 @@ app.post("/session/end", async (req, res) => {
   const { user_id } = req.body || {};
   if (!user_id) return res.status(400).json({ error: "user_id required" });
   try {
+    // Fetch session before marking inactive so we can calculate duration
+    const { data: session } = await supabaseAdmin
+      .from("sessions")
+      .select("id, started_at")
+      .eq("user_id", user_id)
+      .eq("is_active", true)
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
     await supabaseAdmin.from("sessions")
       .update({ is_active: false })
       .eq("user_id", user_id)
       .eq("is_active", true);
+
+    if (session?.started_at) {
+      const durationSecs = Math.max(0, Math.floor((Date.now() - new Date(session.started_at).getTime()) / 1000));
+      deductDecartCredits(durationSecs, session.id).catch(() => {});
+    }
+
     res.json({ ok: true });
   } catch (err) {
     res.json({ ok: true, warn: err.message });
@@ -1524,6 +1630,37 @@ app.post("/admin/api/end-session", adminAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /admin/api/decart-balance — current balance and threshold
+app.get("/admin/api/decart-balance", adminAuth, async (_req, res) => {
+  try {
+    const [balance, threshold] = await Promise.all([
+      getSettingValue("decart_balance",       "1000"),
+      getSettingValue("decart_alert_threshold", "200"),
+    ]);
+    return res.json({
+      balance:   parseFloat(balance),
+      threshold: parseFloat(threshold),
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /admin/api/decart-balance — manually set balance or threshold from admin UI
+app.post("/admin/api/decart-balance", adminAuth, async (req, res) => {
+  const role = req.session.adminRole;
+  const { balance, threshold } = req.body || {};
+  try {
+    if (balance   !== undefined) await setSettingValue("decart_balance",         String(Math.max(0, parseFloat(balance)  || 0)));
+    if (threshold !== undefined) await setSettingValue("decart_alert_threshold",  String(Math.max(0, parseFloat(threshold) || 0)));
+    invalidateDecartCache();
+    await logAction("update_decart_balance", req.session.adminEmail, role, null, { balance, threshold }, req);
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -1702,6 +1839,7 @@ const SETTINGS_ALLOWED_KEYS = [
   "ADMIN_EMAIL", "ADMIN_PASSWORD",
   "CREDITS_PER_SECOND", "COST_PER_CREDIT",
   "BOOTSTRAP_SECRET",
+  "decart_balance", "decart_alert_threshold",
 ];
 
 // Returns masked current values + server info

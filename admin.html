@@ -1119,20 +1119,20 @@ kbd {
     <div class="panel-card">
       <div class="panel-hdr">
         <span class="ptitle">Decart Balance</span>
-        <span style="font-size:10px;color:var(--muted)">manual — enter from Decart dashboard</span>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto;font-size:10px" onclick="loadDecartBalance()">↻ Refresh</button>
       </div>
       <div class="panel-body">
-        <div class="decart-input-row">
-          <input id="decart-bal-input" type="number" placeholder="Enter current Decart balance (credits)…" min="0"/>
-          <button class="btn btn-accent" onclick="saveDecartBalance()">Save</button>
-        </div>
         <div class="decart-track"><div class="decart-bar" id="decart-bar" style="width:100%"></div></div>
-        <div class="decart-meta">
-          <span id="decart-used-lbl">— cr used (est.)</span>
-          <span id="decart-rem-lbl">Est. remaining: —</span>
+        <div class="decart-meta" style="margin-top:6px">
+          <span id="decart-balance-lbl" style="font-weight:600;color:var(--electric)">— cr</span>
+          <span id="decart-rem-lbl">— hrs remaining</span>
+        </div>
+        <div class="decart-meta" style="margin-top:2px">
+          <span id="decart-threshold-lbl" style="font-size:10px;color:var(--muted)">Alert threshold: —</span>
+          <span id="decart-updated-lbl" style="font-size:10px;color:var(--muted)">—</span>
         </div>
         <div class="decart-warn" id="decart-low-warn" style="display:none">
-          &#9888; Below 10,000 cr — Top up now!
+          &#9888; Balance below alert threshold — Top up at decart.ai!
         </div>
       </div>
     </div>
@@ -1210,11 +1210,12 @@ kbd {
         </div>
       </div>
       <div style="padding:12px 16px;border-right:1px solid var(--border)">
-        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Decart API</div>
+        <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Decart Balance</div>
         <div style="display:flex;align-items:center;gap:6px">
           <span class="status-dot dot-amber" id="sys-decart-dot"></span>
           <span id="sys-decart-val" style="font-size:12px;color:var(--muted)">—</span>
         </div>
+        <div id="sys-decart-sub" style="font-size:10px;color:var(--muted);margin-top:2px">—</div>
       </div>
       <div style="padding:12px 16px">
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">Last Update</div>
@@ -1634,6 +1635,34 @@ kbd {
           <strong id="cost-per-sec-display" style="color:var(--warning)">$0.0136</strong>
         </span>
         <button class="btn btn-accent btn-sm" onclick="savePricingConfig()">Save Pricing</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Decart API Balance -->
+  <div class="settings-section">
+    <div class="settings-section-title">Decart API Balance</div>
+    <div class="panel-card">
+      <div style="padding:12px 14px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Current Balance (credits)</label>
+          <input id="decart-balance-input" type="number" min="0" step="1" placeholder="e.g. 1000"
+                 style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Alert Threshold (credits)</label>
+          <input id="decart-threshold-input" type="number" min="0" step="1" placeholder="e.g. 200"
+                 style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px">
+        </div>
+      </div>
+      <div style="padding:0 14px 10px;font-size:11px;color:var(--muted);display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div>Cost per second: <strong style="color:var(--warning)">1.36 cr/s</strong> (auto-deducted on session end)</div>
+        <div id="decart-settings-estimate" style="color:var(--electric)">—</div>
+      </div>
+      <div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center">
+        <button class="btn btn-accent btn-sm" onclick="saveDecartBalanceSettings()">&#128190; Save Balance</button>
+        <button class="btn btn-ghost btn-sm"  onclick="loadDecartBalanceSettings()">↻ Reload</button>
+        <span id="decart-settings-saved" style="font-size:11px;color:var(--success);display:none">Saved ✓</span>
       </div>
     </div>
   </div>
@@ -2295,7 +2324,7 @@ function switchTab(tab) {
     case 'flags':         loadFeatureFlagsTab(); break;
     case 'email':         loadEmailTab(); break;
     case 'tests':         initTestsTab(); break;
-    case 'settings':      loadSettings(); if (typeof loadDbStats === 'function') loadDbStats(); break;
+    case 'settings':      loadSettings(); loadDecartBalanceSettings(); if (typeof loadDbStats === 'function') loadDbStats(); break;
     case 'audit':         renderAuditLog(1); break;
   }
   sessionStorage.setItem('activeTab', tab);
@@ -2560,26 +2589,91 @@ async function loadActivity() {
 }
 
 // ── Decart Balance ────────────────────────────────────────────────
+let _decartBalance   = 0;
+let _decartThreshold = 200;
+
+async function loadDecartBalance() {
+  try {
+    const d = await api("/admin/api/decart-balance");
+    if (!d) return;
+    _decartBalance   = d.balance   || 0;
+    _decartThreshold = d.threshold || 200;
+    updateDecartBar(_decartBalance, _decartThreshold);
+  } catch (e) {
+    console.warn("[Decart] Failed to load balance:", e.message);
+  }
+}
+
 function initDecartBalance() {
-  const saved = localStorage.getItem("tzurah_decart_balance");
-  if (saved) document.getElementById("decart-bal-input").value = saved;
+  loadDecartBalance();
 }
-function saveDecartBalance() {
-  const val = parseInt(document.getElementById("decart-bal-input").value, 10) || 0;
-  localStorage.setItem("tzurah_decart_balance", val);
-  const estUsed = cache.stats ? Math.round((cache.stats.totalSecondsUsed||0) * DECART_CR_PER_SEC) : 0;
-  updateDecartBar(estUsed);
-  toast("Decart balance saved");
+
+function updateDecartBar(balance, threshold) {
+  threshold = threshold || _decartThreshold || 200;
+  const THRESHOLD_FULL = Math.max(threshold * 10, 1000); // treat 10× threshold as "full"
+  const pct     = Math.min(100, (balance / THRESHOLD_FULL * 100)).toFixed(1);
+  const hrRem   = balance > 0 ? ((balance / 1.36) / 3600).toFixed(1) : "0";
+  const barEl   = document.getElementById("decart-bar");
+  const balLbl  = document.getElementById("decart-balance-lbl");
+  const remLbl  = document.getElementById("decart-rem-lbl");
+  const thrLbl  = document.getElementById("decart-threshold-lbl");
+  const updLbl  = document.getElementById("decart-updated-lbl");
+  const warnEl  = document.getElementById("decart-low-warn");
+
+  if (barEl) {
+    barEl.style.width = pct + "%";
+    barEl.style.background = balance < threshold ? "var(--danger)" : balance < threshold * 3 ? "var(--warning)" : "var(--success)";
+  }
+  if (balLbl)  balLbl.textContent  = `${fmtN(Math.round(balance))} cr`;
+  if (remLbl)  remLbl.textContent  = `~${hrRem} hrs remaining`;
+  if (thrLbl)  thrLbl.textContent  = `Alert threshold: ${fmtN(threshold)} cr`;
+  if (updLbl)  updLbl.textContent  = `Updated ${relTime(new Date().toISOString())}`;
+  if (warnEl)  warnEl.style.display = balance > 0 && balance < threshold ? "" : "none";
 }
-function updateDecartBar(estUsedCr) {
-  const balance = parseInt(localStorage.getItem("tzurah_decart_balance")||"0",10);
-  const total   = balance + estUsedCr;
-  const pct     = total > 0 ? Math.min(100, (balance / total * 100)).toFixed(1) : 100;
-  document.getElementById("decart-bar").style.width = pct + "%";
-  const hrRem = total > 0 ? ((balance / DECART_CR_PER_SEC) / 3600).toFixed(1) : "—";
-  document.getElementById("decart-used-lbl").textContent = `${fmtN(estUsedCr)} cr used (est.)`;
-  document.getElementById("decart-rem-lbl").textContent  = `Est. remaining: ~${hrRem} hrs`;
-  document.getElementById("decart-low-warn").style.display = balance > 0 && balance < 10000 ? "" : "none";
+
+// Settings tab — load/save balance controls
+async function loadDecartBalanceSettings() {
+  try {
+    const d = await api("/admin/api/decart-balance");
+    if (!d) return;
+    const balInput = document.getElementById("decart-balance-input");
+    const thrInput = document.getElementById("decart-threshold-input");
+    const estEl    = document.getElementById("decart-settings-estimate");
+    if (balInput) balInput.value = d.balance;
+    if (thrInput) thrInput.value = d.threshold;
+    if (estEl) {
+      const hrs = ((d.balance / 1.36) / 3600).toFixed(1);
+      estEl.textContent = `≈ ${hrs} hrs of streaming at current balance`;
+    }
+  } catch (e) {
+    console.warn("[Decart] Failed to load balance settings:", e.message);
+  }
+}
+
+async function saveDecartBalanceSettings() {
+  const balance   = parseFloat(document.getElementById("decart-balance-input")?.value) || 0;
+  const threshold = parseFloat(document.getElementById("decart-threshold-input")?.value) || 200;
+  try {
+    const res = await adminFetch("/admin/api/decart-balance", {
+      method: "POST",
+      body: JSON.stringify({ balance, threshold }),
+    });
+    if (res?.ok) {
+      const savedEl = document.getElementById("decart-settings-saved");
+      if (savedEl) { savedEl.style.display = ""; setTimeout(() => { savedEl.style.display = "none"; }, 3000); }
+      toast("Decart balance saved ✓", "success");
+      _decartBalance   = balance;
+      _decartThreshold = threshold;
+      updateDecartBar(balance, threshold);
+      // Update estimate
+      const estEl = document.getElementById("decart-settings-estimate");
+      if (estEl) { const hrs = ((balance / 1.36) / 3600).toFixed(1); estEl.textContent = `≈ ${hrs} hrs of streaming at current balance`; }
+    } else {
+      toast("Failed to save balance", "error");
+    }
+  } catch (e) {
+    toast("Error: " + e.message, "error");
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -3419,7 +3513,7 @@ function testEmailAlert() {
   triggerAlert("test", "Manual test email alert triggered");
 }
 function testLowBalanceAlert() {
-  const bal = parseInt(localStorage.getItem("tzurah_decart_balance")||"0",10);
+  const bal = Math.round(_decartBalance);
   const threshold = parseInt(document.getElementById("ar-decart-val")?.value||"5000",10);
   if (bal < threshold && bal > 0) {
     toast(`&#9888; LOW BALANCE: ${fmtN(bal)} cr < ${fmtN(threshold)} cr threshold`, "warning");
@@ -3976,8 +4070,8 @@ function checkAlertsAgainstData(data) {
   }
 
   // Low Decart balance
-  const balance   = parseInt(localStorage.getItem("tzurah_decart_balance") || "0", 10);
-  const threshold = rules.decartVal || 5000;
+  const balance   = Math.round(_decartBalance);
+  const threshold = rules.decartVal || _decartThreshold || 200;
   if (rules.decartEnabled !== false && balance > 0 && balance < threshold) {
     alerts.push({ type: "warning", title: "Low Decart Balance",
       detail: `Balance: ${fmtN(balance)} cr (threshold: ${fmtN(threshold)})` });
@@ -4003,8 +4097,8 @@ async function checkAlerts() {
   const rules = JSON.parse(localStorage.getItem("tzurah_alert_rules") || "{}");
 
   // Low Decart balance
-  const balance   = parseInt(localStorage.getItem("tzurah_decart_balance") || "0", 10);
-  const threshold = rules.decartVal || 5000;
+  const balance   = Math.round(_decartBalance);
+  const threshold = rules.decartVal || _decartThreshold || 200;
   if (rules.decartEnabled !== false && balance > 0 && balance < threshold) {
     triggerAlert("decart", `Low Decart balance: ${fmtN(balance)} cr (threshold: ${fmtN(threshold)})`);
   }
@@ -4111,13 +4205,20 @@ function connectSSE() {
     updateStatCard("sval-credits-used", fmtN(s.totalCreditsUsed));
     updateStatCard("sval-decart-cost",  fmt$(s.estDecartCost));
 
+    // Decart balance from SSE payload
+    if (typeof data.decart_balance === "number") {
+      _decartBalance = data.decart_balance;
+      updateDecartBar(_decartBalance, _decartThreshold);
+      updateDecartSystemStatus(_decartBalance, _decartThreshold);
+    }
+
     updateLiveSessions(data.liveSessions || []);
     checkAlertsAgainstData(data);
 
-    // C6: unread notification badge
-    if (typeof data.unreadNotifications === 'number') {
-      const badge = document.getElementById('notif-badge');
-      if (badge) { badge.textContent = data.unreadNotifications; badge.style.display = data.unreadNotifications > 0 ? 'flex' : 'none'; }
+    // Unread notification badge
+    if (typeof data.unreadNotifications === "number") {
+      const badge = document.getElementById("notif-badge");
+      if (badge) { badge.textContent = data.unreadNotifications; badge.style.display = data.unreadNotifications > 0 ? "flex" : "none"; }
     }
 
     lastRefreshTime = Date.now();
@@ -5816,6 +5917,30 @@ function exportAuditCSV() {
 // ══════════════════════════════════════════════════════════════════
 // SYSTEM STATUS CARD
 // ══════════════════════════════════════════════════════════════════
+function updateDecartSystemStatus(balance, threshold) {
+  const decEl  = document.getElementById("sys-decart-val");
+  const decDot = document.getElementById("sys-decart-dot");
+  const decSub = document.getElementById("sys-decart-sub");
+  if (!decEl || !decDot) return;
+  const hrs = balance > 0 ? ((balance / 1.36) / 3600).toFixed(1) : "0";
+  if (balance > 500) {
+    decEl.textContent  = `${fmtN(Math.round(balance))} cr`;
+    decEl.style.color  = "var(--success)";
+    decDot.className   = "status-dot dot-green";
+    if (decSub) { decSub.textContent = `~${hrs} hrs left`; decSub.style.color = "var(--muted)"; }
+  } else if (balance > 100) {
+    decEl.textContent  = `${fmtN(Math.round(balance))} cr — running low`;
+    decEl.style.color  = "var(--warning)";
+    decDot.className   = "status-dot dot-amber";
+    if (decSub) { decSub.textContent = `~${hrs} hrs left`; decSub.style.color = "var(--warning)"; }
+  } else {
+    decEl.textContent  = `${fmtN(Math.round(balance))} cr — CRITICAL`;
+    decEl.style.color  = "var(--danger)";
+    decDot.className   = "status-dot dot-red";
+    if (decSub) { decSub.textContent = `~${hrs} hrs left`; decSub.style.color = "var(--danger)"; }
+  }
+}
+
 function updateSystemStatus() {
   const secs = Math.round((Date.now() - lastRefreshTime) / 1000);
   const updEl = document.getElementById("sys-upd-val");
@@ -5825,19 +5950,9 @@ function updateSystemStatus() {
   const dbDot  = document.getElementById("sys-db-dot");
   if (gcpDot) gcpDot.className = "status-dot dot-green";
   if (dbDot)  dbDot.className  = "status-dot dot-green";
-  // Decart balance
-  const bal   = parseInt(localStorage.getItem("tzurah_decart_balance") || "0", 10);
-  const decEl = document.getElementById("sys-decart-val");
-  const decDot = document.getElementById("sys-decart-dot");
-  if (decEl && decDot) {
-    if (bal > 0) {
-      decEl.textContent = `${fmtN(bal)} cr`;
-      decDot.className = bal < 5000 ? "status-dot dot-amber" : "status-dot dot-green";
-      decEl.style.color = bal < 5000 ? "var(--warning)" : "var(--success)";
-    } else {
-      decEl.textContent = "Not set";
-      decDot.className = "status-dot dot-amber";
-    }
+  // Decart balance (driven by _decartBalance; SSE updates it; also show if not loaded yet)
+  if (_decartBalance > 0) {
+    updateDecartSystemStatus(_decartBalance, _decartThreshold);
   }
 }
 setInterval(updateSystemStatus, 2000);
