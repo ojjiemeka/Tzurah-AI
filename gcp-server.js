@@ -544,6 +544,14 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
       ended_at:        now,
       created_at:      now,
     }).then(() => {}).catch((e) => console.warn("[DEDUCT] usage insert error:", e.message));
+
+    // Track last sync time so /session/end can deduct only the remaining unsync'd period
+    await supabaseAdmin
+      .from("sessions")
+      .update({ last_sync_at: now })
+      .eq("user_id", req.userId)
+      .eq("is_active", true)
+      .then(() => {}).catch(() => {});
   }
 
   console.log("[DEDUCT] success — new balance:", newBalance);
@@ -1589,10 +1597,12 @@ app.post("/session/end", async (req, res) => {
   const { user_id } = req.body || {};
   if (!user_id) return res.status(400).json({ error: "user_id required" });
   try {
-    // Fetch session before marking inactive so we can calculate duration
+    const endedAt = new Date();
+
+    // Fetch session before marking inactive — include last_sync_at to avoid double-deduction
     const { data: session } = await supabaseAdmin
       .from("sessions")
-      .select("id, started_at")
+      .select("id, started_at, last_sync_at")
       .eq("user_id", user_id)
       .eq("is_active", true)
       .order("started_at", { ascending: false })
@@ -1600,18 +1610,27 @@ app.post("/session/end", async (req, res) => {
       .maybeSingle();
 
     await supabaseAdmin.from("sessions")
-      .update({ is_active: false })
+      .update({ is_active: false, last_ping: endedAt.toISOString() })
       .eq("user_id", user_id)
       .eq("is_active", true);
 
     if (session?.started_at) {
-      const durationSecs = Math.max(0, Math.floor((Date.now() - new Date(session.started_at).getTime()) / 1000));
-      const result = await deductDecartCredits(durationSecs, session.id).catch(() => null);
+      const startedAt    = new Date(session.started_at);
+      const durationSecs = Math.max(0, Math.round((endedAt - startedAt) / 1000));
+
+      // Deduct Decart credits only for the period since the last 10-second sync
+      const lastSync      = session.last_sync_at ? new Date(session.last_sync_at) : startedAt;
+      const remainingSecs = Math.max(0, Math.round((endedAt - lastSync) / 1000));
+
+      console.log(`[SESSION END] Total duration: ${durationSecs}s (server-calculated)`);
+      console.log(`[SESSION END] Remaining since last sync: ${remainingSecs}s`);
+
+      const result = await deductDecartCredits(remainingSecs, session.id).catch(() => null);
       if (result) {
         console.log(`[SESSION SUMMARY]`);
-        console.log(`  Duration: ${durationSecs}s`);
+        console.log(`  Total duration:          ${durationSecs}s`);
+        console.log(`  Unsync'd remaining:      ${remainingSecs}s`);
         console.log(`  Decart credits deducted: ${result.decartCost}`);
-        console.log(`  Decart rate: ${durationSecs > 0 ? (result.decartCost / durationSecs).toFixed(3) : "?"} cr/s`);
         console.log(`  Decart balance remaining: ${result.newBalance?.toFixed(0) ?? "?"}`);
       }
     }
@@ -1647,6 +1666,46 @@ app.get("/admin/api/live-sessions", adminAuth, async (_req, res) => {
     res.json({ ok: true, sessions: enriched, count: enriched.length });
   } catch (err) {
     res.json({ ok: true, sessions: [], count: 0, error: err.message });
+  }
+});
+
+// GET /admin/api/sessions/history — paginated completed sessions
+app.get("/admin/api/sessions/history", adminAuth, async (req, res) => {
+  try {
+    const page   = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit  = 25;
+    const offset = (page - 1) * limit;
+    const email  = req.query.email  || "";
+    const from   = req.query.from   || "";
+    const to     = req.query.to     || "";
+
+    let query = supabaseAdmin
+      .from("sessions")
+      .select("id, user_id, email, started_at, last_ping, credits_used, kill_signal, kill_reason, session_id", { count: "exact" })
+      .eq("is_active", false)
+      .order("started_at", { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (email) query = query.ilike("email", `%${email}%`);
+    if (from)  query = query.gte("started_at", from);
+    if (to)    query = query.lte("started_at", to);
+
+    const { data, count, error } = await query;
+    if (error) throw error;
+
+    // Enrich with server-calculated duration
+    const now = Date.now();
+    const sessions = (data || []).map(s => {
+      const start    = s.started_at ? new Date(s.started_at).getTime() : now;
+      const end      = s.last_ping  ? new Date(s.last_ping).getTime()  : now;
+      const durSecs  = Math.max(0, Math.round((end - start) / 1000));
+      return { ...s, duration_secs: durSecs };
+    });
+
+    return res.json({ sessions, total: count || 0, page, pages: Math.ceil((count || 0) / limit) });
+  } catch (err) {
+    console.error("[SESSIONS HISTORY]", err.message);
+    return res.status(500).json({ error: err.message });
   }
 });
 

@@ -129,6 +129,9 @@ main { padding:20px; max-width:1400px; margin:0 auto; }
   background:var(--surface); border:1px solid var(--border);
   border-radius:var(--r); padding:16px 18px;
 }
+.stat-mini { background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:10px 14px; display:flex; flex-direction:column; gap:2px; min-width:110px; }
+.stat-mini-val { font-size:18px; font-weight:700; color:var(--text); }
+.stat-mini-lbl { font-size:10px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); }
 .stat-card .slabel {
   font-size:10px; text-transform:uppercase; letter-spacing:.8px;
   color:var(--muted); margin-bottom:6px;
@@ -1046,6 +1049,7 @@ kbd {
   <button class="tab-btn" data-tab="users">Users</button>
   <button class="tab-btn" data-tab="revenue">Revenue</button>
   <button class="tab-btn" data-tab="purchases">Purchases</button>
+  <button class="tab-btn" data-tab="sessions">🖥️ Sessions</button>
   <button class="tab-btn" data-tab="alerts">Alerts</button>
   <button class="tab-btn" data-tab="announcements">📣 Announcements</button>
   <button class="tab-btn" data-tab="email">✉ Email</button>
@@ -1357,6 +1361,54 @@ kbd {
       <button class="btn btn-ghost btn-sm" id="purch-prev" onclick="purchPage--; renderPurchPage()">&#8592; Prev</button>
       <span id="purch-page-lbl" style="font-size:11px;color:var(--muted);align-self:center"></span>
       <button class="btn btn-ghost btn-sm" id="purch-next" onclick="purchPage++; renderPurchPage()">Next &#8594;</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SESSIONS ══════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-sessions" style="display:none">
+
+  <!-- Live Sessions -->
+  <div style="padding:16px 20px 8px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Live Sessions</div>
+  <div class="panel-card" style="margin:0 0 20px">
+    <div class="table-wrap">
+      <table class="mobile-cards">
+        <thead><tr><th>Email</th><th>Duration</th><th>Credits/min</th><th>Action</th></tr></thead>
+        <tbody id="sess-live-tbody"><tr><td colspan="4" style="text-align:center;padding:28px;color:var(--muted);font-size:13px">😴 No active sessions right now</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Session History -->
+  <div style="padding:0 20px 8px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Session History</div>
+
+  <!-- Stats bar -->
+  <div style="display:flex;gap:12px;flex-wrap:wrap;padding:0 0 12px" id="sess-stats-bar">
+    <div class="stat-mini"><span class="stat-mini-val" id="sess-stat-today">—</span><span class="stat-mini-lbl">Today</span></div>
+    <div class="stat-mini"><span class="stat-mini-val" id="sess-stat-avg">—</span><span class="stat-mini-lbl">Avg Duration</span></div>
+    <div class="stat-mini"><span class="stat-mini-val" id="sess-stat-credits">—</span><span class="stat-mini-lbl">Credits Today</span></div>
+  </div>
+
+  <div class="filter-row">
+    <input id="sess-search" type="text" placeholder="Filter by email…" oninput="sessHistPage=1; loadSessionHistory()"/>
+    <input id="sess-from"   type="date" onchange="sessHistPage=1; loadSessionHistory()"/>
+    <input id="sess-to"     type="date" onchange="sessHistPage=1; loadSessionHistory()"/>
+    <button class="btn btn-ghost" onclick="sessHistPage=1; loadSessionHistory()">&#128269; Search</button>
+    <button class="btn btn-ghost" onclick="clearSessionsFilter()">✕ Clear</button>
+  </div>
+
+  <div class="table-wrap">
+    <table class="mobile-cards">
+      <thead><tr><th>Email</th><th>Started</th><th>Duration</th><th>Credits Used</th><th>Ended</th><th>Status</th></tr></thead>
+      <tbody id="sess-hist-tbody"><tr><td colspan="6" class="loading-cell"><div class="spinner"></div></td></tr></tbody>
+    </table>
+  </div>
+  <div class="pager">
+    <span class="info" id="sess-hist-info"></span>
+    <div class="btns">
+      <button class="btn btn-ghost btn-sm" id="sess-prev" onclick="sessHistPage--; loadSessionHistory()">&#8592; Prev</button>
+      <span id="sess-page-lbl" style="font-size:11px;color:var(--muted);align-self:center"></span>
+      <button class="btn btn-ghost btn-sm" id="sess-next" onclick="sessHistPage++; loadSessionHistory()">Next &#8594;</button>
     </div>
   </div>
 </div>
@@ -2321,6 +2373,7 @@ function switchTab(tab) {
     case 'users':         if (!cache.users.length) loadUsersData(); break;
     case 'revenue':       if (!cache.allPurchases.length) loadRevenuePurchases(); break;
     case 'purchases':     if (!allPurchases.length) loadPurchasesData(); break;
+    case 'sessions':      loadSessionsTab(); break;
     case 'alerts':        loadAlertRules(); break;
     case 'announcements': loadAnnouncements(); break;
     case 'packs':         loadCreditPacks(); break;
@@ -4224,6 +4277,7 @@ function connectSSE() {
     }
 
     updateLiveSessions(data.liveSessions || []);
+    renderSessLive(data.liveSessions || []);
     checkAlertsAgainstData(data);
 
     // Unread notification badge
@@ -5054,6 +5108,111 @@ function timeAgo(date) {
 
 
 // ══════════════════════════════════════════════════════════════════
+// SESSIONS TAB
+// ══════════════════════════════════════════════════════════════════
+let sessHistPage = 1;
+let sessHistTotal = 0;
+let sessHistPages = 1;
+
+function loadSessionsTab() {
+  renderSessLive(cache.liveSessions || []);
+  loadSessionHistory();
+}
+
+function renderSessLive(sessions) {
+  const tbody = document.getElementById("sess-live-tbody");
+  if (!tbody) return;
+  if (!sessions.length) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:28px;color:var(--muted);font-size:13px">😴 No active sessions right now</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = sessions.map(s => `
+    <tr>
+      <td class="td-email">${esc(s.email || s.user_id?.slice(0,8) || "—")}</td>
+      <td>${fmtSecs(s.duration_secs || 0)}</td>
+      <td>${(s.credits_per_min || 130.8).toFixed(1)}</td>
+      <td><button class="btn btn-red btn-xs" onclick="showEndSessionModal('${esc(s.user_id)}','${esc(s.email||"")}')">End</button></td>
+    </tr>`).join("");
+}
+
+async function loadSessionHistory() {
+  const tbody   = document.getElementById("sess-hist-tbody");
+  const infoEl  = document.getElementById("sess-hist-info");
+  const pageLbl = document.getElementById("sess-page-lbl");
+  const prevBtn = document.getElementById("sess-prev");
+  const nextBtn = document.getElementById("sess-next");
+  if (!tbody) return;
+
+  const email = document.getElementById("sess-search")?.value.trim() || "";
+  const from  = document.getElementById("sess-from")?.value  || "";
+  const to    = document.getElementById("sess-to")?.value    || "";
+
+  const params = new URLSearchParams({ page: sessHistPage });
+  if (email) params.set("email", email);
+  if (from)  params.set("from",  from);
+  if (to)    params.set("to",    to);
+
+  tbody.innerHTML = `<tr><td colspan="6" class="loading-cell"><div class="spinner"></div></td></tr>`;
+
+  try {
+    const d = await api(`/admin/api/sessions/history?${params}`);
+    if (!d) return;
+
+    sessHistTotal = d.total || 0;
+    sessHistPages = d.pages || 1;
+
+    if (infoEl)  infoEl.textContent  = `${sessHistTotal} session${sessHistTotal !== 1 ? "s" : ""}`;
+    if (pageLbl) pageLbl.textContent = `Page ${sessHistPage} / ${sessHistPages}`;
+    if (prevBtn) prevBtn.disabled = sessHistPage <= 1;
+    if (nextBtn) nextBtn.disabled = sessHistPage >= sessHistPages;
+
+    // Stats bar
+    const today = new Date().toISOString().slice(0, 10);
+    const todaySessions = (d.sessions || []).filter(s => (s.started_at || "").startsWith(today));
+    const totalCreditsToday = todaySessions.reduce((a, s) => a + (s.credits_used || 0), 0);
+    const avgDurSecs = todaySessions.length
+      ? Math.round(todaySessions.reduce((a, s) => a + (s.duration_secs || 0), 0) / todaySessions.length) : 0;
+    const todayEl   = document.getElementById("sess-stat-today");
+    const avgEl     = document.getElementById("sess-stat-avg");
+    const creditsEl = document.getElementById("sess-stat-credits");
+    if (todayEl)   todayEl.textContent   = todaySessions.length;
+    if (avgEl)     avgEl.textContent     = fmtSecs(avgDurSecs);
+    if (creditsEl) creditsEl.textContent = fmtN(totalCreditsToday);
+
+    if (!d.sessions?.length) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:28px;color:var(--muted)">No sessions found</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = d.sessions.map(s => {
+      const status = s.kill_reason
+        ? `<span style="background:rgba(245,158,11,.15);color:var(--warning);border-radius:4px;padding:2px 7px;font-size:11px">Killed</span>`
+        : `<span style="background:rgba(34,197,94,.1);color:var(--success);border-radius:4px;padding:2px 7px;font-size:11px">Completed</span>`;
+      const killNote = s.kill_reason ? `<div style="font-size:10px;color:var(--warning);margin-top:2px">${esc(s.kill_reason)}</div>` : "";
+      return `<tr>
+        <td class="td-email">${esc(s.email || s.user_id?.slice(0,8) || "—")}</td>
+        <td>${s.started_at ? new Date(s.started_at).toLocaleString() : "—"}</td>
+        <td>${fmtSecs(s.duration_secs || 0)}</td>
+        <td>${fmtN(s.credits_used || 0)}</td>
+        <td>${s.last_ping ? new Date(s.last_ping).toLocaleString() : "—"}</td>
+        <td>${status}${killNote}</td>
+      </tr>`;
+    }).join("");
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:28px;color:var(--error)">Error: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+function clearSessionsFilter() {
+  const s = document.getElementById("sess-search");
+  const f = document.getElementById("sess-from");
+  const t = document.getElementById("sess-to");
+  if (s) s.value = ""; if (f) f.value = ""; if (t) t.value = "";
+  sessHistPage = 1;
+  loadSessionHistory();
+}
+
+// ══════════════════════════════════════════════════════════════════
 // TAB PERMISSIONS + ROLE VISIBILITY
 // ══════════════════════════════════════════════════════════════════
 const TAB_PERMISSIONS = {
@@ -5061,6 +5220,7 @@ const TAB_PERMISSIONS = {
   users:         ['super_admin', 'admin', 'support'],
   revenue:       ['super_admin', 'admin', 'analyst'],
   purchases:     ['super_admin', 'admin', 'support', 'analyst'],
+  sessions:      ['super_admin', 'admin', 'support'],
   alerts:        ['super_admin', 'admin', 'support'],
   announcements: ['super_admin', 'admin'],
   email:         ['super_admin', 'admin'],
