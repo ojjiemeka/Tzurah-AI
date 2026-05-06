@@ -169,6 +169,7 @@ async function getCachedDecartBalance() {
   }
   _decartBalanceCache = parseFloat(await getSettingValue("decart_balance", "1000"));
   _decartBalanceCachedAt = Date.now();
+  console.log("[DECART] Balance in SSE:", _decartBalanceCache);
   return _decartBalanceCache;
 }
 
