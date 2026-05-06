@@ -1300,6 +1300,8 @@ kbd {
 <!-- ══ REVENUE ════════════════════════════════════════════════════ -->
 <div class="tab-panel" id="tab-revenue">
   <div class="time-range" id="time-range">
+    <button class="time-pill" data-days="-1" onclick="setTimeRange(-1)">Today</button>
+    <button class="time-pill" data-days="-2" onclick="setTimeRange(-2)">This month</button>
     <button class="time-pill" data-days="7"  onclick="setTimeRange(7)">7 days</button>
     <button class="time-pill on" data-days="30" onclick="setTimeRange(30)">30 days</button>
     <button class="time-pill" data-days="90" onclick="setTimeRange(90)">90 days</button>
@@ -1370,26 +1372,36 @@ kbd {
           <label for="ar-decart">Decart balance below</label>
           <input type="number" id="ar-decart-val" value="5000" min="0"/>
           <span style="font-size:11px;color:var(--muted)">credits</span>
+          <span class="alert-last-triggered" id="alt-low_balance" style="font-size:10px;color:var(--muted);margin-left:auto"></span>
+          <button class="btn btn-xs" style="border:1px solid #f59e0b;color:#f59e0b;background:transparent" onclick="testAlertRule('low_balance', this)">🧪 Test</button>
         </div>
         <div class="rule-row">
           <input type="checkbox" id="ar-session" checked>
           <label for="ar-session">User session exceeds</label>
           <input type="number" id="ar-session-val" value="100" min="0"/>
           <span style="font-size:11px;color:var(--muted)">credits</span>
+          <span class="alert-last-triggered" id="alt-high_usage" style="font-size:10px;color:var(--muted);margin-left:auto"></span>
+          <button class="btn btn-xs" style="border:1px solid #f59e0b;color:#f59e0b;background:transparent" onclick="testAlertRule('high_usage', this)">🧪 Test</button>
         </div>
         <div class="rule-row">
           <input type="checkbox" id="ar-signup" checked>
           <label for="ar-signup">Signup spike:</label>
           <input type="number" id="ar-signup-val" value="10" min="1"/>
           <span style="font-size:11px;color:var(--muted)">in 1 hr</span>
+          <span class="alert-last-triggered" id="alt-new_signup" style="font-size:10px;color:var(--muted);margin-left:auto"></span>
+          <button class="btn btn-xs" style="border:1px solid #f59e0b;color:#f59e0b;background:transparent" onclick="testAlertRule('new_signup', this)">🧪 Test</button>
         </div>
         <div class="rule-row">
           <input type="checkbox" id="ar-payment" checked>
           <label for="ar-payment">Payment failed → email me</label>
+          <span class="alert-last-triggered" id="alt-payment_failed" style="font-size:10px;color:var(--muted);margin-left:auto"></span>
+          <button class="btn btn-xs" style="border:1px solid #f59e0b;color:#f59e0b;background:transparent" onclick="testAlertRule('payment_failed', this)">🧪 Test</button>
         </div>
         <div class="rule-row">
           <input type="checkbox" id="ar-ban" checked>
           <label for="ar-ban">User banned → email confirmation</label>
+          <span class="alert-last-triggered" id="alt-low_credits" style="font-size:10px;color:var(--muted);margin-left:auto"></span>
+          <button class="btn btn-xs" style="border:1px solid #f59e0b;color:#f59e0b;background:transparent" onclick="testAlertRule('low_credits', this)">🧪 Test</button>
         </div>
       </div>
       <div style="display:flex;gap:8px;margin-top:10px">
@@ -3065,7 +3077,8 @@ function doExportCSV() {
 async function loadRevenuePurchases() {
   document.getElementById("rev-chart-wrap").innerHTML = `<div class="loading-cell"><div class="spinner spinner-lg"></div></div>`;
   try {
-    const d = await api("/admin/api/purchases?limit=1000");
+    const periodParam = revDays === -1 ? "today" : revDays === -2 ? "month" : revDays === 0 ? "all" : String(revDays);
+    const d = await api(`/admin/api/revenue?period=${periodParam}`);
     cache.allPurchases = d.purchases || [];
     renderRevenue();
   } catch(e) {
@@ -3076,15 +3089,29 @@ async function loadRevenuePurchases() {
 function setTimeRange(days) {
   revDays = days;
   document.querySelectorAll(".time-pill").forEach(p => p.classList.toggle("on", parseInt(p.dataset.days)===days));
-  renderRevenue();
+  document.getElementById("rev-chart-wrap").innerHTML = `<div class="loading-cell"><div class="spinner spinner-lg"></div></div>`;
+  loadRevenuePurchases();
 }
 
 function renderRevenue() {
-  const now     = Date.now();
-  const cutoff  = revDays > 0 ? now - revDays * 86400000 : 0;
-  const prev    = revDays > 0 ? now - revDays * 2 * 86400000 : 0;
+  const now = Date.now();
+  let cutoff, prev;
+  if (revDays === -1) {
+    // Today: from midnight
+    const midnight = new Date(); midnight.setHours(0,0,0,0);
+    cutoff = midnight.getTime();
+    prev = 0;
+  } else if (revDays === -2) {
+    // This month: from 1st of month
+    const ms = new Date(); ms.setDate(1); ms.setHours(0,0,0,0);
+    cutoff = ms.getTime();
+    prev = 0;
+  } else {
+    cutoff = revDays > 0 ? now - revDays * 86400000 : 0;
+    prev   = revDays > 0 ? now - revDays * 2 * 86400000 : 0;
+  }
   const filtered = cache.allPurchases.filter(p => cutoff===0 || new Date(p.created_at).getTime() >= cutoff);
-  const prevPeriod = revDays > 0
+  const prevPeriod = (prev > 0 && cutoff > 0)
     ? cache.allPurchases.filter(p => {
         const t = new Date(p.created_at).getTime();
         return t >= prev && t < cutoff;
@@ -3111,9 +3138,11 @@ function renderRevenue() {
   document.getElementById("rv-top").textContent     = topLabel;
 
   // Build chart grouped by day
-  const days = revDays > 0 ? revDays : 90;
+  const chartDaysCount = revDays === -1 ? 1 :
+                         revDays === -2 ? new Date().getDate() :
+                         revDays >   0 ? revDays : 90;
   const byDay = {};
-  for (let i=days-1; i>=0; i--) {
+  for (let i=chartDaysCount-1; i>=0; i--) {
     const key = new Date(now - i*86400000).toISOString().split("T")[0];
     byDay[key] = 0;
   }
@@ -3132,7 +3161,7 @@ function renderRevenue() {
     packs[n].revenue = Number((packs[n].revenue+(p.amount_usd||0)).toFixed(2));
   });
   const totalR = Object.values(packs).reduce((s,p)=>s+p.revenue,0)||1;
-  const daysN  = revDays||90;
+  const daysN  = chartDaysCount || 1;
   document.getElementById("pack-tbody").innerHTML = Object.entries(packs)
     .sort((a,b)=>b[1].revenue-a[1].revenue)
     .map(([name,p])=>`
@@ -3288,6 +3317,50 @@ function loadAlertRules() {
     if (saved.banEnabled       !== undefined) document.getElementById("ar-ban").checked = saved.banEnabled;
   } catch(_) {}
   renderAlertHistory();
+  loadAlertLastTriggered();
+}
+
+async function loadAlertLastTriggered() {
+  try {
+    const res = await adminFetch('/admin/api/notifications');
+    if (!res?.ok) return;
+    const { notifications } = await res.json();
+    const typeKeywords = {
+      low_balance:    ['Low Balance', 'low balance', 'Decart'],
+      high_usage:     ['High Usage', 'high usage', 'session activity'],
+      new_signup:     ['New Signup', 'new signup', 'registration'],
+      payment_failed: ['Payment Failed', 'payment failed'],
+      low_credits:    ['Low User Credits', 'low credits'],
+    };
+    for (const [type, keywords] of Object.entries(typeKeywords)) {
+      const match = (notifications || []).find(n =>
+        keywords.some(kw => (n.title || n.message || '').includes(kw))
+      );
+      const el = document.getElementById(`alt-${type}`);
+      if (el) el.textContent = match ? `Last: ${relTime(match.created_at)}` : '';
+    }
+  } catch(_) {}
+}
+
+async function testAlertRule(type, btn) {
+  const restore = btnLoading(btn, 'Sending…');
+  try {
+    const res = await adminFetch(`/admin/api/alerts/test/${type}`, { method: 'POST' });
+    const data = await res?.json().catch(() => ({}));
+    if (res?.ok) {
+      toast('✅ Test alert triggered — check notifications', 'success');
+      // Flash notification bell
+      const bell = document.getElementById('notif-bell');
+      if (bell) { bell.style.animation = 'livePulse 0.4s ease 3'; setTimeout(() => { bell.style.animation = ''; }, 1300); }
+      loadAlertLastTriggered();
+    } else {
+      toast(data?.error || 'Failed to trigger test alert', 'error');
+    }
+  } catch(e) {
+    toast(e.message, 'error');
+  } finally {
+    restore();
+  }
 }
 function saveAlertRules() {
   const rules = {
@@ -5052,15 +5125,38 @@ function renderAnnouncements(items) {
   if (!items?.length) { tbody.innerHTML = `<tr><td colspan="5" class="td-empty">No announcements yet</td></tr>`; return; }
   const typeColors = { info: '#6366f1', warning: '#f59e0b', error: '#ef4444', success: '#22c55e' };
   const typeIcons  = { info: 'ℹ️', warning: '⚠️', error: '🚫', success: '✅' };
-  tbody.innerHTML = items.map(a => `
-    <tr>
+  tbody.innerHTML = items.map(a => {
+    const active = a.is_active !== false;
+    const toggleLabel = active ? '⏸ Disable' : '▶ Enable';
+    const toggleColor = active ? '#f59e0b' : '#22c55e';
+    const statusDot   = active ? 'dot-green' : 'dot-grey';
+    const statusText  = active ? 'Active' : '<span style="color:var(--muted)">Disabled</span>';
+    return `<tr id="ann-row-${a.id}">
       <td>${esc(a.title)}</td>
       <td><span style="color:${typeColors[a.type] || '#888'}">${typeIcons[a.type] || '•'} ${a.type}</span></td>
-      <td><span class="status-dot ${a.is_active ? 'dot-green':'dot-red'}"></span> ${a.is_active ? 'Active' : 'Inactive'}</td>
+      <td><span class="status-dot ${statusDot}"></span> ${statusText}</td>
       <td style="color:var(--muted);font-size:0.78rem">${a.expires_at ? new Date(a.expires_at).toLocaleDateString() : 'Never'}</td>
-      <td><button class="btn btn-xs btn-ghost" onclick="deleteAnnouncement('${a.id}')">Delete</button></td>
-    </tr>
-  `).join('');
+      <td style="display:flex;gap:6px">
+        <button class="btn btn-xs" style="border:1px solid ${toggleColor};color:${toggleColor};background:transparent"
+          onclick="toggleAnnouncement('${a.id}', ${!active})">${toggleLabel}</button>
+        <button class="btn btn-xs btn-ghost" onclick="deleteAnnouncement('${a.id}')">Delete</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function toggleAnnouncement(id, newActive) {
+  const res = await adminFetch(`/admin/api/announcements/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ is_active: newActive }),
+  });
+  if (res?.ok) {
+    toast(`Announcement ${newActive ? 'enabled' : 'disabled'} ✓`, 'success');
+    loadAnnouncements();
+  } else {
+    const err = await res?.json().catch(() => ({}));
+    toast(err?.error || 'Failed to update announcement', 'error');
+  }
 }
 
 function showNewAnnouncementModal() {

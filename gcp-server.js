@@ -972,6 +972,121 @@ app.get("/admin/api/revenue-chart", adminAuth, async (_req, res) => {
   }
 });
 
+// ── Admin: revenue page (full breakdown, all purchases, no limit cap) ──
+app.get("/admin/api/revenue", adminAuth, async (req, res) => {
+  const period = req.query.period || "30";
+  const now    = new Date();
+  const MS     = 86400000;
+
+  // Compute cutoff ISO strings
+  let cutoff = null, prevCutoff = null;
+  if (period === "today") {
+    cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  } else if (period === "month") {
+    cutoff = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  } else if (period !== "all") {
+    const d = parseInt(period, 10);
+    if (!isNaN(d) && d > 0) {
+      const c = new Date(Date.now() - d * MS);
+      const p = new Date(Date.now() - d * 2 * MS);
+      cutoff     = c.toISOString();
+      prevCutoff = p.toISOString();
+    }
+  }
+
+  try {
+    const { data: allData, error } = await supabaseAdmin
+      .from("purchases")
+      .select("id, user_id, pack_name, price_usd, credits_added, stripe_payment_id, created_at")
+      .order("created_at", { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+
+    const all = allData || [];
+
+    // Enrich with user email (cap at 100 to avoid long wait)
+    await Promise.all(all.slice(0, 100).map(async p => {
+      try {
+        const { data: au } = await supabaseAdmin.auth.admin.getUserById(p.user_id);
+        p.user_email = au?.user?.email || "—";
+      } catch { p.user_email = "—"; }
+    }));
+    all.slice(100).forEach(p => { p.user_email = "—"; });
+
+    const purchases = all.map(p => ({
+      id: p.id, user_id: p.user_id, user_email: p.user_email || "—",
+      pack_name: p.pack_name, amount_usd: p.price_usd, credits_added: p.credits_added,
+      stripe_session_id: p.stripe_payment_id, created_at: p.created_at,
+    }));
+
+    const filtered    = cutoff     ? purchases.filter(p => p.created_at >= cutoff) : purchases;
+    const prevFiltered = (cutoff && prevCutoff)
+      ? purchases.filter(p => p.created_at >= prevCutoff && p.created_at < cutoff) : [];
+
+    // Aggregate totals
+    const sum  = arr => arr.reduce((s, p) => s + (p.amount_usd || 0), 0);
+    const midnight  = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const yearStart  = new Date(now.getFullYear(), 0, 1).toISOString();
+    const totals = {
+      today:      { revenue: sum(purchases.filter(p => p.created_at >= midnight)),   count: purchases.filter(p => p.created_at >= midnight).length },
+      this_month: { revenue: sum(purchases.filter(p => p.created_at >= monthStart)), count: purchases.filter(p => p.created_at >= monthStart).length },
+      this_year:  { revenue: sum(purchases.filter(p => p.created_at >= yearStart)),  count: purchases.filter(p => p.created_at >= yearStart).length },
+      all_time:   { revenue: sum(purchases), count: purchases.length },
+    };
+
+    // Chart grouped by date
+    const chartDays = period === "today" ? 1 : period === "month" ? 31 :
+                      period === "all"   ? 90 : parseInt(period, 10) || 30;
+    const byDay = {};
+    for (let i = chartDays - 1; i >= 0; i--) {
+      const key = new Date(Date.now() - i * MS).toISOString().split("T")[0];
+      byDay[key] = { revenue: 0, count: 0 };
+    }
+    filtered.forEach(p => {
+      const key = (p.created_at || "").split("T")[0];
+      if (key in byDay) {
+        byDay[key].revenue = Number((byDay[key].revenue + (p.amount_usd || 0)).toFixed(2));
+        byDay[key].count++;
+      }
+    });
+    const chart = Object.entries(byDay).map(([date, v]) => ({ date, revenue: v.revenue, count: v.count }));
+
+    // Pack breakdown
+    const packMap = {};
+    filtered.filter(p => (p.amount_usd || 0) > 0).forEach(p => {
+      const n = p.pack_name || "Unknown";
+      if (!packMap[n]) packMap[n] = { pack_name: n, sales_count: 0, total_revenue: 0 };
+      packMap[n].sales_count++;
+      packMap[n].total_revenue = Number((packMap[n].total_revenue + (p.amount_usd || 0)).toFixed(2));
+    });
+    const totalRev = Object.values(packMap).reduce((s, p) => s + p.total_revenue, 0) || 1;
+    const daysN    = chartDays || 1;
+    const pack_breakdown = Object.values(packMap)
+      .sort((a, b) => b.total_revenue - a.total_revenue)
+      .map(p => ({ ...p, pct_of_total: Number((p.total_revenue / totalRev * 100).toFixed(1)), avg_per_day: Number((p.total_revenue / daysN).toFixed(2)) }));
+
+    // Top spender
+    const byUser = {};
+    filtered.filter(p => (p.amount_usd || 0) > 0).forEach(p => {
+      const k = p.user_email || p.user_id;
+      byUser[k] = (byUser[k] || 0) + (p.amount_usd || 0);
+    });
+    const topEntry = Object.entries(byUser).sort((a, b) => b[1] - a[1])[0];
+    const top_spender = topEntry ? { email: topEntry[0], total: topEntry[1] } : null;
+
+    const period_total     = sum(filtered);
+    const prev_period_total = sum(prevFiltered);
+    const paidOnly         = filtered.filter(p => (p.amount_usd || 0) > 0);
+    const avg_order_value  = paidOnly.length ? period_total / paidOnly.length : 0;
+
+    console.log(`[REVENUE] Returning ${purchases.length} purchases, period total: $${period_total.toFixed(2)}`);
+    res.json({ purchases, chart, totals, pack_breakdown, period_total, prev_period_total, avg_order_value, top_spender });
+  } catch (err) {
+    console.error("[REVENUE] Error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Admin: recent purchases ───────────────────────────────────────
 app.get("/admin/api/purchases", adminAuth, async (req, res) => {
   const limit = Math.min(200, parseInt(req.query.limit || "50", 10));
@@ -2064,6 +2179,22 @@ app.delete("/admin/api/announcements/:id", adminAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
+app.patch("/admin/api/announcements/:id", adminAuth, async (req, res) => {
+  const role = req.session.adminRole;
+  if (!can(role, "manage_announcements")) {
+    return res.status(403).json({ error: "Insufficient permissions", required: "manage_announcements" });
+  }
+  const { id } = req.params;
+  const { is_active } = req.body || {};
+  const { error } = await supabaseAdmin.from("announcements").update({ is_active }).eq("id", id);
+  if (error) return res.status(500).json({ error: error.message });
+  await logAction(
+    is_active ? "enable_announcement" : "disable_announcement",
+    req.session.adminEmail, role, null, { announcement_id: id }, req
+  );
+  res.json({ success: true });
+});
+
 // Public: app can fetch active announcements
 app.get("/api/announcements", async (_req, res) => {
   const now = new Date().toISOString();
@@ -2200,6 +2331,37 @@ app.post("/admin/api/notifications/:id/read", adminAuth, async (req, res) => {
 app.post("/admin/api/notifications/read-all", adminAuth, async (_req, res) => {
   await supabaseAdmin.from("admin_notifications").update({ is_read: true }).eq("is_read", false);
   res.json({ ok: true });
+});
+
+app.post("/admin/api/alerts/test/:type", adminAuth, async (req, res) => {
+  const { type } = req.params;
+  try {
+    switch (type) {
+      case "low_balance":
+        await supabaseAdmin.from("admin_notifications").insert({ title: "⚠️ Test Alert: Low Balance", message: "TEST — Decart balance below threshold", type: "alert" });
+        break;
+      case "low_credits": {
+        const { data: lu } = await supabaseAdmin.from("profiles").select("credits").lt("credits", 20).limit(1).maybeSingle();
+        await supabaseAdmin.from("admin_notifications").insert({ title: "⚠️ Test Alert: Low User Credits", message: `TEST — User has ${lu?.credits ?? 5} credits remaining`, type: "alert" });
+        break;
+      }
+      case "high_usage":
+        await supabaseAdmin.from("admin_notifications").insert({ title: "⚠️ Test Alert: High Usage", message: "TEST — Unusual session activity detected", type: "alert" });
+        break;
+      case "payment_failed":
+        await supabaseAdmin.from("admin_notifications").insert({ title: "⚠️ Test Alert: Payment Failed", message: "TEST — Payment failure simulation", type: "alert" });
+        break;
+      case "new_signup":
+        await supabaseAdmin.from("admin_notifications").insert({ title: "🔔 Test Alert: New Signup", message: "TEST — New user registration simulation", type: "alert" });
+        break;
+      default:
+        return res.status(400).json({ error: `Unknown alert type: ${type}` });
+    }
+    await logAction("test_alert", req.session.adminEmail, req.session.adminRole, null, { alert_type: type }, req);
+    res.json({ success: true, message: `Test alert '${type}' triggered` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── C4 supplement: force password change ──────────────────────────
