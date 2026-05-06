@@ -1686,14 +1686,16 @@ app.get("/admin/api/sessions/history", adminAuth, async (req, res) => {
       .select(`
         session_id,
         user_id,
+        email,
         is_active,
         started_at,
         last_ping,
         kill_signal,
         kill_reason,
+        kill_note,
         last_sync_at,
-        profiles(email, display_name, credits)
-      `, { count: "exact" })
+        credits_used
+      `)
       .eq("is_active", false)
       .order("started_at", { ascending: false })
       .range(offset, offset + limit - 1);
@@ -1701,30 +1703,25 @@ app.get("/admin/api/sessions/history", adminAuth, async (req, res) => {
     if (from) query = query.gte("started_at", from);
     if (to)   query = query.lte("started_at", to);
 
-    const { data, count, error } = await query;
+    const { data, error } = await query;
     if (error) throw error;
 
-    // Enrich with duration, credits estimate, and flattened email
     let sessions = (data || []).map(s => {
-      const start        = new Date(s.started_at);
-      const end          = new Date(s.last_ping || s.started_at);
+      const start         = new Date(s.started_at);
+      const end           = new Date(s.last_ping || s.started_at);
       const duration_secs = Math.max(0, Math.round((end - start) / 1000));
-      const credits_used  = Math.round(duration_secs * 2.18);
-      return {
-        ...s,
-        email:        s.profiles?.email        || "Unknown",
-        display_name: s.profiles?.display_name || "",
-        duration_secs,
-        credits_used,
-        status: s.kill_signal ? "Killed" : "Completed",
-      };
+      const credits_used  = s.credits_used || Math.round(duration_secs * 2.18);
+      return { ...s, duration_secs, credits_used, status: s.kill_signal ? "Killed" : "Completed" };
     });
 
-    // Email filter in JS (avoids complex join-filter syntax)
     if (email) {
-      const q = email.toLowerCase();
-      sessions = sessions.filter(s => s.email.toLowerCase().includes(q));
+      sessions = sessions.filter(s => s.email?.toLowerCase().includes(email.toLowerCase()));
     }
+
+    const { count } = await supabaseAdmin
+      .from("sessions")
+      .select("*", { count: "exact", head: true })
+      .eq("is_active", false);
 
     return res.json({ sessions, total: count || 0, page, pages: Math.ceil((count || 0) / limit) });
   } catch (err) {
