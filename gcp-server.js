@@ -50,8 +50,9 @@ const supabaseAdmin = createClient(
 );
 
 // ── Config ─────────────────────────────────────────────────────────
-const PORT         = parseInt(process.env.PORT || "4000", 10);
-const DECART_KEY   = process.env.DECART_API_KEY;
+const PORT             = parseInt(process.env.PORT || "4000", 10);
+const DECART_KEY       = process.env.DECART_API_KEY;
+const BOOTSTRAP_SECRET = process.env.BOOTSTRAP_SECRET || "tzurah-app-v1-secret";
 
 // Credit packs (1 credit = 10 seconds)
 const PACKS = {
@@ -185,6 +186,20 @@ const apiLimiter = rateLimit({
 const tokenLimiter = rateLimit({
   windowMs: 60 * 1000, max: 10,
   message: { error: "Too many token requests" },
+});
+const bootstrapRateLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 10,
+  message: { error: "Too many requests" },
+  handler: async (req, res) => {
+    console.warn("[BOOTSTRAP] Rate limit exceeded — possible flood from:", req.ip);
+    try {
+      await supabaseAdmin.from("ip_blocks").upsert(
+        { ip: req.ip, reason: "Bootstrap flood", blocked_at: new Date().toISOString() },
+        { onConflict: "ip" }
+      );
+    } catch (_) {}
+    res.status(429).json({ error: "Too many requests" });
+  },
 });
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, max: 20,
@@ -329,6 +344,43 @@ app.get("/internal/decart-key", (req, res) => {
   if (!token) return res.status(500).json({ error: "API key not configured" });
   console.log("[INTERNAL TOKEN] Serving Decart key to:", req.ip);
   return res.json({ token });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// BOOTSTRAP — app startup config for Electron clients
+// ═══════════════════════════════════════════════════════════════════
+app.get("/api/bootstrap", bootstrapRateLimiter, async (req, res) => {
+  console.log("[BOOTSTRAP] Request from:", req.ip, "at:", new Date().toISOString());
+  if (req.headers["x-app-secret"] !== BOOTSTRAP_SECRET) {
+    console.warn("[BOOTSTRAP] Unauthorized attempt from:", req.ip);
+    await logAction("unauthorized_bootstrap", null, null, null, { ip: req.ip }, req).catch(() => {});
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  try {
+    const { data: flagRows } = await supabaseAdmin
+      .from("feature_flags").select("key, enabled");
+    const featureFlags = {};
+    (flagRows || []).forEach(f => { featureFlags[f.key] = f.enabled; });
+
+    const { data: packs } = await supabaseAdmin
+      .from("credit_packs").select("*").eq("is_active", true)
+      .order("price_usd", { ascending: true });
+
+    return res.json({
+      supabase_url:           process.env.SUPABASE_URL,
+      supabase_anon_key:      process.env.SUPABASE_ANON_KEY,
+      gcp_server_url:         `http://${process.env.SERVER_IP || "34.39.83.195"}:4000`,
+      feature_flags:          featureFlags,
+      credit_packs:           packs || [],
+      burn_rate:              2.18,
+      free_credits_on_signup: 6,
+      app_version:            process.env.APP_VERSION || "1.0.0",
+      timestamp:              new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("[BOOTSTRAP] Error:", err.message);
+    return res.status(500).json({ error: "Bootstrap failed" });
+  }
 });
 
 // ── Internal: signal token cache bust to local server ────────────
@@ -1649,6 +1701,7 @@ const SETTINGS_ALLOWED_KEYS = [
   "DECART_API_KEY", "SUPABASE_SERVICE_ROLE_KEY",
   "ADMIN_EMAIL", "ADMIN_PASSWORD",
   "CREDITS_PER_SECOND", "COST_PER_CREDIT",
+  "BOOTSTRAP_SECRET",
 ];
 
 // Returns masked current values + server info
@@ -1656,15 +1709,16 @@ app.get("/admin/api/settings", adminAuth, (req, res) => {
   if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Insufficient permissions", required: "super_admin" });
   const mask = (val) => val ? maskKey(val) : "not set";
   res.json({
-    decart_key:   mask(process.env.DECART_API_KEY),
-    supabase_url: process.env.SUPABASE_URL || "not set",
-    supabase_key: mask(process.env.SUPABASE_SERVICE_ROLE_KEY),
-    admin_email:  process.env.ADMIN_EMAIL  || "not set",
-    node_version: process.version,
-    uptime:       Math.floor(process.uptime()),
-    memory_mb:    Math.floor(process.memoryUsage().heapUsed / 1024 / 1024),
-    pid:          process.pid,
-    env:          process.env.NODE_ENV || "development",
+    decart_key:       mask(process.env.DECART_API_KEY),
+    supabase_url:     process.env.SUPABASE_URL || "not set",
+    supabase_key:     mask(process.env.SUPABASE_SERVICE_ROLE_KEY),
+    admin_email:      process.env.ADMIN_EMAIL  || "not set",
+    bootstrap_secret: mask(process.env.BOOTSTRAP_SECRET),
+    node_version:     process.version,
+    uptime:           Math.floor(process.uptime()),
+    memory_mb:        Math.floor(process.memoryUsage().heapUsed / 1024 / 1024),
+    pid:              process.pid,
+    env:              process.env.NODE_ENV || "development",
     pricing: {
       credits_per_second: parseFloat(process.env.CREDITS_PER_SECOND || "0.1"),
       cost_per_credit:    parseFloat(process.env.COST_PER_CREDIT    || "0.00625"),
@@ -2990,6 +3044,14 @@ app.post("/admin/api/tests/run", adminAuth, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════
 // START
 // ═══════════════════════════════════════════════════════════════════
+
+// Startup: warn if default secrets are in use
+if (!process.env.BOOTSTRAP_SECRET) {
+  console.warn("[BOOTSTRAP] Using default secret — set BOOTSTRAP_SECRET in .env for production");
+}
+if (!process.env.INTERNAL_SECRET) {
+  console.warn("[INTERNAL] Using default internal secret — set INTERNAL_SECRET in .env for production");
+}
 
 // Startup: verify admin_actions table has expected columns
 (async () => {

@@ -1574,6 +1574,16 @@ kbd {
         </div>
         <code class="settings-row-value" id="supabase-url-display">loading…</code>
       </div>
+      <div class="settings-row">
+        <div class="settings-row-label-wrap">
+          <div class="settings-row-label">Bootstrap Secret</div>
+          <div class="settings-row-meta">Electron app auth header — token endpoint is secured with internal secret</div>
+        </div>
+        <code class="settings-row-value" id="bootstrap-secret-display">loading…</code>
+        <div class="settings-row-actions">
+          <button class="btn btn-accent btn-sm" onclick="openUpdateKeyModal('BOOTSTRAP_SECRET','Bootstrap Secret')">Update</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -4668,13 +4678,15 @@ async function loadSettings() {
     const d = await api("/admin/api/settings");
     if (!d) return;
 
-    settingsMasked["decart-key-display"]   = d.decart_key;
-    settingsMasked["supabase-key-display"] = d.supabase_key;
+    settingsMasked["decart-key-display"]        = d.decart_key;
+    settingsMasked["supabase-key-display"]      = d.supabase_key;
+    settingsMasked["bootstrap-secret-display"]  = d.bootstrap_secret;
 
-    document.getElementById("decart-key-display").textContent   = d.decart_key;
-    document.getElementById("supabase-key-display").textContent = d.supabase_key;
-    document.getElementById("supabase-url-display").textContent = d.supabase_url;
-    document.getElementById("admin-email-display").textContent  = d.admin_email;
+    document.getElementById("decart-key-display").textContent        = d.decart_key;
+    document.getElementById("supabase-key-display").textContent      = d.supabase_key;
+    document.getElementById("supabase-url-display").textContent      = d.supabase_url;
+    document.getElementById("admin-email-display").textContent       = d.admin_email;
+    document.getElementById("bootstrap-secret-display").textContent  = d.bootstrap_secret || "not set";
 
     document.getElementById("setting-credits-per-sec").value = d.pricing.credits_per_second;
     document.getElementById("setting-cost-per-credit").value = d.pricing.cost_per_credit;
