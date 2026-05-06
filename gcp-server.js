@@ -1327,9 +1327,10 @@ app.post("/admin/api/gift-credits", adminAuth, async (req, res) => {
       .from("profiles")
       .select("credits, total_credits_purchased, email")
       .eq("id", userId)
-      .single();
+      .maybeSingle();
 
-    if (fetchErr || !profile) return res.status(404).json({ error: "User not found" });
+    if (fetchErr) return res.status(500).json({ error: fetchErr.message });
+    if (!profile) return res.status(404).json({ error: "User not found" });
 
     const newBalance  = profile.credits + credits;
     const userEmail   = profile.email || userId;
@@ -1381,9 +1382,10 @@ app.post("/admin/api/deduct-credits", adminAuth, async (req, res) => {
 
   try {
     const { data: profile, error: fetchErr } = await supabaseAdmin
-      .from("profiles").select("credits").eq("id", userId).single();
+      .from("profiles").select("credits").eq("id", userId).maybeSingle();
 
-    if (fetchErr || !profile) return res.status(404).json({ error: "User not found" });
+    if (fetchErr) return res.status(500).json({ error: fetchErr.message });
+    if (!profile) return res.status(404).json({ error: "User not found" });
 
     const newBalance = Math.max(0, profile.credits - credits);
     await supabaseAdmin.from("profiles").update({ credits: newBalance }).eq("id", userId);
