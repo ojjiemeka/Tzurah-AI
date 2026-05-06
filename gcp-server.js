@@ -315,6 +315,33 @@ app.get("/decart/token", requireAuth, async (req, res) => {
   }
 });
 
+// ── Internal: raw Decart key for local Electron server ───────────
+// NOT public — secured by internal secret or localhost-only IP.
+// server.mjs calls this to proxy the key to the Electron renderer.
+app.get("/internal/decart-key", (req, res) => {
+  const secret  = req.headers["x-internal-secret"];
+  const isLocal = req.ip === "127.0.0.1" || req.ip === "::1" || req.ip === "::ffff:127.0.0.1";
+  if (!isLocal && secret !== (process.env.INTERNAL_SECRET || "tzurah-internal")) {
+    console.warn("[INTERNAL TOKEN] Unauthorized request from:", req.ip);
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  const token = process.env.DECART_API_KEY;
+  if (!token) return res.status(500).json({ error: "API key not configured" });
+  console.log("[INTERNAL TOKEN] Serving Decart key to:", req.ip);
+  return res.json({ token });
+});
+
+// ── Internal: signal token cache bust to local server ────────────
+app.post("/internal/bust-token-cache", (req, res) => {
+  const secret = req.headers["x-internal-secret"];
+  if (secret !== (process.env.INTERNAL_SECRET || "tzurah-internal")) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  process.env.TOKEN_CACHE_BUSTED = Date.now().toString();
+  console.log("[INTERNAL] Token cache bust signal set");
+  return res.json({ success: true });
+});
+
 // ═══════════════════════════════════════════════════════════════════
 // CREDITS
 // ═══════════════════════════════════════════════════════════════════
@@ -1678,6 +1705,10 @@ app.post("/admin/api/settings/update-key", adminAuth, async (req, res) => {
     }
     fs.writeFileSync(envPath, envContent);
     process.env[key_name] = value.trim();
+    if (key_name === "DECART_API_KEY") {
+      process.env.TOKEN_CACHE_BUSTED = Date.now().toString();
+      console.log("[SETTINGS] DECART_API_KEY updated — token cache bust signalled");
+    }
     await logAction("settings_change", req.session.adminEmail, req.session.adminRole, null, { field_changed: key_name }, req);
     res.json({ success: true });
   } catch (err) {
