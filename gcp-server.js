@@ -1031,31 +1031,29 @@ app.get("/admin/api/users/active-today", adminAuth, async (_req, res) => {
     const userIds = Object.keys(byUser);
     if (!userIds.length) return res.json({ ok: true, users: [] });
 
-    // Bulk fetch profiles (one query, always fresh from DB)
+    // Bulk fetch profiles (credits + display_name only — email lives in auth.users)
     const { data: profiles } = await supabaseAdmin
       .from("profiles")
-      .select("id, email, full_name, credits, last_seen, is_banned")
+      .select("id, display_name, credits, last_seen")
       .in("id", userIds);
 
     const profileMap = {};
     (profiles || []).forEach(p => { profileMap[p.id] = p; });
 
-    // Auth emails for any profiles missing email
+    // Fetch email from auth for each user
     const enriched = await Promise.all(
       userIds.map(async (userId) => {
         const prof = profileMap[userId] || {};
-        let email = prof.email || null;
-        if (!email) {
-          const { data: au } = await supabaseAdmin.auth.admin.getUserById(userId);
-          email = au?.user?.email || "unknown";
-        }
+        const { data: au } = await supabaseAdmin.auth.admin.getUserById(userId);
+        const email     = au?.user?.email      || "unknown";
+        const is_banned = !!au?.user?.banned_until;
         return {
           user_id:   userId,
           email,
-          name:      prof.full_name || null,
+          name:      prof.display_name || null,
           balance:   typeof prof.credits === "number" ? prof.credits : 0,
           last_seen: prof.last_seen || null,
-          is_banned: prof.is_banned || false,
+          is_banned,
           ...byUser[userId],
         };
       })
@@ -1325,15 +1323,17 @@ app.post("/admin/api/gift-credits", adminAuth, async (req, res) => {
   try {
     const { data: profile, error: fetchErr } = await supabaseAdmin
       .from("profiles")
-      .select("credits, total_credits_purchased, email")
+      .select("credits, total_credits_purchased")
       .eq("id", userId)
       .maybeSingle();
 
     if (fetchErr) return res.status(500).json({ error: fetchErr.message });
     if (!profile) return res.status(404).json({ error: "User not found" });
 
-    const newBalance  = profile.credits + credits;
-    const userEmail   = profile.email || userId;
+    const { data: authData } = await supabaseAdmin.auth.admin.getUserById(userId);
+    const userEmail = authData?.user?.email || userId;
+
+    const newBalance = profile.credits + credits;
 
     await supabaseAdmin.from("profiles").update({
       credits:                 newBalance,
