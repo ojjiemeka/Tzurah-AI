@@ -133,8 +133,9 @@ async function setSettingValue(key, value) {
 // ── Decart credit deduction (called on session end / kill) ─────────
 async function deductDecartCredits(durationSeconds, sessionId) {
   try {
-    const decartCost = Math.ceil(durationSeconds * DECART_COST_PER_SECOND);
-    if (decartCost <= 0) return;
+    const costPerSec = parseFloat(await getSettingValue("decart_cost_per_second", "2.0"));
+    const decartCost = Math.ceil(durationSeconds * costPerSec);
+    if (decartCost <= 0) return { decartCost: 0, newBalance: null };
 
     const currentBalance = parseFloat(await getSettingValue("decart_balance", "1000"));
     const threshold      = parseFloat(await getSettingValue("decart_alert_threshold", "200"));
@@ -142,7 +143,9 @@ async function deductDecartCredits(durationSeconds, sessionId) {
 
     await setSettingValue("decart_balance", newBalance.toFixed(2));
     invalidateDecartCache();
-    console.log(`[DECART] Session ${sessionId || "?"}: -${decartCost} cr  ${currentBalance.toFixed(0)} → ${newBalance.toFixed(0)}`);
+
+    console.log(`[DECART] Session ${sessionId || "?"}: ${durationSeconds}s × ${costPerSec} cr/s = ${decartCost} cr deducted`);
+    console.log(`[DECART] Balance: ${currentBalance.toFixed(0)} → ${newBalance.toFixed(0)}`);
 
     // Fire low-balance alert only when crossing below threshold
     if (newBalance < threshold && currentBalance >= threshold) {
@@ -154,8 +157,11 @@ async function deductDecartCredits(durationSeconds, sessionId) {
       });
       console.warn("[DECART] Low balance alert fired! Balance:", newBalance);
     }
+
+    return { decartCost, newBalance };
   } catch (err) {
     console.error("[DECART] Failed to deduct credits:", err.message);
+    return null;
   }
 }
 
@@ -1545,6 +1551,23 @@ app.post("/session/ping", async (req, res) => {
       }).eq("id", existing.id);
     }
 
+    // Force-kill if user has run out of credits
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("credits")
+      .eq("id", user_id)
+      .maybeSingle();
+
+    if (profile && profile.credits <= 0) {
+      await supabaseAdmin
+        .from("sessions")
+        .update({ kill_signal: true, kill_reason: "Insufficient credits" })
+        .eq("user_id", user_id)
+        .eq("is_active", true);
+      console.log("[SESSION] Force-killed session for zero credits:", user_id);
+      return res.json({ ok: true, kill: true, reason: "Insufficient credits" });
+    }
+
     res.json({ ok: true });
   } catch (err) {
     console.error("[PING] error:", err.message);
@@ -1574,7 +1597,14 @@ app.post("/session/end", async (req, res) => {
 
     if (session?.started_at) {
       const durationSecs = Math.max(0, Math.floor((Date.now() - new Date(session.started_at).getTime()) / 1000));
-      deductDecartCredits(durationSecs, session.id).catch(() => {});
+      const result = await deductDecartCredits(durationSecs, session.id).catch(() => null);
+      if (result) {
+        console.log(`[SESSION SUMMARY]`);
+        console.log(`  Duration: ${durationSecs}s`);
+        console.log(`  Decart credits deducted: ${result.decartCost}`);
+        console.log(`  Decart rate: ${durationSecs > 0 ? (result.decartCost / durationSecs).toFixed(3) : "?"} cr/s`);
+        console.log(`  Decart balance remaining: ${result.newBalance?.toFixed(0) ?? "?"}`);
+      }
     }
 
     res.json({ ok: true });
@@ -1634,31 +1664,34 @@ app.post("/admin/api/end-session", adminAuth, async (req, res) => {
   }
 });
 
-// GET /admin/api/decart-balance — current balance and threshold
+// GET /admin/api/decart-balance — current balance, threshold, and cost rate
 app.get("/admin/api/decart-balance", adminAuth, async (_req, res) => {
   try {
-    const [balance, threshold] = await Promise.all([
-      getSettingValue("decart_balance",       "1000"),
+    const [balance, threshold, costPerSecond] = await Promise.all([
+      getSettingValue("decart_balance",         "1000"),
       getSettingValue("decart_alert_threshold", "200"),
+      getSettingValue("decart_cost_per_second", "2.0"),
     ]);
     return res.json({
-      balance:   parseFloat(balance),
-      threshold: parseFloat(threshold),
+      balance:          parseFloat(balance),
+      threshold:        parseFloat(threshold),
+      cost_per_second:  parseFloat(costPerSecond),
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
 });
 
-// POST /admin/api/decart-balance — manually set balance or threshold from admin UI
+// POST /admin/api/decart-balance — manually set balance, threshold, or cost rate
 app.post("/admin/api/decart-balance", adminAuth, async (req, res) => {
   const role = req.session.adminRole;
-  const { balance, threshold } = req.body || {};
+  const { balance, threshold, cost_per_second } = req.body || {};
   try {
-    if (balance   !== undefined) await setSettingValue("decart_balance",         String(Math.max(0, parseFloat(balance)  || 0)));
-    if (threshold !== undefined) await setSettingValue("decart_alert_threshold",  String(Math.max(0, parseFloat(threshold) || 0)));
+    if (balance          !== undefined) await setSettingValue("decart_balance",         String(Math.max(0, parseFloat(balance)         || 0)));
+    if (threshold        !== undefined) await setSettingValue("decart_alert_threshold",  String(Math.max(0, parseFloat(threshold)       || 0)));
+    if (cost_per_second  !== undefined) await setSettingValue("decart_cost_per_second",  String(Math.max(0, parseFloat(cost_per_second) || 0)));
     invalidateDecartCache();
-    await logAction("update_decart_balance", req.session.adminEmail, role, null, { balance, threshold }, req);
+    await logAction("update_decart_balance", req.session.adminEmail, role, null, { balance, threshold, cost_per_second }, req);
     return res.json({ success: true });
   } catch (err) {
     return res.status(500).json({ error: err.message });

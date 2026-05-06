@@ -1643,7 +1643,7 @@ kbd {
   <div class="settings-section">
     <div class="settings-section-title">Decart API Balance</div>
     <div class="panel-card">
-      <div style="padding:12px 14px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div style="padding:12px 14px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
         <div>
           <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Current Balance (credits)</label>
           <input id="decart-balance-input" type="number" min="0" step="1" placeholder="e.g. 1000"
@@ -1654,10 +1654,15 @@ kbd {
           <input id="decart-threshold-input" type="number" min="0" step="1" placeholder="e.g. 200"
                  style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px">
         </div>
+        <div>
+          <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Cost per Second (cr/s)</label>
+          <input id="decart-cost-input" type="number" min="0" step="0.01" placeholder="e.g. 2.0"
+                 style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-size:13px">
+        </div>
       </div>
-      <div style="padding:0 14px 10px;font-size:11px;color:var(--muted);display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div>Cost per second: <strong style="color:var(--warning)">1.36 cr/s</strong> (auto-deducted on session end)</div>
+      <div style="padding:0 14px 10px;font-size:11px;color:var(--muted)">
         <div id="decart-settings-estimate" style="color:var(--electric)">—</div>
+        <div style="margin-top:4px;color:var(--muted)">Based on real usage data (updated from test sessions)</div>
       </div>
       <div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center">
         <button class="btn btn-accent btn-sm" onclick="saveDecartBalanceSettings()">&#128190; Save Balance</button>
@@ -2636,14 +2641,17 @@ async function loadDecartBalanceSettings() {
   try {
     const d = await api("/admin/api/decart-balance");
     if (!d) return;
-    const balInput = document.getElementById("decart-balance-input");
-    const thrInput = document.getElementById("decart-threshold-input");
-    const estEl    = document.getElementById("decart-settings-estimate");
-    if (balInput) balInput.value = d.balance;
-    if (thrInput) thrInput.value = d.threshold;
+    const balInput  = document.getElementById("decart-balance-input");
+    const thrInput  = document.getElementById("decart-threshold-input");
+    const costInput = document.getElementById("decart-cost-input");
+    const estEl     = document.getElementById("decart-settings-estimate");
+    if (balInput)  balInput.value  = d.balance;
+    if (thrInput)  thrInput.value  = d.threshold;
+    if (costInput) costInput.value = d.cost_per_second ?? 2.0;
     if (estEl) {
-      const hrs = ((d.balance / 1.36) / 3600).toFixed(1);
-      estEl.textContent = `≈ ${hrs} hrs of streaming at current balance`;
+      const rate = d.cost_per_second || 2.0;
+      const hrs  = (d.balance / rate / 3600).toFixed(1);
+      estEl.textContent = `≈ ${hrs} hrs of streaming at current balance (${rate} cr/s)`;
     }
   } catch (e) {
     console.warn("[Decart] Failed to load balance settings:", e.message);
@@ -2651,12 +2659,13 @@ async function loadDecartBalanceSettings() {
 }
 
 async function saveDecartBalanceSettings() {
-  const balance   = parseFloat(document.getElementById("decart-balance-input")?.value) || 0;
-  const threshold = parseFloat(document.getElementById("decart-threshold-input")?.value) || 200;
+  const balance         = parseFloat(document.getElementById("decart-balance-input")?.value)  || 0;
+  const threshold       = parseFloat(document.getElementById("decart-threshold-input")?.value) || 200;
+  const cost_per_second = parseFloat(document.getElementById("decart-cost-input")?.value)      || 2.0;
   try {
     const res = await adminFetch("/admin/api/decart-balance", {
       method: "POST",
-      body: JSON.stringify({ balance, threshold }),
+      body: JSON.stringify({ balance, threshold, cost_per_second }),
     });
     if (res?.ok) {
       const savedEl = document.getElementById("decart-settings-saved");
@@ -2665,9 +2674,11 @@ async function saveDecartBalanceSettings() {
       _decartBalance   = balance;
       _decartThreshold = threshold;
       updateDecartBar(balance, threshold);
-      // Update estimate
       const estEl = document.getElementById("decart-settings-estimate");
-      if (estEl) { const hrs = ((balance / 1.36) / 3600).toFixed(1); estEl.textContent = `≈ ${hrs} hrs of streaming at current balance`; }
+      if (estEl) {
+        const hrs = (balance / cost_per_second / 3600).toFixed(1);
+        estEl.textContent = `≈ ${hrs} hrs of streaming at current balance (${cost_per_second} cr/s)`;
+      }
     } else {
       toast("Failed to save balance", "error");
     }
