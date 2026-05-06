@@ -1580,11 +1580,33 @@ app.post("/session/ping", async (req, res) => {
     if (profile && profile.credits <= 0) {
       await supabaseAdmin
         .from("sessions")
-        .update({ kill_signal: true, kill_reason: "Insufficient credits" })
+        .update({
+          kill_signal: true,
+          kill_reason: "Insufficient credits",
+          is_active:   false,
+          last_ping:   new Date().toISOString(),
+        })
         .eq("user_id", user_id)
         .eq("is_active", true);
-      console.log("[SESSION] Force-killed session for zero credits:", user_id);
-      return res.json({ ok: true, kill: true, reason: "Insufficient credits" });
+
+      // Deduct remaining Decart credits for unsync'd session time
+      const { data: sess } = await supabaseAdmin
+        .from("sessions")
+        .select("started_at, last_sync_at, session_id")
+        .eq("user_id", user_id)
+        .eq("session_id", session_id)
+        .maybeSingle();
+
+      if (sess?.started_at) {
+        const lastSync    = new Date(sess.last_sync_at || sess.started_at);
+        const remainingSecs = Math.max(0, Math.round((Date.now() - lastSync.getTime()) / 1000));
+        if (remainingSecs > 0) {
+          deductDecartCredits(remainingSecs, sess.session_id).catch(() => {});
+        }
+      }
+
+      console.log("[PING] Force-ended session for zero credits:", user_id);
+      return res.json({ ok: true, kill: true, kill_reason: "Insufficient credits", force_end: true });
     }
 
     res.json({ ok: true });

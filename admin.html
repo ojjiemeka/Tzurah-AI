@@ -4285,9 +4285,19 @@ function connectSSE() {
       updateDecartSystemStatus(_decartBalance, _decartThreshold);
     }
 
-    updateLiveSessions(data.liveSessions || []);
-    renderSessLive(data.liveSessions || []);
+    const prevLiveCount = (cache.liveSessions || []).length;
+    const newLiveSessions = data.liveSessions || [];
+    updateLiveSessions(newLiveSessions);
+    renderSessLive(newLiveSessions);
     checkAlertsAgainstData(data);
+
+    // Refresh Decart balance after last session ends (billing just stopped)
+    if (prevLiveCount > 0 && newLiveSessions.length === 0) {
+      setTimeout(() => {
+        loadDecartBalanceSettings();
+        updateSystemStatus();
+      }, 2000);
+    }
 
     // Unread notification badge
     if (typeof data.unreadNotifications === "number") {
