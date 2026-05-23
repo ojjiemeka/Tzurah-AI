@@ -497,10 +497,14 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 .so-user-email { font-weight: 600; color: var(--text); flex: 1; }
 .so-user-meta  { color: var(--muted); font-size: 11px; }
 
-/* ── Email tab ─────────────────────────────────────────────────── */
+/* ── Email / announcements builder tabs ─────────────────────────── */
+.stage3-grid {
+  display:grid; grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);
+  gap:16px; align-items:start; margin-bottom:18px;
+}
 .email-compose {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--r); padding: 20px; margin-bottom: 20px;
+  border-radius: var(--r); padding: 18px; margin-bottom: 0;
 }
 .email-compose h3 { font-size: 13px; font-weight: 700; margin-bottom: 16px; }
 .email-field { margin-bottom: 14px; }
@@ -522,36 +526,87 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   outline: none; font-family: inherit; resize: vertical; line-height: 1.6;
 }
 .email-textarea:focus { border-color: var(--accent); }
-.email-recipient-group {
-  display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px;
-}
+.email-recipient-group { display: grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap: 6px; margin-bottom: 14px; }
 .email-recipient-row {
   display: flex; align-items: center; gap: 8px;
   padding: 7px 10px; border-radius: 6px;
   border: 1px solid var(--border); background: var(--bg);
   cursor: pointer; transition: border-color .15s;
+  min-width:0;
 }
+.email-recipient-row span:nth-child(2) { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .email-recipient-row:hover { border-color: var(--accent); }
 .email-recipient-row.selected { border-color: var(--accent); background: rgba(99,102,241,.08); }
 .email-recipient-row input[type="radio"] { accent-color: var(--accent); flex-shrink: 0; }
 .email-template-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .email-template-chip {
-  padding: 4px 12px; border-radius: 20px;
+  padding: 5px 10px; border-radius: 6px;
   border: 1px solid var(--border); background: var(--surface2);
   color: var(--text2); font-size: 11px; cursor: pointer; transition: all .15s;
+  font-family:inherit;
 }
 .email-template-chip:hover { border-color: var(--accent); color: var(--text); }
 .email-preview-box {
   background: var(--bg); border: 1px solid var(--border);
   border-radius: 6px; padding: 12px; font-size: 12px;
-  white-space: pre-wrap; color: var(--text2); max-height: 200px; overflow-y: auto;
-  line-height: 1.6; margin-top: 8px; display: none;
+  white-space: pre-wrap; color: var(--text2); min-height: 260px; max-height: 520px; overflow-y: auto;
+  line-height: 1.6; margin-top: 8px; display: block;
 }
 .email-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
 .email-count-badge {
   display: inline-block; background: rgba(99,102,241,.2); color: var(--accent);
   border-radius: 20px; padding: 1px 8px; font-size: 11px; font-weight: 700;
-  margin-left: 4px;
+  margin-left: auto; flex-shrink:0;
+}
+.stage3-preview-card {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r); padding:18px; position:sticky; top:70px;
+}
+.stage3-preview-title {
+  font-size:11px; color:var(--muted); font-weight:700;
+  text-transform:uppercase; letter-spacing:.6px; margin-bottom:10px;
+}
+.stage3-preview-subject {
+  padding:10px 12px; border:1px solid var(--border); border-radius:6px;
+  background:var(--surface2); color:var(--text); font-size:13px;
+  font-weight:700; margin-bottom:10px; word-break:break-word;
+}
+.stage3-preview-meta { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+.stage3-pill {
+  display:inline-flex; align-items:center; gap:5px; padding:3px 8px;
+  border:1px solid var(--border); border-radius:999px;
+  color:var(--muted); background:var(--bg); font-size:10px; font-weight:700;
+}
+.stage3-variable-row { display:flex; gap:6px; flex-wrap:wrap; margin-top:7px; }
+.stage3-variable-chip {
+  border:1px dashed rgba(99,102,241,.45); background:rgba(99,102,241,.08);
+  color:var(--accent); border-radius:6px; padding:4px 8px; font-size:11px;
+  cursor:pointer; font-family:monospace;
+}
+.stage3-variable-chip:hover { background:rgba(99,102,241,.16); }
+.stage3-select {
+  width:100%; padding:8px 10px; background:var(--bg);
+  border:1px solid var(--border); border-radius:6px; color:var(--text);
+  font-size:12px; outline:none; font-family:inherit;
+}
+.stage3-select:focus { border-color:var(--accent); }
+.stage3-toggle-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.stage3-toggle-row label { margin:0; color:var(--text2); text-transform:none; letter-spacing:0; font-size:12px; }
+.announcement-preview-card {
+  border:1px solid var(--border); border-radius:8px; padding:13px 14px;
+  background:var(--bg); color:var(--text2); line-height:1.55;
+}
+.announcement-preview-card .ann-title { color:var(--text); font-weight:800; margin-bottom:4px; }
+.announcement-preview-card.info { border-color:rgba(99,102,241,.38); background:rgba(99,102,241,.08); }
+.announcement-preview-card.success { border-color:rgba(34,197,94,.38); background:rgba(34,197,94,.08); }
+.announcement-preview-card.warning { border-color:rgba(245,158,11,.42); background:rgba(245,158,11,.08); }
+.announcement-preview-card.danger { border-color:rgba(239,68,68,.42); background:rgba(239,68,68,.08); }
+.announcement-preview-card.promo { border-color:rgba(168,85,247,.42); background:rgba(168,85,247,.08); }
+.announcement-preview-card.maintenance { border-color:rgba(6,182,212,.42); background:rgba(6,182,212,.08); }
+@media (max-width: 900px) {
+  .stage3-grid { grid-template-columns:1fr; }
+  .stage3-preview-card { position:static; }
+  .email-recipient-group { grid-template-columns:1fr; }
 }
 
 /* ── System health ─────────────────────────────────────────────── */
@@ -1477,33 +1532,38 @@ kbd {
 
 <!-- ══ EMAIL ══════════════════════════════════════════════════════ -->
 <div class="tab-panel" id="tab-email">
+  <div class="stage3-grid">
   <div class="email-compose">
-    <h3>✉ Compose Email</h3>
+    <h3>Email Campaign</h3>
 
     <!-- Recipient group selector -->
     <div class="email-field">
-      <label>To</label>
+      <label>Recipients</label>
       <div class="email-recipient-group" id="email-recipient-group">
-        <label class="email-recipient-row selected" id="eg-all">
-          <input type="radio" name="email-group" value="all" checked onchange="onRecipientGroupChange()">
+        <label class="email-recipient-row selected" id="eg-all-users">
+          <input type="radio" name="email-group" value="all_users" checked onchange="onRecipientGroupChange()">
           <span>All users</span>
           <span class="email-count-badge" id="eg-all-count">—</span>
         </label>
-        <label class="email-recipient-row" id="eg-active">
-          <input type="radio" name="email-group" value="active_this_week" onchange="onRecipientGroupChange()">
-          <span>Active this week</span>
+        <label class="email-recipient-row" id="eg-active-users">
+          <input type="radio" name="email-group" value="active_users" onchange="onRecipientGroupChange()">
+          <span>Active users</span>
           <span class="email-count-badge" id="eg-active-count">—</span>
         </label>
-        <label class="email-recipient-row" id="eg-zero">
-          <input type="radio" name="email-group" value="zero_credits" onchange="onRecipientGroupChange()">
-          <span>Zero credits</span>
+        <label class="email-recipient-row" id="eg-inactive-users">
+          <input type="radio" name="email-group" value="inactive_users" onchange="onRecipientGroupChange()">
+          <span>Inactive users</span>
           <span class="email-count-badge" id="eg-zero-count">—</span>
         </label>
-        <label class="email-recipient-row" id="eg-low">
-          <input type="radio" name="email-group" value="low_credits" onchange="onRecipientGroupChange()">
-          <span>Low credits (&lt;10)</span>
+        <label class="email-recipient-row" id="eg-paid-users">
+          <input type="radio" name="email-group" value="paid_users" onchange="onRecipientGroupChange()">
+          <span>Paid users</span>
           <span class="email-count-badge" id="eg-low-count">—</span>
         </label>
+        <label class="email-recipient-row" id="eg-free-users"><input type="radio" name="email-group" value="free_users" onchange="onRecipientGroupChange()"><span>Free users</span><span class="email-count-badge" id="eg-free-users-count">-</span></label>
+        <label class="email-recipient-row" id="eg-low-credit-users"><input type="radio" name="email-group" value="low_credit_users" onchange="onRecipientGroupChange()"><span>Low credit users</span><span class="email-count-badge" id="eg-low-credit-users-count">-</span></label>
+        <label class="email-recipient-row" id="eg-zero-credit-users"><input type="radio" name="email-group" value="zero_credit_users" onchange="onRecipientGroupChange()"><span>Zero credit users</span><span class="email-count-badge" id="eg-zero-credit-users-count">-</span></label>
+        <label class="email-recipient-row" id="eg-test-email"><input type="radio" name="email-group" value="test_email" onchange="onRecipientGroupChange()"><span>Test email</span><span class="email-count-badge" id="eg-test-email-count">-</span></label>
       </div>
     </div>
 
@@ -1516,34 +1576,53 @@ kbd {
     <!-- Templates -->
     <div class="email-field">
       <label>Template</label>
-      <div class="email-template-chips">
-        <button class="email-template-chip" onclick="applyEmailTemplate('welcome')">👋 Welcome</button>
-        <button class="email-template-chip" onclick="applyEmailTemplate('low_credits')">⚠ Low Credits</button>
-        <button class="email-template-chip" onclick="applyEmailTemplate('promo')">🎉 Promo</button>
+      <select id="email-template-select" class="stage3-select" onchange="applyEmailTemplate(this.value)">
+        <option value="welcome">Welcome to Tzurah</option>
+        <option value="low_credits">Low Credits Reminder</option>
+        <option value="new_feature">New Feature Announcement</option>
+        <option value="creator_promo">Creator Promo</option>
+        <option value="maintenance">Maintenance Notice</option>
+        <option value="payment_confirmation">Payment Confirmation</option>
+        <option value="winback">Winback Inactive Users</option>
+        <option value="blank">Custom Blank Email</option>
+      </select>
+    </div>
+
+    <div class="email-field">
+      <label>Variables</label>
+      <div class="stage3-variable-row">
+        <button type="button" class="stage3-variable-chip" onclick="insertEmailVariable('{{display_name}}')">{{display_name}}</button>
+        <button type="button" class="stage3-variable-chip" onclick="insertEmailVariable('{{credits}}')">{{credits}}</button>
+        <button type="button" class="stage3-variable-chip" onclick="insertEmailVariable('{{email}}')">{{email}}</button>
+        <button type="button" class="stage3-variable-chip" onclick="insertEmailVariable('{{app_name}}')">{{app_name}}</button>
+        <button type="button" class="stage3-variable-chip" onclick="insertEmailVariable('{{support_email}}')">{{support_email}}</button>
+        <button type="button" class="stage3-variable-chip" onclick="insertEmailVariable('{{dashboard_url}}')">{{dashboard_url}}</button>
       </div>
     </div>
 
     <!-- Body -->
     <div class="email-field">
-      <label>Message <span style="color:var(--muted);font-weight:400;text-transform:none">— use {{name}}, {{credits}} as placeholders</span></label>
+      <label>Body</label>
       <textarea id="email-body" class="email-textarea" placeholder="Write your message…"></textarea>
     </div>
 
-    <!-- Preview -->
-    <div class="email-field">
-      <div style="display:flex;align-items:center;gap:8px">
-        <label style="margin-bottom:0">Preview</label>
-        <button class="btn btn-ghost btn-xs" onclick="toggleEmailPreview()">Show preview</button>
-      </div>
-      <div id="email-preview-box" class="email-preview-box"></div>
-    </div>
-
     <div class="email-actions">
-      <button class="btn btn-ghost" onclick="sendTestEmail()">📨 Send Test to Admin</button>
+      <button class="btn btn-ghost" onclick="sendTestEmail()">Send test email</button>
       <button class="btn btn-accent" id="btn-send-email" onclick="sendEmail()">
-        Send to <span id="email-send-count">—</span> recipients
+        Send campaign to <span id="email-send-count">-</span>
       </button>
     </div>
+  </div>
+
+  <div class="stage3-preview-card">
+    <div class="stage3-preview-title">Live Preview</div>
+    <div class="stage3-preview-meta">
+      <span class="stage3-pill" id="email-preview-recipient">All users</span>
+      <span class="stage3-pill"><span id="email-preview-count">-</span> recipients</span>
+    </div>
+    <div class="stage3-preview-subject" id="email-preview-subject">Subject preview</div>
+    <div id="email-preview-box" class="email-preview-box">Body preview</div>
+  </div>
   </div>
 
   <!-- Sent history -->
@@ -1817,7 +1896,69 @@ kbd {
 <div class="tab-panel" id="tab-announcements">
   <div class="sec-hdr">
     <div><h3>📣 Announcements</h3><div class="sub">Broadcast messages shown to all users</div></div>
-    <button class="btn btn-accent" onclick="showNewAnnouncementModal()">+ New Announcement</button>
+    <button class="btn btn-accent" onclick="resetAnnouncementBuilder()">+ New Announcement</button>
+  </div>
+  <div class="stage3-grid">
+    <div class="email-compose">
+      <h3>Announcement Builder</h3>
+      <input type="hidden" id="ann-edit-id">
+      <div class="email-field">
+        <label>Template</label>
+        <select id="ann-template-select" class="stage3-select" onchange="applyAnnouncementTemplate(this.value)">
+          <option value="welcome">Welcome Message</option>
+          <option value="new_feature">New Feature</option>
+          <option value="maintenance">Scheduled Maintenance</option>
+          <option value="service_issue">Service Issue</option>
+          <option value="promo">Promo Offer</option>
+          <option value="credits">Credits Reminder</option>
+          <option value="version">Version Update</option>
+          <option value="blank">Custom Blank Announcement</option>
+        </select>
+      </div>
+      <div class="email-field">
+        <label>Title</label>
+        <input id="ann-title" class="email-input" type="text" placeholder="Announcement title">
+      </div>
+      <div class="email-field">
+        <label>Message</label>
+        <textarea id="ann-message" class="email-textarea" placeholder="Message shown in the app"></textarea>
+      </div>
+      <div class="email-field">
+        <label>Type</label>
+        <select id="ann-type" class="stage3-select" onchange="updateAnnPreview()">
+          <option value="info">Info</option>
+          <option value="success">Success</option>
+          <option value="warning">Warning</option>
+          <option value="danger">Danger</option>
+          <option value="promo">Promo</option>
+          <option value="maintenance">Maintenance</option>
+        </select>
+      </div>
+      <div class="email-field">
+        <label>Status and expiry</label>
+        <div class="stage3-toggle-row">
+          <label><input type="checkbox" id="ann-active" checked onchange="updateAnnPreview()"> Active</label>
+          <label><input type="checkbox" id="ann-use-expiry" onchange="toggleExpiry(this.checked)"> Expires</label>
+          <input type="datetime-local" id="ann-expires" class="email-input" style="max-width:220px;display:none" onchange="updateAnnPreview()">
+        </div>
+      </div>
+      <div class="email-actions">
+        <button class="btn btn-ghost" onclick="updateAnnPreview()">Preview</button>
+        <button class="btn btn-accent" id="ann-save-btn" onclick="saveAnnouncement()">Create announcement</button>
+        <button class="btn btn-ghost" onclick="resetAnnouncementBuilder()">Clear</button>
+      </div>
+    </div>
+    <div class="stage3-preview-card">
+      <div class="stage3-preview-title">Live Preview</div>
+      <div class="stage3-preview-meta">
+        <span class="stage3-pill" id="ann-preview-type">info</span>
+        <span class="stage3-pill" id="ann-preview-status">active</span>
+      </div>
+      <div id="ann-preview" class="announcement-preview-card info">
+        <div class="ann-title">Announcement title</div>
+        <div>Message shown in the app</div>
+      </div>
+    </div>
   </div>
   <div class="table-wrap">
     <table>
@@ -3941,72 +4082,157 @@ async function openMockPurchaseModal(userId, email) {
 // ══════════════════════════════════════════════════════════════════
 const EMAIL_TEMPLATES = {
   welcome: {
-    subject: "Welcome to Tzurah Live! 🎭",
-    body: `Hi {{name}},
+    subject: "Welcome to {{app_name}}",
+    body: `Hi {{display_name}},
 
-Welcome to Tzurah Live! You've received 1 minute of free credits to get started.
+Welcome to {{app_name}}. Your starter credits are ready.
 
-Transform your identity in real time — load a reference image, describe the character, and hit Start.
+Open your dashboard here:
+{{dashboard_url}}
 
-Need more time? Check our credit packs starting at $20.
+If you need help, reply here or contact {{support_email}}.
 
-– The Tzurah Team`
+- The Tzurah Team`
   },
   low_credits: {
     subject: "Your Tzurah credits are running low",
-    body: `Hi {{name}},
+    body: `Hi {{display_name}},
 
 You have {{credits}} credits remaining.
 
-Top up now to keep transforming:
-→ Starter: $20 for 7 mins
-→ Standard: $60 for 22 mins
-→ Pro: $100 for 36 mins
+Top up before your next stream so your session does not stop mid-creation:
+{{dashboard_url}}
 
-– The Tzurah Team`
+- The Tzurah Team`
   },
-  promo: {
-    subject: "🎉 Special offer from Tzurah Live",
-    body: `Hi {{name}},
+  new_feature: {
+    subject: "New in Tzurah Live",
+    body: `Hi {{display_name}},
 
-We have a special offer just for you...
+We just shipped a new Tzurah Live feature for creators.
 
-[Edit this message]
+Open the app, try it in your next session, and send feedback to {{support_email}}.
 
-– The Tzurah Team`
+- The Tzurah Team`
+  },
+  creator_promo: {
+    subject: "Creator credit offer from Tzurah",
+    body: `Hi {{display_name}},
+
+We are running a creator promo for Tzurah Live.
+
+Your current balance is {{credits}} credits. Visit {{dashboard_url}} to add more time.
+
+- The Tzurah Team`
+  },
+  maintenance: {
+    subject: "Scheduled Tzurah Live maintenance",
+    body: `Hi {{display_name}},
+
+Tzurah Live has scheduled maintenance coming up.
+
+We will keep disruption short and post updates in the app.
+
+- The Tzurah Team`
+  },
+  payment_confirmation: {
+    subject: "Your Tzurah credits were added",
+    body: `Hi {{display_name}},
+
+Your payment was received and credits were added to your account.
+
+Current balance: {{credits}} credits
+Dashboard: {{dashboard_url}}
+
+- The Tzurah Team`
+  },
+  winback: {
+    subject: "Your next Tzurah session is waiting",
+    body: `Hi {{display_name}},
+
+It has been a while since your last Tzurah Live session.
+
+Your account is still ready. Open {{dashboard_url}} to continue.
+
+- The Tzurah Team`
+  },
+  blank: {
+    subject: "",
+    body: ""
   }
 };
 
+const EMAIL_GROUP_LABELS = {
+  all_users: "All users",
+  active_users: "Active users",
+  inactive_users: "Inactive users",
+  paid_users: "Paid users",
+  free_users: "Free users",
+  low_credit_users: "Low credit users",
+  zero_credit_users: "Zero credit users",
+  test_email: "Test email"
+};
+
+const EMAIL_SAMPLE = {
+  display_name: "Avery",
+  name: "Avery",
+  credits: "42",
+  email: "avery@example.com",
+  app_name: "Tzurah Live",
+  support_email: "support@tzurah.ai",
+  dashboard_url: "https://tzurah.ai/dashboard"
+};
+
 let emailRecipients = {};
-let emailSelectedGroup = "all";
+let emailSelectedGroup = "all_users";
+let emailLastField = null;
 
 async function loadEmailTab() {
   try {
     const d = await api("/admin/api/email/recipients");
-    emailRecipients = d;
-    const groups = { all: d.all?.length||0, active_this_week: d.active_this_week?.length||0, zero_credits: d.zero_credits?.length||0, low_credits: d.low_credits?.length||0 };
-    document.getElementById("eg-all-count").textContent    = groups.all;
-    document.getElementById("eg-active-count").textContent = groups.active_this_week;
-    document.getElementById("eg-zero-count").textContent   = groups.zero_credits;
-    document.getElementById("eg-low-count").textContent    = groups.low_credits;
+    emailRecipients = {
+      ...d,
+      all_users: d.all_users || d.all || [],
+      active_users: d.active_users || d.active_this_week || [],
+      inactive_users: d.inactive_users || [],
+      paid_users: d.paid_users || [],
+      free_users: d.free_users || [],
+      low_credit_users: d.low_credit_users || d.low_credits || [],
+      zero_credit_users: d.zero_credit_users || d.zero_credits || [],
+      test_email: d.test_email || []
+    };
+    Object.keys(EMAIL_GROUP_LABELS).forEach(key => {
+      const legacyIds = {
+        all_users: "eg-all-count",
+        active_users: "eg-active-count",
+        inactive_users: "eg-zero-count",
+        paid_users: "eg-low-count"
+      };
+      const badge = document.getElementById(`eg-${key.replaceAll("_", "-")}-count`) || document.getElementById(legacyIds[key]);
+      if (badge) badge.textContent = emailRecipients[key]?.length ?? 0;
+    });
     updateEmailSendCount();
   } catch(e) { console.error("loadEmailTab:", e.message); }
+  initEmailComposer();
   loadSentEmails();
 }
 
 function onRecipientGroupChange() {
   const sel = document.querySelector('input[name="email-group"]:checked');
-  emailSelectedGroup = sel ? sel.value : "all";
+  emailSelectedGroup = sel ? sel.value : "all_users";
   // Update selected styling
   document.querySelectorAll(".email-recipient-row").forEach(r => {
     r.classList.toggle("selected", r.querySelector("input").value === emailSelectedGroup);
   });
   updateEmailSendCount();
+  renderEmailPreview();
 }
 
 function updateEmailSendCount() {
-  const list = emailRecipients[emailSelectedGroup] || emailRecipients.all || [];
+  const list = emailRecipients[emailSelectedGroup] || emailRecipients.all_users || [];
   document.getElementById("email-send-count").textContent = list.length;
+  document.getElementById("email-preview-count").textContent = list.length;
+  document.getElementById("email-preview-recipient").textContent = EMAIL_GROUP_LABELS[emailSelectedGroup] || "Recipients";
 }
 
 function applyEmailTemplate(name) {
@@ -4014,18 +4240,60 @@ function applyEmailTemplate(name) {
   if (!tpl) return;
   document.getElementById("email-subject").value = tpl.subject;
   document.getElementById("email-body").value    = tpl.body;
-  document.getElementById("email-preview-box").style.display = "none";
+  renderEmailPreview();
 }
 
 function toggleEmailPreview() {
-  const box  = document.getElementById("email-preview-box");
-  const body = document.getElementById("email-body").value;
-  if (box.style.display === "block") { box.style.display = "none"; return; }
-  box.style.display = "block";
-  box.textContent = body
-    .replace(/{{name}}/g,    "John")
-    .replace(/{{credits}}/g, "5")
-    .replace(/{{email}}/g,   "john@example.com");
+  renderEmailPreview();
+}
+
+function initEmailComposer() {
+  const subject = document.getElementById("email-subject");
+  const body = document.getElementById("email-body");
+  if (subject && !subject.dataset.stage3Bound) {
+    subject.dataset.stage3Bound = "1";
+    subject.addEventListener("input", renderEmailPreview);
+    subject.addEventListener("focus", () => { emailLastField = subject; });
+  }
+  if (body && !body.dataset.stage3Bound) {
+    body.dataset.stage3Bound = "1";
+    body.addEventListener("input", renderEmailPreview);
+    body.addEventListener("focus", () => { emailLastField = body; });
+  }
+  if (!subject.value && !body.value) applyEmailTemplate(document.getElementById("email-template-select")?.value || "welcome");
+  renderEmailPreview();
+}
+
+function personalizeEmailText(text, sample = EMAIL_SAMPLE) {
+  return String(text || "")
+    .replace(/{{display_name}}/g, sample.display_name)
+    .replace(/{{name}}/g, sample.display_name)
+    .replace(/{{credits}}/g, sample.credits)
+    .replace(/{{email}}/g, sample.email)
+    .replace(/{{app_name}}/g, sample.app_name)
+    .replace(/{{support_email}}/g, sample.support_email)
+    .replace(/{{dashboard_url}}/g, sample.dashboard_url);
+}
+
+function renderEmailPreview() {
+  const subject = document.getElementById("email-subject")?.value || "";
+  const body = document.getElementById("email-body")?.value || "";
+  document.getElementById("email-preview-subject").textContent = personalizeEmailText(subject) || "Subject preview";
+  document.getElementById("email-preview-box").textContent = personalizeEmailText(body) || "Body preview";
+}
+
+function insertEmailVariable(token) {
+  const subject = document.getElementById("email-subject");
+  const body = document.getElementById("email-body");
+  const target = emailLastField || body || subject;
+  if (!target) return;
+  const start = target.selectionStart ?? target.value.length;
+  const end = target.selectionEnd ?? target.value.length;
+  target.value = target.value.slice(0, start) + token + target.value.slice(end);
+  target.focus();
+  const pos = start + token.length;
+  target.setSelectionRange?.(pos, pos);
+  renderEmailPreview();
 }
 
 async function sendTestEmail() {
@@ -4034,7 +4302,7 @@ async function sendTestEmail() {
   if (!subject || !body) { toast("Subject and body required", "error"); return; }
   try {
     const d = await apiPost("/admin/api/email/send", {
-      recipients: [{ email: "admin", name: "Admin" }],
+      recipients: [{ email: "admin", display_name: "Admin", credits_balance: 0 }],
       subject, body, test_only: true
     });
     if (d.sent > 0) toast("✓ Test email sent to admin", "success");
@@ -4045,7 +4313,7 @@ async function sendTestEmail() {
 async function sendEmail() {
   const subject    = document.getElementById("email-subject").value.trim();
   const body       = document.getElementById("email-body").value.trim();
-  const recipients = emailRecipients[emailSelectedGroup] || emailRecipients.all || [];
+  const recipients = emailRecipients[emailSelectedGroup] || emailRecipients.all_users || [];
   if (!subject || !body) { toast("Subject and body required", "error"); return; }
   if (!recipients.length) { toast("No recipients in selected group", "error"); return; }
 
@@ -4056,7 +4324,7 @@ async function sendEmail() {
       const btn = document.getElementById("btn-send-email");
       const restore = btnLoading(btn, "Sending…");
       try {
-        const d = await apiPost("/admin/api/email/send", { recipients, subject, body });
+        const d = await apiPost("/admin/api/email/send", { recipients, subject, body, recipient_group: emailSelectedGroup });
         toast(`✓ Sent ${d.sent} emails${d.failed?`, ${d.failed} failed`:""}`, d.failed?"warning":"success");
         loadSentEmails();
       } catch(e) {
@@ -5415,22 +5683,47 @@ async function archivePack(id, restore = false) {
 // ══════════════════════════════════════════════════════════════════
 // C3: ANNOUNCEMENTS
 // ══════════════════════════════════════════════════════════════════
+const ANNOUNCEMENT_TEMPLATES = {
+  welcome: { title: "Welcome to Tzurah Live", message: "Welcome in. Your creator tools and credits are ready.", type: "info" },
+  new_feature: { title: "New feature available", message: "A new Tzurah Live feature is now available in the app.", type: "success" },
+  maintenance: { title: "Scheduled maintenance", message: "Tzurah Live will have brief scheduled maintenance soon.", type: "maintenance" },
+  service_issue: { title: "Service issue", message: "We are investigating a service issue and will post updates here.", type: "danger" },
+  promo: { title: "Creator credit offer", message: "Limited-time credit packs are available for creator sessions.", type: "promo" },
+  credits: { title: "Credits reminder", message: "Check your credit balance before starting a long session.", type: "warning" },
+  version: { title: "Version update", message: "A new Tzurah Live update is available with stability improvements.", type: "info" },
+  blank: { title: "", message: "", type: "info" }
+};
+
+const ANN_TYPE_META = {
+  info: { label: "info", color: "#6366f1" },
+  success: { label: "success", color: "#22c55e" },
+  warning: { label: "warning", color: "#f59e0b" },
+  danger: { label: "danger", color: "#ef4444" },
+  error: { label: "danger", color: "#ef4444" },
+  promo: { label: "promo", color: "#a855f7" },
+  maintenance: { label: "maintenance", color: "#06b6d4" }
+};
+
+let announcementsCache = [];
+
 async function loadAnnouncements() {
   const res = await adminFetch('/admin/api/announcements');
   if (!res) return;
   const { announcements } = await res.json();
+  announcementsCache = announcements || [];
   renderAnnouncements(announcements);
+  initAnnouncementBuilder();
 }
 
 function renderAnnouncements(items) {
   const tbody = document.getElementById('announcements-tbody');
   if (!tbody) return;
   if (!items?.length) { tbody.innerHTML = `<tr><td colspan="5" class="td-empty">No announcements yet</td></tr>`; return; }
-  const typeColors = { info: '#6366f1', warning: '#f59e0b', error: '#ef4444', success: '#22c55e' };
-  const typeIcons  = { info: 'ℹ️', warning: '⚠️', error: '🚫', success: '✅' };
+  const typeColors = Object.fromEntries(Object.entries(ANN_TYPE_META).map(([k, v]) => [k, v.color]));
+  const typeIcons  = { info: 'Info', warning: 'Warn', error: 'Danger', danger: 'Danger', success: 'Success', promo: 'Promo', maintenance: 'Maint' };
   tbody.innerHTML = items.map(a => {
     const active = a.is_active !== false;
-    const toggleLabel = active ? '⏸ Disable' : '▶ Enable';
+    const toggleLabel = active ? 'Disable' : 'Enable';
     const toggleColor = active ? '#f59e0b' : '#22c55e';
     const statusDot   = active ? 'dot-green' : 'dot-grey';
     const statusText  = active ? 'Active' : '<span style="color:var(--muted)">Disabled</span>';
@@ -5440,6 +5733,7 @@ function renderAnnouncements(items) {
       <td><span class="status-dot ${statusDot}"></span> ${statusText}</td>
       <td style="color:var(--muted);font-size:0.78rem">${a.expires_at ? new Date(a.expires_at).toLocaleDateString() : 'Never'}</td>
       <td style="display:flex;gap:6px">
+        <button class="btn btn-xs btn-ghost" onclick="editAnnouncement('${a.id}')">Edit</button>
         <button class="btn btn-xs" style="border:1px solid ${toggleColor};color:${toggleColor};background:transparent"
           onclick="toggleAnnouncement('${a.id}', ${!active})">${toggleLabel}</button>
         <button class="btn btn-xs btn-ghost" onclick="deleteAnnouncement('${a.id}')">Delete</button>
@@ -5509,6 +5803,102 @@ async function deleteAnnouncement(id) {
   if (!confirm('Delete this announcement?')) return;
   const res = await adminFetch(`/admin/api/announcements/${id}`, { method: 'DELETE' });
   if (res?.ok) { toast('Announcement deleted ✓', 'success'); loadAnnouncements(); }
+}
+
+function showNewAnnouncementModal() { resetAnnouncementBuilder(); }
+
+function toggleExpiry(show) {
+  const el = document.getElementById('ann-expires');
+  if (el) el.style.display = show ? 'block' : 'none';
+  updateAnnPreview();
+}
+
+function updateAnnPreview() {
+  const title = document.getElementById('ann-title')?.value || 'Announcement title';
+  const msg = document.getElementById('ann-message')?.value || 'Message shown in the app';
+  const type = document.getElementById('ann-type')?.value || 'info';
+  const preview = document.getElementById('ann-preview');
+  if (preview) {
+    preview.className = `announcement-preview-card ${type === "error" ? "danger" : type}`;
+    preview.innerHTML = `<div class="ann-title">${esc(title)}</div><div>${esc(msg)}</div>`;
+  }
+  const typeEl = document.getElementById('ann-preview-type');
+  const statusEl = document.getElementById('ann-preview-status');
+  if (typeEl) typeEl.textContent = ANN_TYPE_META[type]?.label || type;
+  if (statusEl) statusEl.textContent = document.getElementById('ann-active')?.checked ? 'active' : 'inactive';
+}
+
+function initAnnouncementBuilder() {
+  ['ann-title', 'ann-message', 'ann-type', 'ann-active', 'ann-use-expiry', 'ann-expires'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && !el.dataset.stage3Bound) {
+      el.dataset.stage3Bound = "1";
+      el.addEventListener("input", updateAnnPreview);
+      el.addEventListener("change", updateAnnPreview);
+    }
+  });
+  if (!document.getElementById('ann-title')?.value && !document.getElementById('ann-message')?.value) {
+    applyAnnouncementTemplate(document.getElementById('ann-template-select')?.value || 'welcome');
+  }
+  updateAnnPreview();
+}
+
+function applyAnnouncementTemplate(key) {
+  const tpl = ANNOUNCEMENT_TEMPLATES[key] || ANNOUNCEMENT_TEMPLATES.blank;
+  document.getElementById('ann-title').value = tpl.title;
+  document.getElementById('ann-message').value = tpl.message;
+  document.getElementById('ann-type').value = tpl.type;
+  updateAnnPreview();
+}
+
+function resetAnnouncementBuilder() {
+  document.getElementById('ann-edit-id').value = "";
+  document.getElementById('ann-save-btn').textContent = "Create announcement";
+  document.getElementById('ann-template-select').value = "welcome";
+  document.getElementById('ann-active').checked = true;
+  document.getElementById('ann-use-expiry').checked = false;
+  document.getElementById('ann-expires').value = "";
+  toggleExpiry(false);
+  applyAnnouncementTemplate('welcome');
+}
+
+function editAnnouncement(id) {
+  const ann = announcementsCache.find(a => String(a.id) === String(id));
+  if (!ann) return;
+  document.getElementById('ann-edit-id').value = ann.id;
+  document.getElementById('ann-save-btn').textContent = "Update announcement";
+  document.getElementById('ann-title').value = ann.title || "";
+  document.getElementById('ann-message').value = ann.message || "";
+  document.getElementById('ann-type').value = ANN_TYPE_META[ann.type] ? ann.type : "info";
+  document.getElementById('ann-active').checked = ann.is_active !== false;
+  document.getElementById('ann-use-expiry').checked = !!ann.expires_at;
+  document.getElementById('ann-expires').value = ann.expires_at ? new Date(ann.expires_at).toISOString().slice(0, 16) : "";
+  toggleExpiry(!!ann.expires_at);
+  updateAnnPreview();
+  toast("Announcement loaded for editing", "info");
+}
+
+async function saveAnnouncement() {
+  const id = document.getElementById('ann-edit-id').value;
+  const title = document.getElementById('ann-title').value.trim();
+  const message = document.getElementById('ann-message').value.trim();
+  const type = document.getElementById('ann-type').value;
+  const is_active = document.getElementById('ann-active').checked;
+  const useExpiry = document.getElementById('ann-use-expiry').checked;
+  const expires_at = useExpiry ? (document.getElementById('ann-expires').value || null) : null;
+  if (!title || !message) { toast('Title and message required', 'error'); return; }
+  const res = await adminFetch(id ? `/admin/api/announcements/${id}` : '/admin/api/announcements', {
+    method: id ? 'PATCH' : 'POST',
+    body: JSON.stringify({ title, message, type, is_active, expires_at })
+  });
+  if (res?.ok) {
+    toast(id ? 'Announcement updated ✓' : 'Announcement created ✓', 'success');
+    resetAnnouncementBuilder();
+    loadAnnouncements();
+  } else {
+    const err = await res?.json().catch(() => ({}));
+    toast(err?.error || 'Failed to save announcement', 'error');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════
