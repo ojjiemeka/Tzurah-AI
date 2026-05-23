@@ -314,6 +314,120 @@ function validateUUID(str) {
 }
 
 // ── CORS ───────────────────────────────────────────────────────────
+// Billing Phase 3A shadow protection. This records protected billing
+// calculations when the SQL migration is present, but never changes live
+// balance deduction behavior.
+const BILLING_BURN_RATE = 2.18;
+const BILLING_MAX_SYNC_SECONDS = 10 * 60;
+const BILLING_MAX_SYNC_CREDITS = BILLING_BURN_RATE * BILLING_MAX_SYNC_SECONDS;
+let _billingShadowRpcAvailable = null;
+
+function finiteNonNegativeNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function clampBillingNumber(value, max) {
+  if (!finiteNonNegativeNumber(value)) return null;
+  return Math.min(value, max);
+}
+
+function makeLegacyBillingSyncId(source) {
+  return `legacy-${source}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function resolveActiveBillingSessionId(userId) {
+  if (!userId || !validateUUID(userId)) return null;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("sessions")
+      .select("session_id")
+      .eq("user_id", userId)
+      .eq("is_active", true)
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("[BILLING SHADOW] Session lookup failed:", error.message);
+      return null;
+    }
+    return data?.session_id || null;
+  } catch (err) {
+    console.warn("[BILLING SHADOW] Session lookup error:", err.message);
+    return null;
+  }
+}
+
+function isMissingBillingMigrationError(error) {
+  const msg = String(error?.message || "").toLowerCase();
+  return msg.includes("could not find the function") ||
+         msg.includes("schema cache") ||
+         msg.includes("billing_syncs") ||
+         msg.includes("billing_reconciliation_events") ||
+         msg.includes("does not exist");
+}
+
+async function recordBillingShadowSync({
+  userId,
+  sessionId,
+  syncId,
+  syncSequence,
+  durationSecs,
+  creditsRequested,
+  clientTs,
+  source,
+  legacyBalanceAfter,
+}) {
+  if (_billingShadowRpcAvailable === false) return null;
+  if (!userId || !validateUUID(userId)) return null;
+
+  const safeDuration = clampBillingNumber(durationSecs, BILLING_MAX_SYNC_SECONDS);
+  const safeCredits = clampBillingNumber(creditsRequested, BILLING_MAX_SYNC_CREDITS);
+  if (safeDuration === null || safeCredits === null) {
+    console.warn("[BILLING SHADOW] Invalid numeric input skipped:", { source, durationSecs, creditsRequested });
+    return null;
+  }
+
+  const resolvedSessionId = sessionId || await resolveActiveBillingSessionId(userId);
+  if (!resolvedSessionId) {
+    console.warn("[BILLING SHADOW] No active session_id for user:", userId);
+    return null;
+  }
+
+  try {
+    const { data, error } = await supabaseAdmin.rpc("protected_billing_sync", {
+      p_user_id: userId,
+      p_session_id: resolvedSessionId,
+      p_sync_id: syncId || makeLegacyBillingSyncId(source || "deduct"),
+      p_sync_sequence: Number.isInteger(syncSequence) ? syncSequence : null,
+      p_duration_secs: safeDuration,
+      p_credits_requested: safeCredits,
+      p_client_ts: clientTs || null,
+      p_shadow_only: true,
+      p_source: source || "legacy",
+      p_legacy_balance_after: finiteNonNegativeNumber(legacyBalanceAfter) ? legacyBalanceAfter : null,
+    });
+
+    if (error) {
+      if (isMissingBillingMigrationError(error)) {
+        _billingShadowRpcAvailable = false;
+        console.warn("[BILLING SHADOW] RPC unavailable. Run billing-protection-phase3a.sql to enable shadow logs.");
+        return null;
+      }
+      console.warn("[BILLING SHADOW] RPC error:", error.message);
+      return null;
+    }
+
+    _billingShadowRpcAvailable = true;
+    if (data?.duplicate) console.warn("[BILLING SHADOW] Duplicate sync detected:", data);
+    else if (data?.status && data.status !== "shadow_ok") console.warn("[BILLING SHADOW] Shadow warning:", data);
+    return data;
+  } catch (err) {
+    console.warn("[BILLING SHADOW] Non-fatal error:", err.message);
+    return null;
+  }
+}
+
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:4000",
@@ -504,7 +618,7 @@ app.post("/internal/bust-token-cache", (req, res) => {
  * Body: { credits: number, session_seconds: number }
  */
 app.post("/credits/deduct", requireAuth, async (req, res) => {
-  const { credits, session_seconds } = req.body || {};
+  const { credits, session_seconds, session_id, sync_id, sync_sequence, client_ts } = req.body || {};
 
   console.log("[DEDUCT] user:", req.userId, "credits:", credits, "seconds:", session_seconds);
 
@@ -530,6 +644,18 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
   const newBalance      = Math.max(0, profile.credits - credits);
   const newTotalUsed    = (profile.total_credits_used || 0) + credits;
 
+  await recordBillingShadowSync({
+    userId: req.userId,
+    sessionId: session_id || null,
+    syncId: sync_id || null,
+    syncSequence: sync_sequence,
+    durationSecs: Number(session_seconds) || 0,
+    creditsRequested: credits,
+    clientTs: client_ts || null,
+    source: "credits_deduct",
+    legacyBalanceAfter: newBalance,
+  });
+
   console.log("[DEDUCT] updating balance:", profile.credits, "→", newBalance);
 
   const { error: updateErr } = await supabaseAdmin
@@ -547,21 +673,22 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
 
   if (session_seconds && session_seconds > 0) {
     const now = new Date().toISOString();
-    await supabaseAdmin.from("usage").insert({
+    const { error: usageInsertErr } = await supabaseAdmin.from("usage").insert({
       user_id:         req.userId,
       session_seconds: session_seconds,
       credits_used:    credits,
       ended_at:        now,
       created_at:      now,
-    }).then(() => {}).catch((e) => console.warn("[DEDUCT] usage insert error:", e.message));
+    });
+    if (usageInsertErr) console.warn("[DEDUCT] usage insert error:", usageInsertErr.message);
 
     // Track last sync time so /session/end can deduct only the remaining unsync'd period
-    await supabaseAdmin
+    const { error: sessionSyncErr } = await supabaseAdmin
       .from("sessions")
       .update({ last_sync_at: now })
       .eq("user_id", req.userId)
-      .eq("is_active", true)
-      .then(() => {}).catch(() => {});
+      .eq("is_active", true);
+    if (sessionSyncErr) console.warn("[DEDUCT] session last_sync_at update error:", sessionSyncErr.message);
   }
 
   console.log("[DEDUCT] success — new balance:", newBalance);
@@ -573,7 +700,7 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
  * Body: { usage_logs: [{ session_seconds, credits_used, started_at, ended_at }] }
  */
 app.post("/credits/sync", requireAuth, async (req, res) => {
-  const { usage_logs } = req.body || {};
+  const { usage_logs, session_id, sync_id, sync_sequence, client_ts } = req.body || {};
 
   if (Array.isArray(usage_logs) && usage_logs.length > 0) {
     const rows = usage_logs.map((log) => ({
@@ -585,17 +712,32 @@ app.post("/credits/sync", requireAuth, async (req, res) => {
       created_at:      new Date().toISOString(),
     }));
 
-    await supabaseAdmin.from("usage").insert(rows).then(() => {}).catch(() => {});
+    const { error: usageInsertErr } = await supabaseAdmin.from("usage").insert(rows);
+    if (usageInsertErr) console.warn("[SYNC] usage insert error:", usageInsertErr.message);
 
     const totalCredits = usage_logs.reduce((s, l) => s + (l.credits_used || 0), 0);
+    const totalSeconds = usage_logs.reduce((s, l) => s + (l.session_seconds || 0), 0);
 
     // Fetch and deduct atomically
     const { data: profile } = await supabaseAdmin
       .from("profiles").select("credits").eq("id", req.userId).single();
 
     if (profile) {
+      const legacyBalanceAfter = Math.max(0, profile.credits - totalCredits);
+      await recordBillingShadowSync({
+        userId: req.userId,
+        sessionId: session_id || null,
+        syncId: sync_id || null,
+        syncSequence: sync_sequence,
+        durationSecs: Number(totalSeconds) || 0,
+        creditsRequested: Number(totalCredits) || 0,
+        clientTs: client_ts || null,
+        source: "credits_sync",
+        legacyBalanceAfter,
+      });
+
       await supabaseAdmin.from("profiles")
-        .update({ credits: Math.max(0, profile.credits - totalCredits) })
+        .update({ credits: legacyBalanceAfter })
         .eq("id", req.userId);
     }
   }
