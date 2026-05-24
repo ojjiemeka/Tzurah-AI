@@ -255,6 +255,45 @@ main { padding:20px; max-width:1400px; margin:0 auto; }
   max-width:420px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   color:var(--muted);
 }
+.recon-analytics-grid {
+  display:grid; grid-template-columns:220px 1fr 260px; gap:12px; margin:12px 0;
+}
+.integrity-score-card,
+.billing-mode-card,
+.trend-card {
+  background:var(--bg); border:1px solid var(--border); border-radius:var(--r); padding:12px;
+  min-width:0;
+}
+.integrity-score-value { font-size:34px; font-weight:900; line-height:1; }
+.integrity-score-value.green { color:var(--success); }
+.integrity-score-value.amber { color:var(--warning); }
+.integrity-score-value.red { color:var(--danger); }
+.trend-bars { display:flex; align-items:flex-end; gap:5px; height:86px; padding-top:8px; }
+.trend-bar {
+  flex:1; min-width:8px; border-radius:4px 4px 0 0;
+  background:linear-gradient(180deg,var(--accent),var(--electric));
+  opacity:.82;
+}
+.top-anomaly-list { display:grid; gap:6px; margin-top:8px; }
+.top-anomaly-row { display:flex; justify-content:space-between; gap:10px; font-size:11px; color:var(--text2); }
+.billing-mode-pill {
+  display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px;
+  border:1px solid var(--border); font-size:11px; font-weight:700; color:var(--text);
+}
+.billing-mode-pill.legacy { background:rgba(34,197,94,.12); color:#4ade80; border-color:rgba(34,197,94,.35); }
+.billing-mode-pill.live { background:rgba(239,68,68,.14); color:#f87171; border-color:rgba(239,68,68,.35); }
+.billing-mode-controls { display:grid; gap:7px; margin-top:10px; }
+.billing-mode-controls label { display:flex; align-items:center; gap:7px; font-size:11px; color:var(--text2); }
+.mini-field-row { display:flex; gap:6px; margin-top:8px; }
+.mini-field-row input { min-width:0; flex:1; }
+@media(max-width:1024px) {
+  .recon-analytics-grid { grid-template-columns:1fr 1fr; }
+  .billing-mode-card { grid-column:1 / -1; }
+}
+@media(max-width:640px) {
+  .recon-analytics-grid { grid-template-columns:1fr; }
+  .mini-field-row { flex-direction:column; }
+}
 
 /* ── Two-col layout ────────────────────────────────────────────── */
 .two-col { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
@@ -1601,6 +1640,12 @@ kbd {
         <option value="csv">CSV</option>
         <option value="txt">TXT</option>
       </select>
+      <select class="export-select" onchange="exportReconciliationAnalytics(this.value); this.value='';">
+        <option value="">Export analytics</option>
+        <option value="json">JSON</option>
+        <option value="md">Markdown</option>
+        <option value="csv">CSV</option>
+      </select>
       <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="loadReconciliation()">Refresh</button>
     </div>
     <div class="panel-body">
@@ -1610,6 +1655,40 @@ kbd {
         <div class="recon-metric"><div class="rval">--</div><div class="rlbl">Critical</div></div>
         <div class="recon-metric"><div class="rval">--</div><div class="rlbl">High</div></div>
         <div class="recon-metric"><div class="rval">--</div><div class="rlbl">Warnings</div></div>
+      </div>
+      <div class="recon-analytics-grid">
+        <div class="integrity-score-card" id="integrity-score-card">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Integrity Score</div>
+          <div class="integrity-score-value" id="integrity-score-value">--</div>
+          <div id="integrity-score-label" style="font-size:12px;color:var(--muted);margin-top:4px">Loading analytics...</div>
+        </div>
+        <div class="trend-card">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Anomaly Trend</div>
+            <span id="analytics-window-label" style="font-size:10px;color:var(--muted);margin-left:auto">7 days</span>
+          </div>
+          <div class="trend-bars" id="anomaly-trend-bars"></div>
+          <div class="top-anomaly-list" id="top-anomaly-list"></div>
+        </div>
+        <div class="billing-mode-card">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Protected Billing Framework</div>
+            <span id="billing-mode-pill" class="billing-mode-pill legacy" style="margin-left:auto">legacy_only</span>
+          </div>
+          <div id="billing-mode-note" style="font-size:11px;color:var(--muted);margin-top:8px">Legacy billing remains authoritative.</div>
+          <div id="billing-mode-controls" class="billing-mode-controls">
+            <label><input type="checkbox" id="flag-shadow-compare" onchange="updateProtectedBillingFlags()"> Shadow compare</label>
+            <label><input type="checkbox" id="flag-test-users" onchange="updateProtectedBillingFlags()"> Enable test-user framework</label>
+            <label><input type="checkbox" id="flag-global-live" onchange="updateProtectedBillingFlags()"> Global protected live (do not enable yet)</label>
+            <label><input type="checkbox" id="flag-force-legacy" onchange="updateProtectedBillingFlags()"> Force legacy billing</label>
+            <div class="mini-field-row">
+              <input id="protected-user-id" class="modal-input" style="padding:5px 8px;font-size:11px" placeholder="Test user UUID">
+              <button class="btn btn-ghost btn-xs" onclick="setProtectedBillingTestUser(true)">Enable</button>
+              <button class="btn btn-ghost btn-xs" onclick="setProtectedBillingTestUser(false)">Disable</button>
+            </div>
+            <button class="btn btn-red btn-sm" onclick="forceLegacyBilling()">Force Legacy Billing</button>
+          </div>
+        </div>
       </div>
       <div class="table-wrap" style="margin-bottom:0">
         <table>
@@ -3692,6 +3771,154 @@ function exportReconciliationRows(format) {
   });
 }
 
+function renderIntegrityScore(integrity) {
+  const value = document.getElementById("integrity-score-value");
+  const label = document.getElementById("integrity-score-label");
+  if (!value || !label) return;
+  value.className = `integrity-score-value ${integrity?.color || ""}`;
+  value.textContent = integrity?.score ?? "--";
+  label.textContent = `${integrity?.label || "unknown"} - ${integrity?.explanation || ""}`;
+}
+
+function renderTrendBars(trends) {
+  const wrap = document.getElementById("anomaly-trend-bars");
+  if (!wrap) return;
+  const entries = Object.entries(trends?.daily || {}).sort((a, b) => a[0].localeCompare(b[0])).slice(-7);
+  const max = Math.max(1, ...entries.map(([, count]) => Number(count) || 0));
+  wrap.innerHTML = entries.length
+    ? entries.map(([day, count]) => `<div class="trend-bar" title="${esc(day)}: ${fmtN(count)}" style="height:${Math.max(6, Math.round((count / max) * 82))}px"></div>`).join("")
+    : `<div style="color:var(--muted);font-size:12px">No trend data.</div>`;
+}
+
+function renderTopAnomalies(trends) {
+  const wrap = document.getElementById("top-anomaly-list");
+  if (!wrap) return;
+  const rows = trends?.top_types || [];
+  wrap.innerHTML = rows.length
+    ? rows.slice(0, 5).map(row => `<div class="top-anomaly-row"><span>${esc(row.type)}</span><strong>${fmtN(row.count)}</strong></div>`).join("")
+    : `<div class="top-anomaly-row"><span>No active anomaly types</span><strong>0</strong></div>`;
+}
+
+function renderBillingCutoverStatus(status) {
+  window._billingCutoverStatus = status || {};
+  const pill = document.getElementById("billing-mode-pill");
+  const note = document.getElementById("billing-mode-note");
+  if (pill) {
+    const live = String(status?.mode || "").startsWith("protected_live");
+    pill.className = `billing-mode-pill ${live ? "live" : "legacy"}`;
+    pill.textContent = status?.mode || "legacy_only";
+  }
+  if (note) {
+    note.textContent = status?.note || "Legacy billing remains authoritative.";
+  }
+  const flags = status?.flags || {};
+  const set = (id, value) => { const el = document.getElementById(id); if (el) el.checked = value === true; };
+  set("flag-shadow-compare", flags.protected_billing_shadow_compare);
+  set("flag-test-users", flags.enable_protected_billing_test_users);
+  set("flag-global-live", flags.enable_protected_billing_global);
+  set("flag-force-legacy", flags.protected_billing_force_legacy);
+  const controls = document.getElementById("billing-mode-controls");
+  if (controls) controls.style.display = window._adminRole === "super_admin" ? "grid" : "none";
+}
+
+async function loadReconciliationAnalytics() {
+  try {
+    const [analytics, trends, cutover] = await Promise.all([
+      api("/admin/api/reconciliation/analytics"),
+      api("/admin/api/reconciliation/trends"),
+      api("/admin/api/billing-cutover/status"),
+    ]);
+    window._reconAnalytics = analytics;
+    window._reconTrends = trends;
+    renderIntegrityScore(analytics?.integrity);
+    renderTrendBars(trends?.trends);
+    renderTopAnomalies(trends?.trends);
+    renderBillingCutoverStatus(cutover);
+    const lbl = document.getElementById("analytics-window-label");
+    if (lbl) lbl.textContent = `${analytics?.window_days || 7} days`;
+  } catch (e) {
+    console.warn("loadReconciliationAnalytics:", e.message);
+    renderIntegrityScore({ score: "--", label: "unavailable", color: "", explanation: e.message });
+  }
+}
+
+function analyticsExportRows() {
+  const analytics = window._reconAnalytics?.analytics || {};
+  const totals = analytics.totals || {};
+  const rows = Object.entries(totals).map(([metric, value]) => ({ section: "totals", metric, value }));
+  for (const [type, count] of Object.entries(analytics.counts_by_type || {})) rows.push({ section: "type", metric: type, value: count });
+  for (const [scenario, stat] of Object.entries(analytics.scenario_stats || {})) rows.push({ section: "soak_scenario", metric: scenario, value: JSON.stringify(stat) });
+  rows.push({ section: "integrity", metric: "score", value: window._reconAnalytics?.integrity?.score ?? "" });
+  rows.push({ section: "integrity", metric: "label", value: window._reconAnalytics?.integrity?.label ?? "" });
+  return rows;
+}
+
+function exportReconciliationAnalytics(format) {
+  if (!format) return;
+  const rows = analyticsExportRows();
+  AdminExport.exportRows(rows, {
+    format,
+    title: "Tzurah Reconciliation Analytics Export",
+    filename: `tzurah-reconciliation-analytics-${AdminExport.stamp()}`,
+    metadata: {
+      integrity_score: window._reconAnalytics?.integrity?.score ?? null,
+      integrity_label: window._reconAnalytics?.integrity?.label ?? null,
+      billing_mode: window._billingCutoverStatus?.mode || "legacy_only",
+      legacy_authoritative: window._billingCutoverStatus?.legacy_authoritative !== false,
+    },
+    columns: ["section", "metric", "value"],
+  });
+}
+
+async function updateProtectedBillingFlags() {
+  if (window._adminRole !== "super_admin") return toast("Super admin required", "error");
+  const flags = {
+    protected_billing_shadow_compare: document.getElementById("flag-shadow-compare")?.checked === true,
+    enable_protected_billing_test_users: document.getElementById("flag-test-users")?.checked === true,
+    enable_protected_billing_global: document.getElementById("flag-global-live")?.checked === true,
+    protected_billing_force_legacy: document.getElementById("flag-force-legacy")?.checked === true,
+  };
+  try {
+    const data = await apiPost("/admin/api/billing-cutover/flags", { flags });
+    renderBillingCutoverStatus(data.status);
+    toast("Billing framework flags updated", "success");
+  } catch (e) {
+    toast("Flag update failed: " + e.message, "error");
+    loadReconciliationAnalytics();
+  }
+}
+
+async function setProtectedBillingTestUser(enabled) {
+  if (window._adminRole !== "super_admin") return toast("Super admin required", "error");
+  const input = document.getElementById("protected-user-id");
+  const userId = input?.value?.trim();
+  if (!isValidUuid(userId)) return toast("Enter a valid user UUID", "error");
+  try {
+    const data = await apiPost("/admin/api/billing-cutover/test-users", { user_id: userId, enabled });
+    renderBillingCutoverStatus(data.status);
+    toast(enabled ? "Test user enabled" : "Test user disabled", "success");
+  } catch (e) {
+    toast("Test user update failed: " + e.message, "error");
+  }
+}
+
+async function forceLegacyBilling() {
+  if (window._adminRole !== "super_admin") return toast("Super admin required", "error");
+  const confirmed = await showModalConfirm("Force all billing mode resolution back to legacy? No restart required.", {
+    title: "Force Legacy Billing",
+    confirmLabel: "Force Legacy",
+    variant: "danger",
+  });
+  if (!confirmed) return;
+  try {
+    const data = await apiPost("/admin/api/billing-cutover/force-legacy", { enabled: true });
+    renderBillingCutoverStatus(data.status);
+    toast("Legacy billing forced", "success");
+  } catch (e) {
+    toast("Rollback failed: " + e.message, "error");
+  }
+}
+
 async function resolveReconEvent(id) {
   if (!id) return;
   const note = await showModalPrompt("Resolution note (optional):", {
@@ -4093,6 +4320,7 @@ async function loadReconciliation() {
     window._reconLastData = data;
     renderReconMetrics(data);
     renderReconEvents(data.latest || []);
+    loadReconciliationAnalytics();
     const updated = document.getElementById("recon-updated");
     if (updated) updated.textContent = `Updated ${new Date().toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })}`;
     if (status) {

@@ -2943,6 +2943,182 @@ app.get("/admin/api/decart-log", adminAuth, async (_req, res) => {
 
 // ── Admin: recent activity feed ───────────────────────────────────
 // GET /admin/api/reconciliation/summary - lightweight billing anomaly summary
+const PROTECTED_BILLING_FLAGS = [
+  "enable_protected_billing_global",
+  "enable_protected_billing_test_users",
+  "protected_billing_shadow_compare",
+  "protected_billing_force_legacy",
+];
+
+const PROTECTED_BILLING_ALLOWLIST_SETTING = "protected_billing_test_users";
+
+function isTestModeEvent(event) {
+  return event?.details?.test_mode === true || event?.details?.test_mode === "true";
+}
+
+function countBy(rows, keyFn) {
+  const out = {};
+  for (const row of rows || []) {
+    const key = keyFn(row) || "unknown";
+    out[key] = (out[key] || 0) + 1;
+  }
+  return out;
+}
+
+function isoBucket(ts, granularity = "day") {
+  const d = new Date(ts || Date.now());
+  if (!Number.isFinite(d.getTime())) return "unknown";
+  if (granularity === "hour") return d.toISOString().slice(0, 13) + ":00Z";
+  return d.toISOString().slice(0, 10);
+}
+
+async function getRecentReconciliationRows(days = 7, includeResolved = false) {
+  let query = supabaseAdmin
+    .from("billing_reconciliation_events")
+    .select("id,type,severity,details,session_id,user_id,created_at,resolved,auto_resolved")
+    .gte("created_at", new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString())
+    .order("created_at", { ascending: false })
+    .limit(5000);
+  if (!includeResolved) query = query.or("resolved.is.false,resolved.is.null");
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+async function getRecentBillingSyncRows(days = 7) {
+  const { data, error } = await supabaseAdmin
+    .from("billing_syncs")
+    .select("id,user_id,session_id,sync_id,sync_sequence,source,duration_secs,credits_requested,credits_expected,credits_deducted,status,shadow_only,created_at")
+    .gte("created_at", new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString())
+    .order("created_at", { ascending: false })
+    .limit(5000);
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
+function buildReconciliationAnalytics({ events = [], syncs = [] }) {
+  const realEvents = events.filter(e => !isTestModeEvent(e));
+  const testEvents = events.filter(isTestModeEvent);
+  const severeTypes = new Set(["billing_rounding_drift_severe", "balance_drift_severe", "decart_billing_mismatch_severe"]);
+  const driftSyncs = syncs.filter(s => Math.abs(Number(s.credits_requested || 0) - Number(s.credits_expected || 0)) >= 0.5);
+  const severeDriftSyncs = syncs.filter(s => Math.abs(Number(s.credits_requested || 0) - Number(s.credits_expected || 0)) >= 2);
+  const scenarioStats = {};
+  for (const event of testEvents) {
+    const scenario = event.details?.scenario || "unknown";
+    if (!scenarioStats[scenario]) scenarioStats[scenario] = { runs: 0, events: 0, warnings: 0, high: 0, critical: 0 };
+    scenarioStats[scenario].events += 1;
+    if (event.type === "soak_test_completed") scenarioStats[scenario].runs += 1;
+    if (event.severity === "warning") scenarioStats[scenario].warnings += 1;
+    if (event.severity === "high") scenarioStats[scenario].high += 1;
+    if (event.severity === "critical") scenarioStats[scenario].critical += 1;
+  }
+  return {
+    totals: {
+      events: events.length,
+      real_events: realEvents.length,
+      test_events: testEvents.length,
+      billing_syncs: syncs.length,
+      severe_events: realEvents.filter(e => e.severity === "high" || e.severity === "critical" || severeTypes.has(e.type)).length,
+      critical_events: realEvents.filter(e => e.severity === "critical").length,
+      duplicate_sync_events: realEvents.filter(e => e.type === "duplicate_sync_id_detected").length,
+      missing_final_sync: realEvents.filter(e => e.type === "missing_final_sync").length,
+      stale_sessions: realEvents.filter(e => e.type === "stale_session_detected").length,
+      invalid_session_attempts: realEvents.filter(e => /invalid|killed|replaced|inactive|stale/.test(String(e.type || ""))).length,
+      drift_warning_syncs: driftSyncs.length,
+      drift_severe_syncs: severeDriftSyncs.length,
+      soak_runs: testEvents.filter(e => e.type === "soak_test_completed").length,
+    },
+    counts_by_type: countBy(realEvents, e => e.type),
+    counts_by_severity: countBy(realEvents, e => e.severity || "info"),
+    scenario_stats: scenarioStats,
+    drift: {
+      average_abs_drift: syncs.length ? Number((syncs.reduce((sum, s) => sum + Math.abs(Number(s.credits_requested || 0) - Number(s.credits_expected || 0)), 0) / syncs.length).toFixed(3)) : 0,
+      warning_count: driftSyncs.length,
+      severe_count: severeDriftSyncs.length,
+    },
+  };
+}
+
+function calculateBillingIntegrityScore(analytics) {
+  const totals = analytics?.totals || {};
+  let score = 100;
+  score -= (totals.critical_events || 0) * 20;
+  score -= Math.max(0, (totals.severe_events || 0) - (totals.critical_events || 0)) * 10;
+  score -= (totals.duplicate_sync_events || 0) * 8;
+  score -= (totals.drift_severe_syncs || 0) * 8;
+  score -= (totals.missing_final_sync || 0) * 5;
+  score -= (totals.invalid_session_attempts || 0) * 4;
+  score -= (totals.stale_sessions || 0) * 3;
+  score -= Math.min(10, Math.floor((totals.drift_warning_syncs || 0) / 3));
+  score = Math.max(0, Math.min(100, score));
+  const label = score >= 90 ? "healthy" : score >= 70 ? "degraded" : "dangerous";
+  const color = score >= 90 ? "green" : score >= 70 ? "amber" : "red";
+  const explanation = score >= 90
+    ? "No severe active billing integrity risks are currently dominating the window."
+    : score >= 70
+      ? "Warning-level anomalies exist; review before protected billing cutover."
+      : "Severe or repeated anomalies exist; protected billing cutover is blocked.";
+  return { score, label, color, explanation };
+}
+
+function buildReconciliationTrends({ events = [], syncs = [] }) {
+  const realEvents = events.filter(e => !isTestModeEvent(e));
+  return {
+    hourly: countBy(realEvents, e => isoBucket(e.created_at, "hour")),
+    daily: countBy(realEvents, e => isoBucket(e.created_at, "day")),
+    top_types: Object.entries(countBy(realEvents, e => e.type)).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([type, count]) => ({ type, count })),
+    duplicate_sync_trend: countBy(realEvents.filter(e => e.type === "duplicate_sync_id_detected"), e => isoBucket(e.created_at, "day")),
+    missing_final_trend: countBy(realEvents.filter(e => e.type === "missing_final_sync"), e => isoBucket(e.created_at, "day")),
+    stale_session_trend: countBy(realEvents.filter(e => e.type === "stale_session_detected"), e => isoBucket(e.created_at, "day")),
+    drift_trend: countBy(syncs.filter(s => Math.abs(Number(s.credits_requested || 0) - Number(s.credits_expected || 0)) >= 0.5), s => isoBucket(s.created_at, "day")),
+    soak_scenarios: countBy(events.filter(isTestModeEvent), e => e.details?.scenario || "unknown"),
+  };
+}
+
+async function getBillingFeatureFlags() {
+  const { data, error } = await supabaseAdmin
+    .from("feature_flags")
+    .select("key, enabled")
+    .in("key", PROTECTED_BILLING_FLAGS);
+  if (error) throw new Error(error.message);
+  const flags = {
+    enable_protected_billing_global: false,
+    enable_protected_billing_test_users: false,
+    protected_billing_shadow_compare: true,
+    protected_billing_force_legacy: true,
+  };
+  (data || []).forEach(row => { flags[row.key] = row.enabled === true; });
+  return flags;
+}
+
+async function getProtectedBillingAllowlist() {
+  const raw = await getSettingValue(PROTECTED_BILLING_ALLOWLIST_SETTING, "[]");
+  try {
+    const parsed = JSON.parse(raw || "[]");
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+async function setProtectedBillingAllowlist(list) {
+  const normalized = Array.from(new Set((list || []).filter(Boolean)));
+  await setSettingValue(PROTECTED_BILLING_ALLOWLIST_SETTING, JSON.stringify(normalized));
+  return normalized;
+}
+
+async function resolveBillingModeForUser(userId = null) {
+  const flags = await getBillingFeatureFlags();
+  const allowlist = await getProtectedBillingAllowlist();
+  const allowedUser = !!(userId && allowlist.includes(userId));
+  let mode = "legacy_only";
+  if (flags.protected_billing_force_legacy) mode = "forced_legacy_fallback";
+  else if (flags.enable_protected_billing_global) mode = flags.protected_billing_shadow_compare ? "protected_live_with_legacy_compare" : "protected_live";
+  else if (flags.enable_protected_billing_test_users && allowedUser) mode = flags.protected_billing_shadow_compare ? "protected_live_with_legacy_compare" : "protected_live";
+  else if (flags.protected_billing_shadow_compare) mode = "shadow_compare";
+  return { mode, flags, allowlist, protected_live_enabled: mode.startsWith("protected_live"), legacy_authoritative: !mode.startsWith("protected_live") };
+}
+
 app.get("/admin/api/reconciliation/summary", adminAuth, async (req, res) => {
   try {
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -3063,6 +3239,155 @@ app.get("/admin/api/reconciliation/summary", adminAuth, async (req, res) => {
   } catch (err) {
     console.warn("[RECON SUMMARY] Error:", err.message);
     return res.json({ ok: true, error: err.message, total_anomalies: 0 });
+  }
+});
+
+app.get("/admin/api/reconciliation/analytics", adminAuth, async (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days || "7", 10) || 7, 1), 30);
+    const includeResolved = req.query.include_resolved === "true";
+    const [events, syncs] = await Promise.all([
+      getRecentReconciliationRows(days, includeResolved),
+      getRecentBillingSyncRows(days),
+    ]);
+    const analytics = buildReconciliationAnalytics({ events, syncs });
+    const integrity = calculateBillingIntegrityScore(analytics);
+    return res.json({ ok: true, window_days: days, analytics, integrity });
+  } catch (err) {
+    console.warn("[RECON ANALYTICS] Error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/admin/api/reconciliation/trends", adminAuth, async (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days || "7", 10) || 7, 1), 30);
+    const includeResolved = req.query.include_resolved === "true";
+    const [events, syncs] = await Promise.all([
+      getRecentReconciliationRows(days, includeResolved),
+      getRecentBillingSyncRows(days),
+    ]);
+    return res.json({ ok: true, window_days: days, trends: buildReconciliationTrends({ events, syncs }) });
+  } catch (err) {
+    console.warn("[RECON TRENDS] Error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/admin/api/reconciliation/integrity-score", adminAuth, async (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days || "7", 10) || 7, 1), 30);
+    const includeResolved = req.query.include_resolved === "true";
+    const [events, syncs] = await Promise.all([
+      getRecentReconciliationRows(days, includeResolved),
+      getRecentBillingSyncRows(days),
+    ]);
+    const analytics = buildReconciliationAnalytics({ events, syncs });
+    return res.json({ ok: true, window_days: days, integrity: calculateBillingIntegrityScore(analytics), totals: analytics.totals });
+  } catch (err) {
+    console.warn("[INTEGRITY SCORE] Error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/admin/api/billing-cutover/status", adminAuth, async (req, res) => {
+  try {
+    const userId = validateUUID(String(req.query.user_id || "")) ? String(req.query.user_id) : null;
+    const mode = await resolveBillingModeForUser(userId);
+    const [events, syncs] = await Promise.all([
+      getRecentReconciliationRows(7, false),
+      getRecentBillingSyncRows(7),
+    ]);
+    const analytics = buildReconciliationAnalytics({ events, syncs });
+    const fallbackEvents = events.filter(e => /fallback|forced_legacy|protected_billing/.test(String(e.type || "")));
+    const mismatchEvents = events.filter(e => /mismatch|drift|compare/.test(String(e.type || "")) && !isTestModeEvent(e));
+    return res.json({
+      ok: true,
+      ...mode,
+      global_live_enabled: mode.flags.enable_protected_billing_global === true,
+      test_users_enabled: mode.flags.enable_protected_billing_test_users === true,
+      fallback_events: fallbackEvents.length,
+      mismatch_events: mismatchEvents.length,
+      compare_mode_stats: {
+        shadow_compare: mode.flags.protected_billing_shadow_compare === true,
+        recent_syncs: syncs.length,
+        drift_warning_syncs: analytics.totals.drift_warning_syncs,
+        drift_severe_syncs: analytics.totals.drift_severe_syncs,
+      },
+      note: "Framework only: legacy billing remains authoritative unless a later approved phase wires protected live mode into billing endpoints.",
+    });
+  } catch (err) {
+    console.warn("[BILLING CUTOVER STATUS] Error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/admin/api/billing-cutover/flags", adminAuth, async (req, res) => {
+  if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Super admin required" });
+  const updates = req.body?.flags || {};
+  try {
+    const rows = [];
+    for (const key of PROTECTED_BILLING_FLAGS) {
+      if (Object.prototype.hasOwnProperty.call(updates, key)) {
+        rows.push({
+          key,
+          enabled: updates[key] === true,
+          description: "Protected billing cutover framework flag",
+          updated_at: new Date().toISOString(),
+          updated_by: req.session.adminEmail || "admin",
+        });
+      }
+    }
+    if (!rows.length) return res.status(400).json({ error: "No recognized billing flags provided" });
+    const { error } = await supabaseAdmin.from("feature_flags").upsert(rows, { onConflict: "key" });
+    if (error) throw new Error(error.message);
+    await logAction("protected_billing_flags_update", req.session.adminEmail, req.session.adminRole, null, { flags: rows }, req);
+    return res.json({ ok: true, status: await resolveBillingModeForUser(null) });
+  } catch (err) {
+    console.warn("[BILLING CUTOVER FLAGS] Error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/admin/api/billing-cutover/test-users", adminAuth, async (req, res) => {
+  if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Super admin required" });
+  const userId = String(req.body?.user_id || "").trim();
+  const enabled = req.body?.enabled === true;
+  if (!validateUUID(userId)) return res.status(400).json({ error: "Valid user_id required" });
+  try {
+    const current = await getProtectedBillingAllowlist();
+    const next = enabled ? [...current, userId] : current.filter(id => id !== userId);
+    const allowlist = await setProtectedBillingAllowlist(next);
+    await logAction("protected_billing_test_user_update", req.session.adminEmail, req.session.adminRole, userId, { enabled }, req);
+    return res.json({ ok: true, allowlist, status: await resolveBillingModeForUser(userId) });
+  } catch (err) {
+    console.warn("[BILLING CUTOVER USER] Error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/admin/api/billing-cutover/force-legacy", adminAuth, async (req, res) => {
+  if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Super admin required" });
+  const enabled = req.body?.enabled !== false;
+  try {
+    const { error } = await supabaseAdmin.from("feature_flags").upsert({
+      key: "protected_billing_force_legacy",
+      enabled,
+      description: "Emergency rollback: force legacy billing mode",
+      updated_at: new Date().toISOString(),
+      updated_by: req.session.adminEmail || "admin",
+    }, { onConflict: "key" });
+    if (error) throw new Error(error.message);
+    await logAction("protected_billing_force_legacy", req.session.adminEmail, req.session.adminRole, null, { enabled }, req);
+    await logBillingReconciliationEvent({
+      type: "protected_billing_force_legacy_changed",
+      severity: enabled ? "warning" : "info",
+      details: { enabled, changed_by: req.session.adminEmail || "admin", framework_only: true },
+    });
+    return res.json({ ok: true, status: await resolveBillingModeForUser(null) });
+  } catch (err) {
+    console.warn("[BILLING FORCE LEGACY] Error:", err.message);
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -5153,6 +5478,10 @@ const STARTUP_FLAGS = [
   { key: "enable_style_mode",  enabled: true,  description: "Enable style transformation mode"              },
   { key: "enable_obs_output",  enabled: true,  description: "Enable OBS output feature"                     },
   { key: "enable_kill_switch", enabled: false, description: "Emergency: block all new sessions immediately" },
+  { key: "enable_protected_billing_global",     enabled: false, description: "Protected billing global live cutover - keep disabled until approved" },
+  { key: "enable_protected_billing_test_users", enabled: false, description: "Protected billing for explicit test-user allowlist only" },
+  { key: "protected_billing_shadow_compare",    enabled: true,  description: "Compare protected billing calculations while legacy remains authoritative" },
+  { key: "protected_billing_force_legacy",      enabled: true,  description: "Emergency rollback flag forcing legacy billing mode" },
 ];
 (async () => {
   const now = new Date().toISOString();
