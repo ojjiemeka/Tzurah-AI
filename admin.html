@@ -486,8 +486,13 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 @keyframes mfade { from{opacity:0;transform:scale(.96)} to{opacity:1;transform:scale(1)} }
 .admin-modal-card {
   background:#1a1a2e; border:1px solid #2a2a4a; border-radius:12px;
-  padding:24px; min-width:380px; max-width:480px; width:100%;
+  padding:0; min-width:0; max-width:480px; width:min(100%,480px);
+  max-height:calc(100vh - 36px); display:flex; flex-direction:column; overflow:hidden;
 }
+.admin-modal-card.modal-sm { max-width:380px; }
+.admin-modal-card.modal-md { max-width:520px; }
+.admin-modal-card.modal-lg { max-width:760px; }
+.admin-modal-card.modal-xl { max-width:960px; }
 .admin-modal-card.modal-attention {
   animation: modal-attention-pulse .18s ease-in-out 0s 2;
 }
@@ -496,8 +501,14 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   25% { transform: translateX(-4px); }
   75% { transform: translateX(4px); }
 }
-.modal-header { font-size:1rem; font-weight:800; color:#fff; margin-bottom:12px; }
-.modal-body   { margin-bottom:18px; color:var(--text2); }
+.modal-header {
+  flex:0 0 auto; font-size:1rem; font-weight:800; color:#fff; margin:0;
+  padding:16px 18px; background:#1a1a2e; border-bottom:1px solid var(--border);
+}
+.modal-body {
+  flex:1 1 auto; min-height:0; overflow-y:auto; margin:0; padding:16px 18px;
+  color:var(--text2); overscroll-behavior:contain;
+}
 .modal-subtitle { color:#fff; margin-bottom:10px; font-size:13px; }
 .modal-field  { margin-bottom:10px; }
 .modal-field label { display:block; font-size:11px; color:var(--muted); margin-bottom:3px; font-weight:600; }
@@ -511,7 +522,10 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   color:#f87171; font-size:11px; background:rgba(239,68,68,.1);
   padding:7px 10px; border-radius:6px; margin-top:8px;
 }
-.modal-footer { display:flex; gap:8px; justify-content:flex-end; margin-top:20px; }
+.modal-footer {
+  flex:0 0 auto; display:flex; gap:8px; justify-content:flex-end; margin:0;
+  padding:12px 18px; background:#1a1a2e; border-top:1px solid var(--border); flex-wrap:wrap;
+}
 .modal-btn-cancel {
   padding:7px 14px; background:transparent; color:var(--muted);
   border:1px solid var(--border); border-radius:6px; cursor:pointer; font-family:inherit; font-size:12px;
@@ -1575,7 +1589,7 @@ kbd {
         <option value="all">All rows</option>
       </select>
       <button id="soak-test-btn" class="btn btn-amber btn-sm" style="display:none;font-size:10px" onclick="openSoakTestModal()">Run Soak Test</button>
-      <button id="soak-cleanup-card-btn" class="btn btn-ghost btn-sm" style="display:none;font-size:10px" onclick="cleanupSoakTestRows(this)">Cleanup Test Rows</button>
+      <button id="soak-cleanup-card-btn" class="btn btn-ghost btn-sm" style="display:none;font-size:10px" onclick="cleanupSoakTestRows(this, 'all_test')">Cleanup all test rows</button>
       <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="loadReconciliation()">Refresh</button>
     </div>
     <div class="panel-body">
@@ -2736,6 +2750,11 @@ function modalBehavior(opts = {}) {
   };
 }
 
+function modalSizeClass(size) {
+  const normalized = ["sm", "md", "lg", "xl"].includes(String(size || "md")) ? String(size || "md") : "md";
+  return `modal-${normalized}`;
+}
+
 function bindModalKeyboard(ov, { cancelable = true, closeOnEscape = true } = {}) {
   const onKey = (e) => {
     if (!document.body.contains(ov)) {
@@ -2778,7 +2797,7 @@ function requestModalCancel(ov, onCancel) {
 function showModal(htmlOrOpts, opts = {}) {
   // Object API: showModal({ title, body, onConfirm, confirmLabel, confirmClass })
   if (typeof htmlOrOpts !== "string") {
-    const { title, body, onConfirm, onCancel, confirmLabel = "Confirm", confirmClass = "", cancelLabel = "Cancel" } = htmlOrOpts;
+    const { title, body, onConfirm, onCancel, confirmLabel = "Confirm", confirmClass = "", cancelLabel = "Cancel", showClose = false } = htmlOrOpts;
     const behavior = modalBehavior(htmlOrOpts);
     const ov = document.createElement("div");
     ov.className = "admin-modal-overlay";
@@ -2787,8 +2806,11 @@ function showModal(htmlOrOpts, opts = {}) {
     ov.setAttribute("role", "dialog");
     ov.setAttribute("aria-modal", "true");
     ov.innerHTML = `
-      <div class="admin-modal-card" style="max-width:520px;width:100%">
-        <div class="modal-header">${title || ""}</div>
+      <div class="admin-modal-card ${modalSizeClass(htmlOrOpts.size)}">
+        <div class="modal-header" style="${showClose ? "display:flex;align-items:center;gap:10px" : ""}">
+          <span>${title || ""}</span>
+          ${showClose ? `<button type="button" class="modal-btn-cancel modal-x" style="margin-left:auto;background:none;border:0;color:var(--muted);font-size:20px;line-height:1;cursor:pointer" aria-label="Close">&times;</button>` : ""}
+        </div>
         <div class="modal-body">${body || ""}</div>
         <div class="modal-footer">
           ${behavior.cancelable ? `<button class="modal-btn-cancel">${esc(cancelLabel)}</button>` : ""}
@@ -2825,7 +2847,7 @@ function showModal(htmlOrOpts, opts = {}) {
   ov.dataset.closeOnBackdrop = behavior.closeOnBackdrop ? "true" : "false";
   ov.setAttribute("role", "dialog");
   ov.setAttribute("aria-modal", "true");
-  ov.innerHTML = `<div class="admin-modal-card">${htmlOrOpts}</div>`;
+  ov.innerHTML = `<div class="admin-modal-card ${modalSizeClass(opts.size)}">${htmlOrOpts}</div>`;
   document.body.appendChild(ov);
 
   ov.querySelectorAll(".modal-btn-cancel").forEach(btn => {
@@ -2922,6 +2944,37 @@ function showModalPrompt(message, options = {}) {
 }
 
 const Modal = {
+  open({ id, title = "", body = "", footer = "", size = "md", persistent = true, closeOnBackdrop, closeOnEscape, showClose = true, onClose } = {}) {
+    const closeBtn = showClose
+      ? `<button type="button" class="modal-btn-cancel modal-x" style="margin-left:auto;background:none;border:0;color:var(--muted);font-size:20px;line-height:1;cursor:pointer" aria-label="Close">&times;</button>`
+      : "";
+    const ov = showModal(`
+      <div class="modal-header" style="display:flex;align-items:center;gap:10px">
+        <span>${title}</span>${closeBtn}
+      </div>
+      <div class="modal-body">${body}</div>
+      <div class="modal-footer">${footer}</div>
+    `, { size, persistent, closeOnBackdrop, closeOnEscape, onCancel: onClose });
+    if (id) ov.id = id;
+    return ov;
+  },
+  close(idOrOverlay) {
+    const ov = typeof idOrOverlay === "string" ? document.getElementById(idOrOverlay) : idOrOverlay;
+    closeModalOverlay(ov);
+  },
+  setLoading(idOrOverlay, loading) {
+    const ov = typeof idOrOverlay === "string" ? document.getElementById(idOrOverlay) : idOrOverlay;
+    if (!ov) return;
+    ov.dataset.modalBusy = loading ? "true" : "false";
+    ov.querySelectorAll(".modal-btn-cancel,.modal-x").forEach(btn => {
+      btn.disabled = !!loading;
+      btn.style.opacity = loading ? ".45" : "";
+      btn.style.cursor = loading ? "not-allowed" : "";
+    });
+  },
+  showAlert(message, options = {}) { return showModalAlert(message, options); },
+  showConfirm(message, options = {}) { return showModalConfirm(message, options); },
+  showPrompt(message, options = {}) { return showModalPrompt(message, options); },
   confirmAction(title, msg, onConfirm, onCancel) {
     showModal(`
       <div class="modal-header">${title}</div>
@@ -3511,12 +3564,16 @@ function openSoakTestModal() {
     return;
   }
   window._soakSelectedUser = null;
-  const ov = showModal(`
-    <div class="modal-header" style="display:flex;align-items:center;gap:10px">
-      <span>Internal Billing Soak Test</span>
-      <button type="button" class="modal-btn-cancel" style="margin-left:auto;background:none;border:0;color:var(--muted);font-size:20px;line-height:1;cursor:pointer" aria-label="Close">&times;</button>
-    </div>
-    <div class="modal-body">
+  window._soakCurrentRunId = "";
+  window._soakCurrentRunCleaned = false;
+  const ov = Modal.open({
+    id: "soak-test-modal",
+    title: "Internal Billing Soak Test",
+    size: "lg",
+    persistent: true,
+    closeOnBackdrop: false,
+    closeOnEscape: false,
+    body: `
       <div class="modal-field">
         <label>Test user</label>
         <input id="soak-user-search" class="modal-input" placeholder="Search email, display name, or user ID" autocomplete="off" oninput="debounceSoakUserSearch(this.value)">
@@ -3556,17 +3613,14 @@ function openSoakTestModal() {
       </label>
       <div id="soak-result" class="recon-status" style="display:block;margin-top:12px;color:var(--muted)">Ready.</div>
       <div id="soak-result-table" style="display:none;margin-top:10px"></div>
-    </div>
-    <div class="modal-footer">
+    `,
+    footer: `
       <button class="modal-btn-cancel">Close</button>
-      <button class="btn btn-ghost" type="button" onclick="cleanupSoakTestRows(this)">Cleanup test rows</button>
+      <button id="soak-cleanup-current-btn" class="btn btn-ghost" type="button" onclick="cleanupSoakTestRows(this, 'current_run')" disabled>Cleanup this run</button>
       <button id="soak-run-btn" class="btn btn-amber" type="button" onclick="runSoakTestFromModal(this)" disabled>Run dry-run</button>
-    </div>
-  `, { persistent: true, closeOnBackdrop: false, closeOnEscape: false });
-  if (ov) {
-    ov.id = "soak-test-modal";
-    ov.querySelector(".admin-modal-card")?.classList.add("soak-modal-card");
-  }
+    `,
+  });
+  ov?.querySelector(".admin-modal-card")?.classList.add("soak-modal-card");
   setTimeout(() => searchSoakUsers(""), 50);
 }
 
@@ -3582,14 +3636,7 @@ async function runSoakTestFromModal(btn) {
   }
   const done = btnLoading(btn, "Running");
   const modal = document.getElementById("soak-test-modal");
-  if (modal) {
-    modal.dataset.modalBusy = "true";
-    modal.querySelectorAll(".modal-btn-cancel").forEach(closeBtn => {
-      closeBtn.disabled = true;
-      closeBtn.style.opacity = ".45";
-      closeBtn.style.cursor = "not-allowed";
-    });
-  }
+  Modal.setLoading(modal, true);
   if (result) result.textContent = "Running synthetic dry-run...";
   try {
     const data = await apiPost("/admin/api/reconciliation/soak-test", {
@@ -3600,6 +3647,8 @@ async function runSoakTestFromModal(btn) {
     });
     if (result) {
       const anomalyEvents = data.anomaly_events ?? data.reconciliation_events;
+      window._soakCurrentRunId = data.run_id || "";
+      window._soakCurrentRunCleaned = false;
       result.innerHTML = `
         <strong style="color:var(--success)">Dry-run complete.</strong><br>
         Run: <code>${esc(data.run_id || "--")}</code><br>
@@ -3610,6 +3659,8 @@ async function runSoakTestFromModal(btn) {
         ${esc(data.note || "")}
       `;
     }
+    const cleanupCurrentBtn = document.getElementById("soak-cleanup-current-btn");
+    if (cleanupCurrentBtn) cleanupCurrentBtn.disabled = !window._soakCurrentRunId;
     renderSoakResultTable(data);
     const reconFilter = document.getElementById("recon-filter");
     const reconTestFilter = document.getElementById("recon-test-filter");
@@ -3621,14 +3672,7 @@ async function runSoakTestFromModal(btn) {
     if (result) result.textContent = `Failed: ${e.message}`;
     toast("Soak test failed: " + e.message, "error");
   } finally {
-    if (modal) {
-      modal.dataset.modalBusy = "false";
-      modal.querySelectorAll(".modal-btn-cancel").forEach(closeBtn => {
-        closeBtn.disabled = false;
-        closeBtn.style.opacity = "";
-        closeBtn.style.cursor = "";
-      });
-    }
+    Modal.setLoading(modal, false);
     done();
   }
 }
@@ -3750,29 +3794,48 @@ function selectSoakUser(user) {
   updateSoakRunState();
 }
 
-async function cleanupSoakTestRows(btn) {
+async function cleanupSoakTestRows(btn, mode = "all_test") {
   if (window._adminRole !== "super_admin") {
     toast("Super admin required", "error");
     return;
   }
-  const confirmed = await showModalConfirm("Resolve soak-test reconciliation events and delete synthetic billing sync rows only?", {
-    title: "Cleanup Soak Test Rows",
+  const isCurrentRun = mode === "current_run";
+  const runId = isCurrentRun ? String(window._soakCurrentRunId || "").trim() : "";
+  if (isCurrentRun && !runId) {
+    toast("Run a soak test first before cleaning this run.", "error");
+    return;
+  }
+  const message = isCurrentRun
+    ? `Clean only this soak run (${runId})? Previous soak runs and real rows are untouched.`
+    : "This will remove all synthetic soak test rows. Real rows are untouched.";
+  const confirmed = await showModalConfirm(message, {
+    title: isCurrentRun ? "Cleanup This Soak Run" : "Cleanup All Test Rows",
     confirmLabel: "Cleanup",
     variant: "danger",
   });
   if (!confirmed) return;
   const result = document.getElementById("soak-result");
   const done = btnLoading(btn, "Cleaning");
-  if (result) result.textContent = "Cleaning synthetic rows...";
+  if (result) result.textContent = isCurrentRun ? "Cleaning this soak run..." : "Cleaning all synthetic rows...";
   try {
-    const data = await apiPost("/admin/api/reconciliation/soak-test/cleanup", {});
+    const data = await apiPost("/admin/api/reconciliation/soak-test/cleanup", {
+      mode: isCurrentRun ? "current_run" : "all_test",
+      run_id: runId || undefined,
+    });
     if (result) {
       result.innerHTML = `
         <strong style="color:var(--success)">Cleanup complete.</strong><br>
+        Mode: ${esc(data.mode || mode)}${data.run_id ? ` - Run: <code>${esc(data.run_id)}</code>` : ""}<br>
         Deleted sync rows: ${fmtN(data.deleted_billing_sync_rows || 0)}<br>
         Resolved test events: ${fmtN(data.resolved_reconciliation_events || 0)}<br>
         ${esc(data.note || "")}
       `;
+    }
+    if (isCurrentRun) {
+      window._soakCurrentRunCleaned = true;
+      const table = document.getElementById("soak-result-table");
+      if (table) table.innerHTML = `<div class="td-empty" style="padding:12px">This run's synthetic rows were cleaned.</div>`;
+      if (btn) btn.disabled = true;
     }
     toast("Soak test rows cleaned", "success");
     const reconTestFilter = document.getElementById("recon-test-filter");
@@ -3783,6 +3846,7 @@ async function cleanupSoakTestRows(btn) {
     toast("Cleanup failed: " + e.message, "error");
   } finally {
     done();
+    if (isCurrentRun && window._soakCurrentRunCleaned && btn) btn.disabled = true;
   }
 }
 

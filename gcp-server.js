@@ -3185,7 +3185,7 @@ function buildSoakBillingRows({ userId, scenario, sessionCount, adminEmail, bala
   const sessions = [];
   const plan = soakScenarioPlan(scenario);
   for (let i = 0; i < sessionCount; i++) {
-    const sessionId = `soak_${scenario}_${runId}_${i + 1}`;
+    const sessionId = `soak_${runId}_${scenario}_${i + 1}`;
     sessions.push(sessionId);
     let sequence = 0;
     for (const step of plan) {
@@ -3375,22 +3375,44 @@ app.post("/admin/api/reconciliation/soak-test", adminAuth, async (req, res) => {
 // POST /admin/api/reconciliation/soak-test/cleanup - clean only synthetic soak rows
 app.post("/admin/api/reconciliation/soak-test/cleanup", adminAuth, async (req, res) => {
   if (!requireSoakSuperAdmin(req, res)) return;
+  const mode = ["current_run", "all_test"].includes(String(req.body?.mode || "all_test"))
+    ? String(req.body?.mode || "all_test")
+    : "all_test";
+  const runId = String(req.body?.run_id || "").trim();
+  if (mode === "current_run" && !runId) {
+    return res.status(400).json({ error: "run_id required for current_run cleanup" });
+  }
   try {
-    const sourceDelete = await supabaseAdmin.from("billing_syncs").delete().like("source", "soak_test%").select("id");
-    const sessionDelete = await supabaseAdmin.from("billing_syncs").delete().like("session_id", "soak_%").select("id");
-    const syncDelete = await supabaseAdmin.from("billing_syncs").delete().like("sync_id", "soak_%").select("id");
-    const eventResolve = await supabaseAdmin
+    const runPrefix = `soak_${runId}_`;
+    const sourceDelete = mode === "all_test"
+      ? await supabaseAdmin.from("billing_syncs").delete().like("source", "soak_test%").select("id")
+      : { data: [], error: null };
+    const sessionDeleteQuery = supabaseAdmin.from("billing_syncs").delete();
+    const sessionDelete = await (mode === "current_run"
+      ? sessionDeleteQuery.like("session_id", `${runPrefix}%`)
+      : sessionDeleteQuery.like("session_id", "soak_%")
+    ).select("id");
+    const syncDeleteQuery = supabaseAdmin.from("billing_syncs").delete();
+    const syncDelete = await (mode === "current_run"
+      ? syncDeleteQuery.like("sync_id", `${runPrefix}%`)
+      : syncDeleteQuery.like("sync_id", "soak_%")
+    ).select("id");
+
+    let eventResolveQuery = supabaseAdmin
       .from("billing_reconciliation_events")
       .update({
         resolved: true,
         resolved_at: new Date().toISOString(),
-        resolved_reason: "soak_test_cleanup",
+        resolved_reason: mode === "current_run" ? "soak_test_current_run_cleanup" : "soak_test_cleanup",
         resolved_by: req.session.adminEmail || "admin",
         auto_resolved: false,
       })
       .contains("details", { test_mode: true })
-      .eq("resolved", false)
-      .select("id");
+      .eq("resolved", false);
+    if (mode === "current_run") {
+      eventResolveQuery = eventResolveQuery.contains("details", { run_id: runId });
+    }
+    const eventResolve = await eventResolveQuery.select("id");
 
     const errors = [sourceDelete.error, sessionDelete.error, syncDelete.error, eventResolve.error].filter(Boolean);
     if (errors.length) throw new Error(errors.map(e => e.message).join("; "));
@@ -3403,15 +3425,21 @@ app.post("/admin/api/reconciliation/soak-test/cleanup", adminAuth, async (req, r
     const resolvedEvents = eventResolve.data?.length || 0;
 
     await logAction("cleanup_billing_soak_test", req.session.adminEmail, req.session.adminRole, null, {
+      mode,
+      run_id: runId || null,
       deleted_billing_sync_rows: deletedSyncIds.size,
       resolved_reconciliation_events: resolvedEvents,
     }, req);
 
     return res.json({
       ok: true,
+      mode,
+      run_id: runId || null,
       deleted_billing_sync_rows: deletedSyncIds.size,
       resolved_reconciliation_events: resolvedEvents,
-      note: "Only rows marked with soak_test source/session/sync prefixes or details.test_mode=true were touched.",
+      note: mode === "current_run"
+        ? "Only synthetic rows for this soak run were touched."
+        : "Only rows marked with soak_test source/session/sync prefixes or details.test_mode=true were touched.",
     });
   } catch (err) {
     console.warn("[SOAK CLEANUP] Error:", err.message);
