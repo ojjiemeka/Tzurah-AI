@@ -321,6 +321,13 @@ const BILLING_BURN_RATE = 2.18;
 const BILLING_MAX_SYNC_SECONDS = 10 * 60;
 const BILLING_MAX_SYNC_CREDITS = BILLING_BURN_RATE * BILLING_MAX_SYNC_SECONDS;
 const BILLING_STALE_MS = 90 * 1000;
+const BILLING_ROUNDING_DRIFT_WARNING = 0.5;
+const BILLING_ROUNDING_DRIFT_SEVERE = 2.0;
+const BILLING_BALANCE_DRIFT_WARNING = 1.0;
+const BILLING_BALANCE_DRIFT_SEVERE = 5.0;
+const BILLING_MISSING_FINAL_MIN_SECONDS = 15;
+const BILLING_ORPHAN_ACTIVE_MS = 5 * 60 * 1000;
+const BILLING_TINY_SYNC_SECONDS = 1;
 let _billingShadowRpcAvailable = null;
 
 function finiteNonNegativeNumber(value) {
@@ -337,6 +344,7 @@ function makeLegacyBillingSyncId(source) {
 }
 
 async function logBillingReconciliationEvent({ userId, sessionId, type, severity = "warning", details = {} }) {
+  const normalizedSeverity = ["info", "warning", "high", "critical"].includes(severity) ? severity : "warning";
   try {
     const { error } = await supabaseAdmin
       .from("billing_reconciliation_events")
@@ -344,10 +352,26 @@ async function logBillingReconciliationEvent({ userId, sessionId, type, severity
         user_id: validateUUID(userId || "") ? userId : null,
         session_id: sessionId || null,
         type,
-        severity,
+        severity: normalizedSeverity,
         details,
         created_at: new Date().toISOString(),
       });
+    if (error && normalizedSeverity === "high" && String(error.message || "").toLowerCase().includes("billing_reconciliation_severity_check")) {
+      const { error: retryError } = await supabaseAdmin
+        .from("billing_reconciliation_events")
+        .insert({
+          user_id: validateUUID(userId || "") ? userId : null,
+          session_id: sessionId || null,
+          type,
+          severity: "warning",
+          details: { ...details, intended_severity: "high" },
+          created_at: new Date().toISOString(),
+        });
+      if (retryError && !isMissingBillingMigrationError(retryError)) {
+        console.warn("[BILLING RECON] Insert retry error:", retryError.message);
+      }
+      return;
+    }
     if (error && !isMissingBillingMigrationError(error)) {
       console.warn("[BILLING RECON] Insert error:", error.message);
     }
@@ -398,6 +422,276 @@ function badBillingNumberResponse(res, label, value) {
 function safeBillingNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function calculateExpectedCredits(durationSecs) {
+  const safeDuration = clampBillingNumber(Number(durationSecs), BILLING_MAX_SYNC_SECONDS);
+  if (safeDuration === null) return null;
+  return Math.round(Math.min(safeDuration * BILLING_BURN_RATE, BILLING_MAX_SYNC_CREDITS) * 1000) / 1000;
+}
+
+async function wasRecentReconciliationLogged(type, sessionId, sinceMs = 30 * 60 * 1000) {
+  if (!type || !sessionId) return false;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("billing_reconciliation_events")
+      .select("id")
+      .eq("type", type)
+      .eq("session_id", sessionId)
+      .gte("created_at", new Date(Date.now() - sinceMs).toISOString())
+      .limit(1)
+      .maybeSingle();
+    if (error) return false;
+    return !!data;
+  } catch {
+    return false;
+  }
+}
+
+async function logReconciliationEventOnce(event, sinceMs = 30 * 60 * 1000) {
+  if (event?.sessionId && await wasRecentReconciliationLogged(event.type, event.sessionId, sinceMs)) return;
+  await logBillingReconciliationEvent(event);
+}
+
+async function detectDuplicateSyncId({ userId, sessionId, syncId, source }) {
+  if (!userId || !sessionId || !syncId) return { duplicate: false };
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("billing_syncs")
+      .select("id, balance_after, status, created_at")
+      .eq("user_id", userId)
+      .eq("session_id", sessionId)
+      .eq("sync_id", syncId)
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      if (!isMissingBillingMigrationError(error)) console.warn("[BILLING RECON] Duplicate sync lookup error:", error.message);
+      return { duplicate: false };
+    }
+    if (!data) return { duplicate: false };
+    await logBillingReconciliationEvent({
+      userId,
+      sessionId,
+      type: "duplicate_sync_id_detected",
+      severity: "warning",
+      details: { sync_id: syncId, source, existing_status: data.status || null, existing_created_at: data.created_at || null },
+    });
+    return { duplicate: true, balanceAfter: finiteNonNegativeNumber(data.balance_after) ? data.balance_after : null };
+  } catch (err) {
+    if (!isMissingBillingMigrationError(err)) console.warn("[BILLING RECON] Duplicate sync lookup failed:", err.message);
+    return { duplicate: false };
+  }
+}
+
+async function detectBillingDrift({ userId, sessionId, syncId, source, durationSecs, creditsRequested, creditsExpected }) {
+  const requested = safeBillingNumber(creditsRequested);
+  const expected = creditsExpected ?? calculateExpectedCredits(durationSecs);
+  if (requested === null || expected === null) {
+    await logBillingReconciliationEvent({
+      userId,
+      sessionId,
+      type: "invalid_session_duration",
+      severity: "warning",
+      details: { sync_id: syncId || null, source, duration_secs: durationSecs, credits_requested: creditsRequested },
+    });
+    return null;
+  }
+  const drift = Math.round((requested - expected) * 1000) / 1000;
+  const absDrift = Math.abs(drift);
+  if (absDrift >= BILLING_ROUNDING_DRIFT_SEVERE) {
+    await logBillingReconciliationEvent({
+      userId,
+      sessionId,
+      type: "billing_rounding_drift_severe",
+      severity: "high",
+      details: { sync_id: syncId || null, source, requested, expected, drift, duration_secs: durationSecs },
+    });
+  } else if (absDrift >= BILLING_ROUNDING_DRIFT_WARNING) {
+    await logBillingReconciliationEvent({
+      userId,
+      sessionId,
+      type: "billing_rounding_drift_warning",
+      severity: "warning",
+      details: { sync_id: syncId || null, source, requested, expected, drift, duration_secs: durationSecs },
+    });
+  }
+  return { expected, drift, absDrift };
+}
+
+async function detectDecartBillingMismatch({ userId, sessionId, source, durationSecs, creditsRequested }) {
+  const safeDuration = safeBillingNumber(durationSecs);
+  const requested = safeBillingNumber(creditsRequested);
+  if (safeDuration === null || requested === null) return;
+  try {
+    const costPerSecond = parseFloat(await getSettingValue("decart_cost_per_second", "2"));
+    const decartRate = Number.isFinite(costPerSecond) && costPerSecond > 0 ? costPerSecond : 2;
+    const decartCost = Math.round(safeDuration * decartRate * 1000) / 1000;
+    const expectedUserCredits = Math.round(decartCost * (BILLING_BURN_RATE / decartRate) * 1000) / 1000;
+    const mismatch = Math.round((requested - expectedUserCredits) * 1000) / 1000;
+    const absMismatch = Math.abs(mismatch);
+    if (absMismatch >= 5) {
+      await logBillingReconciliationEvent({
+        userId,
+        sessionId,
+        type: "decart_billing_mismatch_severe",
+        severity: "high",
+        details: { source, duration_secs: safeDuration, credits_requested: requested, decart_cost: decartCost, expected_user_credits: expectedUserCredits, mismatch },
+      });
+    } else if (absMismatch >= 2) {
+      await logBillingReconciliationEvent({
+        userId,
+        sessionId,
+        type: "decart_billing_mismatch_warning",
+        severity: "warning",
+        details: { source, duration_secs: safeDuration, credits_requested: requested, decart_cost: decartCost, expected_user_credits: expectedUserCredits, mismatch },
+      });
+    }
+  } catch (err) {
+    console.warn("[BILLING RECON] Decart mismatch check skipped:", err.message);
+  }
+}
+
+async function detectBalanceDrift({ userId, sessionId, source, balanceBefore, creditsDeducted, actualBalanceAfter }) {
+  const before = safeBillingNumber(balanceBefore);
+  const deducted = safeBillingNumber(creditsDeducted);
+  const actual = safeBillingNumber(actualBalanceAfter);
+  if (before === null || deducted === null || actual === null) return;
+  const expectedAfter = Math.max(0, before - deducted);
+  const drift = Math.round((actual - expectedAfter) * 1000) / 1000;
+  const absDrift = Math.abs(drift);
+  if (absDrift >= BILLING_BALANCE_DRIFT_SEVERE) {
+    await logBillingReconciliationEvent({
+      userId,
+      sessionId,
+      type: "balance_drift_severe",
+      severity: "high",
+      details: { source, balance_before: before, credits_deducted: deducted, expected_after: expectedAfter, actual_after: actual, drift },
+    });
+  } else if (absDrift >= BILLING_BALANCE_DRIFT_WARNING) {
+    await logBillingReconciliationEvent({
+      userId,
+      sessionId,
+      type: "balance_drift_warning",
+      severity: "warning",
+      details: { source, balance_before: before, credits_deducted: deducted, expected_after: expectedAfter, actual_after: actual, drift },
+    });
+  }
+}
+
+async function detectSuspiciousSyncPattern({ userId, sessionId, syncId, source, durationSecs, creditsRequested }) {
+  const duration = safeBillingNumber(durationSecs);
+  const credits = safeBillingNumber(creditsRequested);
+  if (duration === null || credits === null) {
+    await logBillingReconciliationEvent({
+      userId,
+      sessionId,
+      type: "invalid_session_duration",
+      severity: "warning",
+      details: { sync_id: syncId || null, source, duration_secs: durationSecs, credits_requested: creditsRequested },
+    });
+    return;
+  }
+  if (duration === 0 || (duration <= BILLING_TINY_SYNC_SECONDS && credits > 0)) {
+    await logBillingReconciliationEvent({
+      userId,
+      sessionId,
+      type: "suspicious_sync_pattern",
+      severity: "warning",
+      details: { sync_id: syncId || null, source, duration_secs: duration, credits_requested: credits, reason: "tiny_or_zero_duration_sync" },
+    });
+  }
+}
+
+async function detectMissingFinalSync(session) {
+  if (!session?.session_id || !session.started_at || !session.last_ping) return;
+  const durationSecs = Math.max(0, Math.round((new Date(session.last_ping) - new Date(session.started_at)) / 1000));
+  if (durationSecs < BILLING_MISSING_FINAL_MIN_SECONDS) return;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("billing_syncs")
+      .select("source")
+      .eq("session_id", session.session_id)
+      .in("source", ["final", "manual_stop", "app_shutdown"])
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      if (!isMissingBillingMigrationError(error)) console.warn("[BILLING RECON] Missing final lookup error:", error.message);
+      return;
+    }
+    if (!data) {
+      await logReconciliationEventOnce({
+        userId: session.user_id || null,
+        sessionId: session.session_id,
+        type: "missing_final_sync",
+        severity: "warning",
+        details: { duration_secs: durationSecs, started_at: session.started_at, last_ping: session.last_ping },
+      }, 24 * 60 * 60 * 1000);
+    }
+  } catch (err) {
+    if (!isMissingBillingMigrationError(err)) console.warn("[BILLING RECON] Missing final detection failed:", err.message);
+  }
+}
+
+async function detectSessionAnomalies() {
+  try {
+    const staleCutoff = new Date(Date.now() - BILLING_STALE_MS).toISOString();
+    const orphanCutoff = new Date(Date.now() - BILLING_ORPHAN_ACTIVE_MS).toISOString();
+
+    const { data: staleActive, error: staleErr } = await supabaseAdmin
+      .from("sessions")
+      .select("user_id, session_id, started_at, last_ping, last_sync_at, credits_used")
+      .eq("is_active", true)
+      .lt("last_ping", staleCutoff)
+      .limit(50);
+    if (staleErr && !isMissingBillingMigrationError(staleErr)) {
+      console.warn("[BILLING RECON] Stale active scan error:", staleErr.message);
+    }
+    for (const sess of staleActive || []) {
+      await logReconciliationEventOnce({
+        userId: sess.user_id,
+        sessionId: sess.session_id,
+        type: "stale_session_detected",
+        severity: "warning",
+        details: { last_ping: sess.last_ping, started_at: sess.started_at, credits_used: sess.credits_used || 0, source: "reconciliation_scan" },
+      });
+    }
+
+    const { data: orphanActive, error: orphanErr } = await supabaseAdmin
+      .from("sessions")
+      .select("user_id, session_id, started_at, last_ping, last_sync_at, credits_used")
+      .eq("is_active", true)
+      .lt("last_ping", orphanCutoff)
+      .limit(50);
+    if (orphanErr && !isMissingBillingMigrationError(orphanErr)) {
+      console.warn("[BILLING RECON] Orphan active scan error:", orphanErr.message);
+    }
+    for (const sess of orphanActive || []) {
+      await logReconciliationEventOnce({
+        userId: sess.user_id,
+        sessionId: sess.session_id,
+        type: "orphan_active_session",
+        severity: "high",
+        details: { last_ping: sess.last_ping, started_at: sess.started_at, credits_used: sess.credits_used || 0, source: "reconciliation_scan" },
+      }, 60 * 60 * 1000);
+    }
+
+    const inactiveCutoff = new Date(Date.now() - 60 * 1000).toISOString();
+    const { data: inactiveSessions, error: inactiveErr } = await supabaseAdmin
+      .from("sessions")
+      .select("user_id, session_id, started_at, last_ping, is_active")
+      .eq("is_active", false)
+      .gte("last_ping", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .lte("last_ping", inactiveCutoff)
+      .limit(100);
+    if (inactiveErr && !isMissingBillingMigrationError(inactiveErr)) {
+      console.warn("[BILLING RECON] Missing final scan error:", inactiveErr.message);
+    }
+    for (const sess of inactiveSessions || []) {
+      await detectMissingFinalSync(sess);
+    }
+  } catch (err) {
+    console.warn("[BILLING RECON] Session anomaly scan failed:", err.message);
+  }
 }
 
 async function validateBillingSession(userId, sessionId, source = "legacy") {
@@ -576,7 +870,40 @@ async function recordBillingShadowSync({
       status: data?.status,
       duplicate: !!data?.duplicate,
     };
-    if (data?.duplicate) console.warn("[BILLING SHADOW] Duplicate sync detected:", shadowLog);
+    await detectBillingDrift({
+      userId,
+      sessionId: resolvedSessionId,
+      syncId,
+      source: source || "legacy",
+      durationSecs: safeDuration,
+      creditsRequested: safeCredits,
+      creditsExpected: data?.credits_expected,
+    });
+    await detectDecartBillingMismatch({
+      userId,
+      sessionId: resolvedSessionId,
+      source: source || "legacy",
+      durationSecs: safeDuration,
+      creditsRequested: safeCredits,
+    });
+    await detectSuspiciousSyncPattern({
+      userId,
+      sessionId: resolvedSessionId,
+      syncId,
+      source: source || "legacy",
+      durationSecs: safeDuration,
+      creditsRequested: safeCredits,
+    });
+    if (data?.duplicate) {
+      await logBillingReconciliationEvent({
+        userId,
+        sessionId: resolvedSessionId,
+        type: "duplicate_sync_id_detected",
+        severity: "warning",
+        details: shadowLog,
+      });
+      console.warn("[BILLING SHADOW] Duplicate sync detected:", shadowLog);
+    }
     else if (data?.status && data.status !== "shadow_ok") console.warn("[BILLING SHADOW] Shadow warning:", shadowLog);
     else console.log("[BILLING SHADOW] Recorded:", shadowLog);
     return data;
@@ -843,6 +1170,26 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
     });
   }
 
+  const duplicateSync = await detectDuplicateSyncId({
+    userId: req.userId,
+    sessionId: session_id || null,
+    syncId: sync_id || null,
+    source: source || "credits_deduct",
+  });
+  if (duplicateSync.duplicate) {
+    const { data: currentProfile } = await supabaseAdmin
+      .from("profiles")
+      .select("credits")
+      .eq("id", req.userId)
+      .maybeSingle();
+    return res.json({
+      ok: true,
+      duplicate: true,
+      skipped_deduction: true,
+      credits_remaining: currentProfile?.credits ?? duplicateSync.balanceAfter ?? 0,
+    });
+  }
+
   const { data: profile, error: fetchErr } = await supabaseAdmin
     .from("profiles")
     .select("credits, total_credits_used")
@@ -885,7 +1232,30 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
 
   console.log("[DEDUCT] update error:", updateErr?.message || "none");
 
-  if (updateErr) return res.status(500).json({ error: updateErr.message });
+  if (updateErr) {
+    await logBillingReconciliationEvent({
+      userId: req.userId,
+      sessionId: session_id || null,
+      type: "failed_billing_write",
+      severity: "critical",
+      details: { endpoint: "credits_deduct", source: source || "credits_deduct", error: updateErr.message },
+    });
+    return res.status(500).json({ error: updateErr.message });
+  }
+
+  const { data: postUpdateProfile } = await supabaseAdmin
+    .from("profiles")
+    .select("credits")
+    .eq("id", req.userId)
+    .maybeSingle();
+  await detectBalanceDrift({
+    userId: req.userId,
+    sessionId: session_id || null,
+    source: source || "credits_deduct",
+    balanceBefore: profile.credits,
+    creditsDeducted: credits,
+    actualBalanceAfter: postUpdateProfile?.credits ?? newBalance,
+  });
 
   if (session_seconds && session_seconds > 0) {
     const now = new Date().toISOString();
@@ -977,6 +1347,26 @@ app.post("/credits/sync", requireAuth, async (req, res) => {
       });
     }
 
+    const duplicateSync = await detectDuplicateSyncId({
+      userId: req.userId,
+      sessionId: session_id || null,
+      syncId: sync_id || null,
+      source: source || "credits_sync",
+    });
+    if (duplicateSync.duplicate) {
+      const { data: currentProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("credits")
+        .eq("id", req.userId)
+        .maybeSingle();
+      return res.json({
+        ok: true,
+        duplicate: true,
+        skipped_deduction: true,
+        credits_remaining: currentProfile?.credits ?? duplicateSync.balanceAfter ?? 0,
+      });
+    }
+
     const rows = usage_logs.map((log) => ({
       user_id:         req.userId,
       session_seconds: log.session_seconds,
@@ -1007,9 +1397,32 @@ app.post("/credits/sync", requireAuth, async (req, res) => {
         legacyBalanceAfter,
       });
 
-      await supabaseAdmin.from("profiles")
+      const { error: profileUpdateErr } = await supabaseAdmin.from("profiles")
         .update({ credits: legacyBalanceAfter })
         .eq("id", req.userId);
+      if (profileUpdateErr) {
+        await logBillingReconciliationEvent({
+          userId: req.userId,
+          sessionId: session_id || null,
+          type: "failed_billing_write",
+          severity: "critical",
+          details: { endpoint: "credits_sync", source: source || "credits_sync", error: profileUpdateErr.message },
+        });
+      } else {
+        const { data: postUpdateProfile } = await supabaseAdmin
+          .from("profiles")
+          .select("credits")
+          .eq("id", req.userId)
+          .maybeSingle();
+        await detectBalanceDrift({
+          userId: req.userId,
+          sessionId: session_id || null,
+          source: source || "credits_sync",
+          balanceBefore: profile.credits,
+          creditsDeducted: totalCredits,
+          actualBalanceAfter: postUpdateProfile?.credits ?? legacyBalanceAfter,
+        });
+      }
     }
   }
 
@@ -2085,13 +2498,13 @@ app.post("/session/end", async (req, res) => {
     let sessResult;
     if (session_id) {
       let sessionEndQuery = supabaseAdmin.from("sessions")
-        .select("id, is_active, started_at, last_sync_at, session_id")
+        .select("id, user_id, is_active, started_at, last_sync_at, last_ping, session_id")
         .eq("session_id", session_id);
       if (user_id) sessionEndQuery = sessionEndQuery.eq("user_id", user_id);
       sessResult = await sessionEndQuery.maybeSingle();
     } else {
       sessResult = await supabaseAdmin.from("sessions")
-        .select("id, is_active, started_at, last_sync_at, session_id")
+        .select("id, user_id, is_active, started_at, last_sync_at, last_ping, session_id")
         .eq("user_id", user_id)
         .eq("is_active", true)
         .order("started_at", { ascending: false })
@@ -2107,6 +2520,7 @@ app.post("/session/end", async (req, res) => {
     await supabaseAdmin.from("sessions")
       .update({ is_active: false, last_ping: endedAt.toISOString() })
       .eq("id", session.id);
+    session.last_ping = endedAt.toISOString();
 
     if (session.started_at) {
       const startedAt    = new Date(session.started_at);
@@ -2124,6 +2538,8 @@ app.post("/session/end", async (req, res) => {
         }
       }
     }
+
+    await detectMissingFinalSync(session);
 
     res.json({ ok: true });
   } catch (err) {
@@ -2287,6 +2703,63 @@ app.get("/admin/api/decart-log", adminAuth, async (_req, res) => {
 });
 
 // ── Admin: recent activity feed ───────────────────────────────────
+// GET /admin/api/reconciliation/summary - lightweight billing anomaly summary
+app.get("/admin/api/reconciliation/summary", adminAuth, async (_req, res) => {
+  try {
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const [eventsRes, sessionsRes, staleRes, syncsRes] = await Promise.all([
+      supabaseAdmin
+        .from("billing_reconciliation_events")
+        .select("type, severity, created_at")
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(1000),
+      supabaseAdmin.from("sessions").select("id", { count: "exact", head: true }),
+      supabaseAdmin
+        .from("sessions")
+        .select("id", { count: "exact", head: true })
+        .eq("is_active", true)
+        .lt("last_ping", new Date(Date.now() - BILLING_STALE_MS).toISOString()),
+      supabaseAdmin
+        .from("billing_syncs")
+        .select("id", { count: "exact", head: true })
+        .gte("created_at", since),
+    ]);
+
+    const events = eventsRes.data || [];
+    const byType = {};
+    const bySeverity = { info: 0, warning: 0, high: 0, critical: 0 };
+    for (const event of events) {
+      byType[event.type] = (byType[event.type] || 0) + 1;
+      bySeverity[event.severity] = (bySeverity[event.severity] || 0) + 1;
+    }
+
+    return res.json({
+      ok: true,
+      window_days: 7,
+      total_sessions: sessionsRes.count || 0,
+      total_anomalies: events.length,
+      severe_anomalies: (bySeverity.high || 0) + (bySeverity.critical || 0),
+      drift_totals: {
+        rounding_warning: byType.billing_rounding_drift_warning || 0,
+        rounding_severe: byType.billing_rounding_drift_severe || 0,
+        balance_warning: byType.balance_drift_warning || 0,
+        balance_severe: byType.balance_drift_severe || 0,
+      },
+      duplicate_sync_count: byType.duplicate_sync_id_detected || 0,
+      missing_final_sync_count: byType.missing_final_sync || 0,
+      stale_session_count: (byType.stale_session_detected || 0) + (staleRes.count || 0),
+      billing_sync_count: syncsRes.count || 0,
+      counts_by_type: byType,
+      counts_by_severity: bySeverity,
+      latest: events.slice(0, 20),
+    });
+  } catch (err) {
+    console.warn("[RECON SUMMARY] Error:", err.message);
+    return res.json({ ok: true, error: err.message, total_anomalies: 0 });
+  }
+});
+
 app.get("/admin/api/activity", adminAuth, async (_req, res) => {
   try {
     const [purchRes, usageRes, signupRes] = await Promise.all([
@@ -3940,6 +4413,14 @@ setInterval(async () => {
         kill_reason: "Session timed out — no ping received",
         last_ping:   now.toISOString(),
       }).eq("session_id", sess.session_id);
+      await logBillingReconciliationEvent({
+        userId: sess.user_id,
+        sessionId: sess.session_id,
+        type: "stale_session_detected",
+        severity: "warning",
+        details: { last_ping: sess.last_ping, unbilled_secs: unbilledSecs, source: "watchdog" },
+      });
+      await detectMissingFinalSync({ ...sess, last_ping: now.toISOString() });
 
       logAction("session_timeout", "system", "system", sess.user_id, {
         session_id:    sess.session_id,
@@ -3953,6 +4434,12 @@ setInterval(async () => {
     console.error("[WATCHDOG] Error:", err.message);
   }
 }, 30 * 1000);
+
+setInterval(() => {
+  detectSessionAnomalies().catch((err) => {
+    console.warn("[BILLING RECON] Scheduled scan failed:", err.message);
+  });
+}, 2 * 60 * 1000);
 
 app.listen(PORT, () => {
   console.log("═══════════════════════════════════════════════════════");
