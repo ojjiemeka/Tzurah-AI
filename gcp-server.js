@@ -331,6 +331,7 @@ const BILLING_ORPHAN_ACTIVE_MS = 5 * 60 * 1000;
 const BILLING_TINY_SYNC_SECONDS = 1;
 let _billingShadowRpcAvailable = null;
 const _activityWarningCache = new Map();
+const _protectedBillingFailureTimes = [];
 
 function finiteNonNegativeNumber(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
@@ -1126,6 +1127,257 @@ async function recordBillingShadowSync({
   }
 }
 
+async function getBillingSyncRecord({ userId, sessionId, syncId }) {
+  if (!userId || !sessionId || !syncId) return null;
+  const { data, error } = await supabaseAdmin
+    .from("billing_syncs")
+    .select("sync_id,status,reason,credits_requested,credits_expected,credits_deducted,balance_before,balance_after,shadow_only,created_at")
+    .eq("user_id", userId)
+    .eq("session_id", sessionId)
+    .eq("sync_id", syncId)
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    if (!isMissingBillingMigrationError(error)) console.warn("[PROTECTED BILLING] Sync row lookup error:", error.message);
+    return null;
+  }
+  return data || null;
+}
+
+async function maybeForceLegacyAfterProtectedFailure(reason) {
+  const now = Date.now();
+  _protectedBillingFailureTimes.push(now);
+  while (_protectedBillingFailureTimes.length && now - _protectedBillingFailureTimes[0] > 5 * 60 * 1000) {
+    _protectedBillingFailureTimes.shift();
+  }
+  if (_protectedBillingFailureTimes.length < 3) return false;
+  try {
+    const { error } = await supabaseAdmin.from("feature_flags").upsert({
+      key: "protected_billing_force_legacy",
+      enabled: true,
+      description: "Emergency rollback: auto-forced after repeated protected billing failures",
+      updated_at: new Date().toISOString(),
+      updated_by: "protected_billing_auto_rollback",
+    }, { onConflict: "key" });
+    if (error) throw new Error(error.message);
+    await logBillingReconciliationEvent({
+      type: "protected_billing_auto_force_legacy",
+      severity: "critical",
+      details: { reason, failure_count: _protectedBillingFailureTimes.length, window_minutes: 5 },
+    });
+    return true;
+  } catch (err) {
+    console.warn("[PROTECTED BILLING] Auto rollback failed:", err.message);
+    return false;
+  }
+}
+
+async function logProtectedBillingFallback({ userId, sessionId, syncId, source, reason, error }) {
+  await logBillingReconciliationEvent({
+    userId,
+    sessionId,
+    type: "protected_billing_fallback_to_legacy",
+    severity: "high",
+    details: {
+      sync_id: syncId || null,
+      source,
+      reason,
+      error: error || null,
+      legacy_authoritative_for_request: true,
+    },
+  });
+  await maybeForceLegacyAfterProtectedFailure(reason);
+}
+
+async function logProtectedLegacyComparison({
+  userId,
+  sessionId,
+  syncId,
+  source,
+  legacyRequested,
+  protectedDeducted,
+  balanceBefore,
+  legacyBalanceAfter,
+  protectedBalanceAfter,
+  mode,
+}) {
+  const deductionDrift = Math.abs(Number(legacyRequested || 0) - Number(protectedDeducted || 0));
+  const balanceDrift = Math.abs(Number(legacyBalanceAfter || 0) - Number(protectedBalanceAfter || 0));
+  const drift = Math.max(deductionDrift, balanceDrift);
+  const type = drift >= BILLING_ROUNDING_DRIFT_SEVERE
+    ? "protected_legacy_mismatch_severe"
+    : drift >= BILLING_ROUNDING_DRIFT_WARNING
+      ? "protected_legacy_mismatch_warning"
+      : "protected_legacy_match";
+  const severity = type === "protected_legacy_mismatch_severe" ? "high" : type === "protected_legacy_mismatch_warning" ? "warning" : "info";
+  await logBillingReconciliationEvent({
+    userId,
+    sessionId,
+    type,
+    severity,
+    details: {
+      sync_id: syncId || null,
+      source,
+      mode,
+      legacy_requested: legacyRequested,
+      protected_deducted: protectedDeducted,
+      balance_before: balanceBefore,
+      legacy_balance_after: legacyBalanceAfter,
+      protected_balance_after: protectedBalanceAfter,
+      drift,
+      authoritative_path: "protected",
+    },
+  });
+  if (type === "protected_legacy_mismatch_severe") {
+    await maybeForceLegacyAfterProtectedFailure(type);
+  }
+}
+
+async function recordProtectedBillingLiveSync({
+  userId,
+  sessionId,
+  syncId,
+  syncSequence,
+  durationSecs,
+  creditsRequested,
+  clientTs,
+  source,
+  profileBefore,
+  mode,
+}) {
+  const resolvedSyncId = syncId || makeLegacyBillingSyncId(source || "protected_live");
+  const legacyBalanceAfter = Math.max(0, Number(profileBefore?.credits || 0) - Number(creditsRequested || 0));
+
+  try {
+    const { data, error } = await supabaseAdmin.rpc("protected_billing_sync", {
+      p_user_id: userId,
+      p_session_id: sessionId,
+      p_sync_id: resolvedSyncId,
+      p_sync_sequence: Number.isInteger(Number(syncSequence)) ? Number(syncSequence) : null,
+      p_duration_secs: durationSecs,
+      p_credits_requested: creditsRequested,
+      p_client_ts: clientTs || null,
+      p_shadow_only: false,
+      p_source: source || "protected_live",
+      p_legacy_balance_after: null,
+    });
+
+    if (error) {
+      await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: "rpc_error", error: error.message });
+      return { ok: false, fallback: true, reason: "rpc_error", syncId: resolvedSyncId };
+    }
+
+    if (data?.duplicate) {
+      const { data: currentProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("credits")
+        .eq("id", userId)
+        .maybeSingle();
+      return {
+        ok: true,
+        duplicate: true,
+        syncId: resolvedSyncId,
+        creditsRemaining: currentProfile?.credits ?? data?.credits_remaining ?? profileBefore?.credits ?? 0,
+      };
+    }
+
+    const syncRow = await getBillingSyncRecord({ userId, sessionId, syncId: resolvedSyncId });
+    if (!syncRow) {
+      await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: "missing_billing_sync_insert" });
+      return { ok: false, fallback: true, reason: "missing_billing_sync_insert", syncId: resolvedSyncId };
+    }
+
+    const protectedDeducted = Number(syncRow.credits_deducted ?? data?.credits_deducted ?? 0);
+    const protectedBalanceAfter = Number(syncRow.balance_after ?? data?.balance_after ?? data?.credits_remaining);
+    if (syncRow.status !== "live_ok" || syncRow.shadow_only === true) {
+      await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: `unexpected_rpc_status:${syncRow.status}` });
+      return { ok: false, fallback: true, reason: "unexpected_rpc_status", syncId: resolvedSyncId };
+    }
+    if (!Number.isFinite(protectedBalanceAfter) || protectedBalanceAfter < 0 || protectedDeducted < 0) {
+      await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: "invalid_protected_balance_after" });
+      return { ok: false, fallback: true, reason: "invalid_protected_balance_after", syncId: resolvedSyncId };
+    }
+    if (Number(creditsRequested || 0) > 0 && protectedDeducted <= 0) {
+      await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: "missing_protected_deduction" });
+      return { ok: false, fallback: true, reason: "missing_protected_deduction", syncId: resolvedSyncId };
+    }
+
+    const { data: postProfile, error: postErr } = await supabaseAdmin
+      .from("profiles")
+      .select("credits,total_credits_used")
+      .eq("id", userId)
+      .maybeSingle();
+    if (postErr || !postProfile) {
+      await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: "profile_verify_failed", error: postErr?.message || "profile_not_found" });
+      return { ok: false, fallback: true, reason: "profile_verify_failed", syncId: resolvedSyncId };
+    }
+    if (Math.abs(Number(postProfile.credits || 0) - protectedBalanceAfter) > 0.001) {
+      await logProtectedBillingFallback({
+        userId,
+        sessionId,
+        syncId: resolvedSyncId,
+        source,
+        reason: "profile_balance_not_mutated_by_rpc",
+        error: `profile=${postProfile.credits} rpc=${protectedBalanceAfter}`,
+      });
+      return { ok: false, fallback: true, reason: "profile_balance_not_mutated_by_rpc", syncId: resolvedSyncId };
+    }
+
+    await logProtectedLegacyComparison({
+      userId,
+      sessionId,
+      syncId: resolvedSyncId,
+      source,
+      legacyRequested: creditsRequested,
+      protectedDeducted,
+      balanceBefore: syncRow.balance_before ?? profileBefore?.credits ?? 0,
+      legacyBalanceAfter,
+      protectedBalanceAfter,
+      mode,
+    });
+
+    return {
+      ok: true,
+      protected: true,
+      syncId: resolvedSyncId,
+      creditsRemaining: protectedBalanceAfter,
+      creditsDeducted: protectedDeducted,
+      status: syncRow.status,
+    };
+  } catch (err) {
+    await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: "protected_live_exception", error: err.message });
+    return { ok: false, fallback: true, reason: "protected_live_exception", syncId: resolvedSyncId };
+  }
+}
+
+async function recordUsageAndSessionSync({ userId, sessionId, sessionSeconds, credits, usageRows = null }) {
+  const now = new Date().toISOString();
+  if (usageRows?.length) {
+    const { error } = await supabaseAdmin.from("usage").insert(usageRows);
+    if (error) console.warn("[BILLING] usage insert error:", error.message);
+  } else if (sessionSeconds && sessionSeconds > 0) {
+    const { error } = await supabaseAdmin.from("usage").insert({
+      user_id: userId,
+      session_seconds: sessionSeconds,
+      credits_used: credits,
+      ended_at: now,
+      created_at: now,
+    });
+    if (error) console.warn("[BILLING] usage insert error:", error.message);
+  }
+
+  if (sessionSeconds && sessionSeconds > 0) {
+    let syncUpdateQuery = supabaseAdmin
+      .from("sessions")
+      .update({ last_sync_at: now })
+      .eq("user_id", userId)
+      .eq("is_active", true);
+    if (sessionId) syncUpdateQuery = syncUpdateQuery.eq("session_id", sessionId);
+    const { error } = await syncUpdateQuery;
+    if (error) console.warn("[BILLING] session last_sync_at update error:", error.message);
+  }
+}
+
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:4000",
@@ -1419,18 +1671,65 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
 
   const newBalance      = Math.max(0, profile.credits - credits);
   const newTotalUsed    = (profile.total_credits_used || 0) + credits;
+  const billingMode = await resolveBillingModeForUser(req.userId);
+  const protectedAuthoritative = billingMode.protected_live_enabled === true;
+  let protectedAttempted = false;
 
-  await recordBillingShadowSync({
-    userId: req.userId,
-    sessionId: session_id || null,
-    syncId: sync_id || null,
-    syncSequence: sync_sequence,
-    durationSecs: session_seconds,
-    creditsRequested: credits,
-    clientTs: client_ts || null,
-    source: source || "credits_deduct",
-    legacyBalanceAfter: newBalance,
-  });
+  if (protectedAuthoritative) {
+    protectedAttempted = true;
+    const protectedResult = await recordProtectedBillingLiveSync({
+      userId: req.userId,
+      sessionId: session_id || null,
+      syncId: sync_id || null,
+      syncSequence: sync_sequence,
+      durationSecs: session_seconds,
+      creditsRequested: credits,
+      clientTs: client_ts || null,
+      source: source || "credits_deduct",
+      profileBefore: profile,
+      mode: billingMode.mode,
+    });
+    if (protectedResult.ok) {
+      if (protectedResult.duplicate) {
+        return res.json({
+          ok: true,
+          duplicate: true,
+          skipped_deduction: true,
+          billing_mode: billingMode.mode,
+          credits_remaining: protectedResult.creditsRemaining,
+        });
+      }
+      await recordUsageAndSessionSync({
+        userId: req.userId,
+        sessionId: session_id || null,
+        sessionSeconds: session_seconds,
+        credits,
+      });
+      console.log("[DEDUCT] protected live success - new balance:", protectedResult.creditsRemaining);
+      return res.json({
+        ok: true,
+        billing_mode: billingMode.mode,
+        protected_billing: true,
+        credits_remaining: protectedResult.creditsRemaining,
+        credits_deducted: protectedResult.creditsDeducted,
+      });
+    }
+    console.warn("[DEDUCT] Protected billing fallback to legacy:", protectedResult.reason);
+  }
+
+  if (!protectedAttempted) {
+    await recordBillingShadowSync({
+      userId: req.userId,
+      sessionId: session_id || null,
+      syncId: sync_id || null,
+      syncSequence: sync_sequence,
+      durationSecs: session_seconds,
+      creditsRequested: credits,
+      clientTs: client_ts || null,
+      source: source || "credits_deduct",
+      legacyBalanceAfter: newBalance,
+    });
+  }
 
   console.log("[DEDUCT] updating balance:", profile.credits, "→", newBalance);
 
@@ -1470,30 +1769,20 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
     actualBalanceAfter: postUpdateProfile?.credits ?? newBalance,
   });
 
-  if (session_seconds && session_seconds > 0) {
-    const now = new Date().toISOString();
-    const { error: usageInsertErr } = await supabaseAdmin.from("usage").insert({
-      user_id:         req.userId,
-      session_seconds: session_seconds,
-      credits_used:    credits,
-      ended_at:        now,
-      created_at:      now,
-    });
-    if (usageInsertErr) console.warn("[DEDUCT] usage insert error:", usageInsertErr.message);
-
-    // Track last sync time so /session/end can deduct only the remaining unsync'd period
-    let syncUpdateQuery = supabaseAdmin
-      .from("sessions")
-      .update({ last_sync_at: now })
-      .eq("user_id", req.userId)
-      .eq("is_active", true);
-    if (session_id) syncUpdateQuery = syncUpdateQuery.eq("session_id", session_id);
-    const { error: sessionSyncErr } = await syncUpdateQuery;
-    if (sessionSyncErr) console.warn("[DEDUCT] session last_sync_at update error:", sessionSyncErr.message);
-  }
+  await recordUsageAndSessionSync({
+    userId: req.userId,
+    sessionId: session_id || null,
+    sessionSeconds: session_seconds,
+    credits,
+  });
 
   console.log("[DEDUCT] success — new balance:", newBalance);
-  res.json({ ok: true, credits_remaining: newBalance });
+  res.json({
+    ok: true,
+    billing_mode: protectedAttempted ? "protected_fallback_legacy" : billingMode.mode,
+    protected_billing: false,
+    credits_remaining: newBalance,
+  });
 });
 
 /**
@@ -1589,25 +1878,71 @@ app.post("/credits/sync", requireAuth, async (req, res) => {
       created_at:      new Date().toISOString(),
     }));
 
-    const { error: usageInsertErr } = await supabaseAdmin.from("usage").insert(rows);
-    if (usageInsertErr) console.warn("[SYNC] usage insert error:", usageInsertErr.message);
-
-    // Fetch and deduct atomically
     const { data: profile } = await supabaseAdmin
-      .from("profiles").select("credits").eq("id", req.userId).maybeSingle();
+      .from("profiles").select("credits,total_credits_used").eq("id", req.userId).maybeSingle();
 
     if (profile) {
       const legacyBalanceAfter = Math.max(0, profile.credits - totalCredits);
-      await recordBillingShadowSync({
+      const billingMode = await resolveBillingModeForUser(req.userId);
+      const protectedAuthoritative = billingMode.protected_live_enabled === true;
+      let protectedAttempted = false;
+
+      if (protectedAuthoritative) {
+        protectedAttempted = true;
+        const protectedResult = await recordProtectedBillingLiveSync({
+          userId: req.userId,
+          sessionId: session_id || null,
+          syncId: sync_id || null,
+          syncSequence: sync_sequence,
+          durationSecs: Number(totalSeconds) || 0,
+          creditsRequested: Number(totalCredits) || 0,
+          clientTs: client_ts || null,
+          source: source || "credits_sync",
+          profileBefore: profile,
+          mode: billingMode.mode,
+        });
+        if (protectedResult.ok) {
+          if (!protectedResult.duplicate) {
+            await recordUsageAndSessionSync({
+              userId: req.userId,
+              sessionId: session_id || null,
+              sessionSeconds: Number(totalSeconds) || 0,
+              credits: Number(totalCredits) || 0,
+              usageRows: rows,
+            });
+          }
+          return res.json({
+            ok: true,
+            duplicate: !!protectedResult.duplicate,
+            billing_mode: billingMode.mode,
+            protected_billing: true,
+            credits_remaining: protectedResult.creditsRemaining,
+            credits_deducted: protectedResult.creditsDeducted || 0,
+          });
+        }
+        console.warn("[SYNC] Protected billing fallback to legacy:", protectedResult.reason);
+      }
+
+      if (!protectedAttempted) {
+        await recordBillingShadowSync({
+          userId: req.userId,
+          sessionId: session_id || null,
+          syncId: sync_id || null,
+          syncSequence: sync_sequence,
+          durationSecs: Number(totalSeconds) || 0,
+          creditsRequested: Number(totalCredits) || 0,
+          clientTs: client_ts || null,
+          source: source || "credits_sync",
+          legacyBalanceAfter,
+        });
+      }
+
+      await recordUsageAndSessionSync({
         userId: req.userId,
         sessionId: session_id || null,
-        syncId: sync_id || null,
-        syncSequence: sync_sequence,
-        durationSecs: Number(totalSeconds) || 0,
-        creditsRequested: Number(totalCredits) || 0,
-        clientTs: client_ts || null,
-        source: source || "credits_sync",
-        legacyBalanceAfter,
+        sessionSeconds: Number(totalSeconds) || 0,
+        credits: Number(totalCredits) || 0,
+        usageRows: rows,
       });
 
       const { error: profileUpdateErr } = await supabaseAdmin.from("profiles")

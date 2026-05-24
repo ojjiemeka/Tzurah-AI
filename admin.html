@@ -1716,6 +1716,7 @@ kbd {
             <div class="billing-state-item"><div class="billing-state-label">Current Mode</div><div class="billing-state-value" id="cutover-current-mode">legacy_only</div></div>
             <div class="billing-state-item"><div class="billing-state-label">Shadow Compare</div><div class="billing-state-value" id="cutover-shadow-state">--</div></div>
             <div class="billing-state-item"><div class="billing-state-label">Test Users</div><div class="billing-state-value" id="cutover-test-state">--</div></div>
+            <div class="billing-state-item"><div class="billing-state-label">Global Live</div><div class="billing-state-value" id="cutover-global-state">OFF</div></div>
             <div class="billing-state-item"><div class="billing-state-label">Rollback State</div><div class="billing-state-value" id="cutover-rollback-state">--</div></div>
           </div>
           <button id="billing-mode-controls" class="btn btn-ghost btn-sm" style="margin-top:10px;width:100%;justify-content:center" onclick="openAdvancedBillingControls()">Advanced Billing Controls</button>
@@ -4027,10 +4028,12 @@ function renderBillingCutoverStatus(status) {
   const modeEl = document.getElementById("cutover-current-mode");
   const shadowEl = document.getElementById("cutover-shadow-state");
   const testEl = document.getElementById("cutover-test-state");
+  const globalEl = document.getElementById("cutover-global-state");
   const rollbackEl = document.getElementById("cutover-rollback-state");
   if (modeEl) modeEl.textContent = status?.mode || "legacy_only";
   if (shadowEl) shadowEl.textContent = flags.protected_billing_shadow_compare ? "On" : "Off";
   if (testEl) testEl.textContent = flags.enable_protected_billing_test_users ? `${fmtN(status?.allowlist?.length || 0)} enabled` : "Disabled";
+  if (globalEl) globalEl.textContent = flags.enable_protected_billing_global ? "ON" : "OFF";
   if (rollbackEl) rollbackEl.textContent = flags.protected_billing_force_legacy ? "Forced legacy" : "Not forced";
   const set = (id, value) => { const el = document.getElementById(id); if (el) el.checked = value === true; };
   set("flag-shadow-compare", flags.protected_billing_shadow_compare);
