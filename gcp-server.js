@@ -2949,6 +2949,9 @@ app.get("/admin/api/reconciliation/summary", adminAuth, async (req, res) => {
     const status = ["active", "resolved", "all"].includes(String(req.query.status || "active"))
       ? String(req.query.status || "active")
       : "active";
+    const testMode = ["real", "test", "all"].includes(String(req.query.test_mode || "real"))
+      ? String(req.query.test_mode || "real")
+      : "real";
     const autoResolvedDuringRequest = await autoResolveRecentMissingFinalFalsePositives(since);
     let eventsQuery = supabaseAdmin
       .from("billing_reconciliation_events")
@@ -2997,7 +3000,13 @@ app.get("/admin/api/reconciliation/summary", adminAuth, async (req, res) => {
       eventsRes.resolutionFallback = true;
     }
 
-    const events = eventsRes.data || [];
+    const allEvents = eventsRes.data || [];
+    const events = allEvents.filter(event => {
+      const isTest = event.details?.test_mode === true || event.details?.test_mode === "true";
+      if (testMode === "test") return isTest;
+      if (testMode === "real") return !isTest;
+      return true;
+    });
     let resolvedCount = 0;
     let autoResolvedCount = 0;
     try {
@@ -3028,6 +3037,7 @@ app.get("/admin/api/reconciliation/summary", adminAuth, async (req, res) => {
       ok: true,
       window_days: 7,
       status,
+      test_mode: testMode,
       resolution_lifecycle_available: !eventsRes.resolutionFallback,
       total_sessions: sessionsRes.count || 0,
       total_anomalies: events.length,
@@ -3280,9 +3290,28 @@ app.post("/admin/api/reconciliation/soak-test", adminAuth, async (req, res) => {
       .select("id, session_id, sync_id, source, status");
     if (syncError) throw new Error(syncError.message);
 
-    const eventRows = [];
+    const scenarioEvents = soakScenarioEvents(scenario);
+    const eventRows = [{
+      user_id: userId,
+      session_id: sessions[0] || null,
+      type: "soak_test_completed",
+      severity: "info",
+      details: {
+        test_mode: true,
+        scenario,
+        generated_by: req.session.adminEmail || "admin",
+        run_id: runId,
+        dry_run: true,
+        session_count: sessionCount,
+        generated_syncs: insertedSyncs?.length || 0,
+        generated_events: scenarioEvents.length * sessions.length,
+        source: "soak_test",
+        message: `Dry-run completed: ${insertedSyncs?.length || 0} billing sync rows created, ${scenarioEvents.length * sessions.length} anomaly events.`,
+      },
+      created_at: new Date().toISOString(),
+    }];
     for (const sessionId of sessions) {
-      for (const event of soakScenarioEvents(scenario)) {
+      for (const event of scenarioEvents) {
         eventRows.push({
           user_id: userId,
           session_id: sessionId,
@@ -3331,7 +3360,10 @@ app.post("/admin/api/reconciliation/soak-test", adminAuth, async (req, res) => {
       user_id: userId,
       billing_sync_rows: insertedSyncs?.length || 0,
       reconciliation_events: insertedEvents.length,
+      anomaly_events: scenarioEvents.length * sessions.length,
       sessions: sessions.slice(0, 10),
+      latest_syncs: (insertedSyncs || []).slice(0, 10),
+      latest_events: insertedEvents.slice(0, 10),
       note: "Synthetic dry-run rows inserted only; no Decart call and no profile credit mutation.",
     });
   } catch (err) {

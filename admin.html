@@ -488,6 +488,14 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   background:#1a1a2e; border:1px solid #2a2a4a; border-radius:12px;
   padding:24px; min-width:380px; max-width:480px; width:100%;
 }
+.admin-modal-card.modal-attention {
+  animation: modal-attention-pulse .18s ease-in-out 0s 2;
+}
+@keyframes modal-attention-pulse {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
 .modal-header { font-size:1rem; font-weight:800; color:#fff; margin-bottom:12px; }
 .modal-body   { margin-bottom:18px; color:var(--text2); }
 .modal-subtitle { color:#fff; margin-bottom:10px; font-size:13px; }
@@ -1491,6 +1499,11 @@ kbd {
         <option value="active">Active</option>
         <option value="resolved">Resolved</option>
         <option value="all">All</option>
+      </select>
+      <select id="recon-test-filter" class="recon-filter" onchange="loadReconciliation()">
+        <option value="real">Real only</option>
+        <option value="test">Test only</option>
+        <option value="all">All rows</option>
       </select>
       <button id="soak-test-btn" class="btn btn-amber btn-sm" style="display:none;font-size:10px" onclick="openSoakTestModal()">Run Soak Test</button>
       <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="loadReconciliation()">Refresh</button>
@@ -2636,7 +2649,24 @@ function _dismissToast(t) {
 }
 
 // ── Modal system ──────────────────────────────────────────────────
-function bindModalKeyboard(ov, { cancelable = true } = {}) {
+function modalAttention(ov) {
+  const card = ov?.querySelector(".admin-modal-card");
+  if (!card) return;
+  card.classList.remove("modal-attention");
+  void card.offsetWidth;
+  card.classList.add("modal-attention");
+}
+
+function modalBehavior(opts = {}) {
+  const persistent = opts.persistent === true;
+  return {
+    cancelable: opts.cancelable !== false,
+    closeOnBackdrop: opts.closeOnBackdrop ?? !persistent,
+    closeOnEscape: opts.closeOnEscape ?? !persistent,
+  };
+}
+
+function bindModalKeyboard(ov, { cancelable = true, closeOnEscape = true } = {}) {
   const onKey = (e) => {
     if (!document.body.contains(ov)) {
       document.removeEventListener("keydown", onKey);
@@ -2644,7 +2674,11 @@ function bindModalKeyboard(ov, { cancelable = true } = {}) {
     }
     if (e.key === "Escape" && cancelable) {
       e.preventDefault();
-      ov.querySelector(".modal-btn-cancel")?.click();
+      if (closeOnEscape && ov.dataset.modalBusy !== "true") {
+        ov.querySelector(".modal-btn-cancel")?.click();
+      } else {
+        modalAttention(ov);
+      }
     } else if (e.key === "Enter" && !e.shiftKey) {
       if (e.target?.tagName === "TEXTAREA") return;
       e.preventDefault();
@@ -2664,9 +2698,12 @@ function closeModalOverlay(ov) {
 function showModal(htmlOrOpts, opts = {}) {
   // Object API: showModal({ title, body, onConfirm, confirmLabel, confirmClass })
   if (typeof htmlOrOpts !== "string") {
-    const { title, body, onConfirm, onCancel, confirmLabel = "Confirm", confirmClass = "", cancelLabel = "Cancel", cancelable = true } = htmlOrOpts;
+    const { title, body, onConfirm, onCancel, confirmLabel = "Confirm", confirmClass = "", cancelLabel = "Cancel" } = htmlOrOpts;
+    const behavior = modalBehavior(htmlOrOpts);
     const ov = document.createElement("div");
     ov.className = "admin-modal-overlay";
+    ov.dataset.closeOnEscape = behavior.closeOnEscape ? "true" : "false";
+    ov.dataset.closeOnBackdrop = behavior.closeOnBackdrop ? "true" : "false";
     ov.setAttribute("role", "dialog");
     ov.setAttribute("aria-modal", "true");
     ov.innerHTML = `
@@ -2674,32 +2711,51 @@ function showModal(htmlOrOpts, opts = {}) {
         <div class="modal-header">${title || ""}</div>
         <div class="modal-body">${body || ""}</div>
         <div class="modal-footer">
-          ${cancelable ? `<button class="modal-btn-cancel">${esc(cancelLabel)}</button>` : ""}
+          ${behavior.cancelable ? `<button class="modal-btn-cancel">${esc(cancelLabel)}</button>` : ""}
           <button class="modal-btn-confirm ${confirmClass}">${confirmLabel}</button>
         </div>
       </div>`;
     document.body.appendChild(ov);
     ov.querySelector(".modal-btn-cancel")?.addEventListener("click", () => { onCancel?.(); closeModalOverlay(ov); });
-    ov.addEventListener("click", e => { if (e.target === ov && cancelable) { onCancel?.(); closeModalOverlay(ov); } });
+    ov.addEventListener("click", e => {
+      if (e.target !== ov || !behavior.cancelable) return;
+      if (behavior.closeOnBackdrop && ov.dataset.modalBusy !== "true") {
+        onCancel?.();
+        closeModalOverlay(ov);
+      } else {
+        modalAttention(ov);
+      }
+    });
     ov.querySelector(".modal-btn-confirm").addEventListener("click", async () => {
       const result = await onConfirm?.();
       if (result !== false) closeModalOverlay(ov);
     });
-    bindModalKeyboard(ov, { cancelable });
+    bindModalKeyboard(ov, behavior);
     setTimeout(() => ov.querySelector("input,textarea,select")?.focus(), 80);
     return ov;
   }
 
   // String API: showModal(htmlString, opts)
+  const behavior = modalBehavior({ ...opts, persistent: opts.persistent !== false });
   const ov = document.createElement("div");
   ov.className = "admin-modal-overlay";
+  ov.dataset.closeOnEscape = behavior.closeOnEscape ? "true" : "false";
+  ov.dataset.closeOnBackdrop = behavior.closeOnBackdrop ? "true" : "false";
   ov.setAttribute("role", "dialog");
   ov.setAttribute("aria-modal", "true");
   ov.innerHTML = `<div class="admin-modal-card">${htmlOrOpts}</div>`;
   document.body.appendChild(ov);
 
   ov.querySelector(".modal-btn-cancel")?.addEventListener("click", () => { opts.onCancel?.(); closeModalOverlay(ov); });
-  ov.addEventListener("click", e => { if (e.target===ov) { opts.onCancel?.(); closeModalOverlay(ov); } });
+  ov.addEventListener("click", e => {
+    if (e.target !== ov || !behavior.cancelable) return;
+    if (behavior.closeOnBackdrop && ov.dataset.modalBusy !== "true") {
+      opts.onCancel?.();
+      closeModalOverlay(ov);
+    } else {
+      modalAttention(ov);
+    }
+  });
 
   const confirmBtn = ov.querySelector(".modal-btn-confirm");
   if (confirmBtn) {
@@ -2722,8 +2778,9 @@ function showModal(htmlOrOpts, opts = {}) {
       }
     });
   }
-  bindModalKeyboard(ov, { cancelable: opts.cancelable !== false });
+  bindModalKeyboard(ov, behavior);
   setTimeout(() => ov.querySelector("input")?.focus(), 80);
+  return ov;
 }
 
 function showModalAlert(message, options = {}) {
@@ -2734,6 +2791,9 @@ function showModalAlert(message, options = {}) {
       confirmLabel: options.confirmLabel || "OK",
       confirmClass: options.variant === "danger" ? "btn-red" : options.confirmClass || "",
       cancelable: options.cancelable !== false,
+      closeOnBackdrop: options.closeOnBackdrop,
+      closeOnEscape: options.closeOnEscape,
+      persistent: options.persistent,
       onConfirm: () => resolve(true),
       onCancel: () => resolve(false),
     });
@@ -2748,6 +2808,9 @@ function showModalConfirm(message, options = {}) {
       confirmLabel: options.confirmLabel || "Confirm",
       confirmClass: options.variant === "danger" ? "btn-red" : options.confirmClass || "",
       cancelLabel: options.cancelLabel || "Cancel",
+      persistent: options.persistent !== false,
+      closeOnBackdrop: options.closeOnBackdrop,
+      closeOnEscape: options.closeOnEscape,
       onConfirm: () => resolve(true),
       onCancel: () => resolve(false),
     });
@@ -2765,6 +2828,9 @@ function showModalPrompt(message, options = {}) {
       `,
       confirmLabel: options.confirmLabel || "Continue",
       cancelLabel: options.cancelLabel || "Cancel",
+      persistent: options.persistent !== false,
+      closeOnBackdrop: options.closeOnBackdrop,
+      closeOnEscape: options.closeOnEscape,
       onConfirm: () => resolve(document.getElementById(inputId)?.value || ""),
       onCancel: () => resolve(null),
     });
@@ -3295,7 +3361,11 @@ function renderReconEvents(events) {
   const tbody = document.getElementById("recon-events-tbody");
   if (!tbody) return;
   if (!events.length) {
-    tbody.innerHTML = `<tr><td colspan="6" class="td-empty">No reconciliation anomalies detected.</td></tr>`;
+    const mode = document.getElementById("recon-test-filter")?.value || "real";
+    const message = mode === "test"
+      ? "No test-mode reconciliation events detected. Normal soak scenarios may only create billing sync rows."
+      : "No reconciliation anomalies detected.";
+    tbody.innerHTML = `<tr><td colspan="6" class="td-empty">${esc(message)}</td></tr>`;
     return;
   }
   tbody.innerHTML = events.slice(0, 20).map((event, idx) => {
@@ -3357,8 +3427,11 @@ function openSoakTestModal() {
     return;
   }
   window._soakSelectedUser = null;
-  showModal(`
-    <div class="modal-header">Internal Billing Soak Test</div>
+  const ov = showModal(`
+    <div class="modal-header" style="display:flex;align-items:center;gap:10px">
+      <span>Internal Billing Soak Test</span>
+      <button type="button" class="modal-btn-cancel" style="margin-left:auto;background:none;border:0;color:var(--muted);font-size:20px;line-height:1;cursor:pointer" aria-label="Close">&times;</button>
+    </div>
     <div class="modal-body">
       <div class="modal-field">
         <label>Test user</label>
@@ -3398,13 +3471,15 @@ function openSoakTestModal() {
         Dry run only - no Decart call, no profile credit mutation
       </label>
       <div id="soak-result" class="recon-status" style="display:block;margin-top:12px;color:var(--muted)">Ready.</div>
+      <div id="soak-result-table" style="display:none;margin-top:10px"></div>
     </div>
     <div class="modal-footer">
       <button class="modal-btn-cancel">Close</button>
       <button class="btn btn-ghost" type="button" onclick="cleanupSoakTestRows(this)">Cleanup test rows</button>
       <button id="soak-run-btn" class="btn btn-amber" type="button" onclick="runSoakTestFromModal(this)" disabled>Run dry-run</button>
     </div>
-  `);
+  `, { persistent: true, closeOnBackdrop: false, closeOnEscape: false });
+  if (ov) ov.id = "soak-test-modal";
   setTimeout(() => searchSoakUsers(""), 50);
 }
 
@@ -3419,6 +3494,8 @@ async function runSoakTestFromModal(btn) {
     return;
   }
   const done = btnLoading(btn, "Running");
+  const modal = document.getElementById("soak-test-modal");
+  if (modal) modal.dataset.modalBusy = "true";
   if (result) result.textContent = "Running synthetic dry-run...";
   try {
     const data = await apiPost("/admin/api/reconciliation/soak-test", {
@@ -3428,21 +3505,69 @@ async function runSoakTestFromModal(btn) {
       dry_run: true,
     });
     if (result) {
+      const anomalyEvents = data.anomaly_events ?? data.reconciliation_events;
       result.innerHTML = `
         <strong style="color:var(--success)">Dry-run complete.</strong><br>
         Run: <code>${esc(data.run_id || "--")}</code><br>
+        Scenario: ${esc(data.scenario || scenario)} - Sessions: ${fmtN(data.session_count || count)}<br>
+        Anomaly events: ${fmtN(anomalyEvents || 0)}<br>
         Sync rows: ${fmtN(data.billing_sync_rows || 0)} · Events: ${fmtN(data.reconciliation_events || 0)}<br>
+        ${anomalyEvents ? "" : "No anomaly events were produced; this scenario still created synthetic billing sync rows.<br>"}
         ${esc(data.note || "")}
       `;
     }
+    renderSoakResultTable(data);
+    const reconFilter = document.getElementById("recon-filter");
+    const reconTestFilter = document.getElementById("recon-test-filter");
+    if (reconFilter) reconFilter.value = "active";
+    if (reconTestFilter) reconTestFilter.value = "test";
     toast("Soak test rows generated", "success");
     loadReconciliation();
   } catch (e) {
     if (result) result.textContent = `Failed: ${e.message}`;
     toast("Soak test failed: " + e.message, "error");
   } finally {
+    if (modal) modal.dataset.modalBusy = "false";
     done();
   }
+}
+
+function renderSoakResultTable(data) {
+  const wrap = document.getElementById("soak-result-table");
+  if (!wrap) return;
+  const syncs = data?.latest_syncs || [];
+  const events = data?.latest_events || [];
+  const syncRows = syncs.slice(0, 8).map(row => `
+    <tr>
+      <td class="td-mono">${esc(shortSessionId(row.session_id))}</td>
+      <td class="td-mono">${esc(row.source || "--")}</td>
+      <td>${esc(row.status || "--")}</td>
+    </tr>
+  `).join("");
+  const eventRows = events.slice(0, 8).map(row => `
+    <tr>
+      <td>${esc(row.type || "--")}</td>
+      <td>${reconSeverityBadge(row)}</td>
+      <td class="td-mono">${esc(shortSessionId(row.session_id))}</td>
+    </tr>
+  `).join("");
+  wrap.style.display = "block";
+  wrap.innerHTML = `
+    <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Latest synthetic billing rows</div>
+    <div class="table-wrap" style="margin:0;max-height:180px">
+      <table>
+        <thead><tr><th>Session</th><th>Source</th><th>Status</th></tr></thead>
+        <tbody>${syncRows || `<tr><td colspan="3" class="td-empty">No billing sync preview returned.</td></tr>`}</tbody>
+      </table>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin:10px 0 6px">Latest synthetic reconciliation events</div>
+    <div class="table-wrap" style="margin:0;max-height:180px">
+      <table>
+        <thead><tr><th>Type</th><th>Severity</th><th>Session</th></tr></thead>
+        <tbody>${eventRows || `<tr><td colspan="3" class="td-empty">0 anomaly events for this scenario.</td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
 }
 
 let soakUserSearchTimer = null;
@@ -3558,7 +3683,8 @@ async function loadReconciliation() {
   const status = document.getElementById("recon-status");
   try {
     const filter = document.getElementById("recon-filter")?.value || "active";
-    const data = await api(`/admin/api/reconciliation/summary?status=${encodeURIComponent(filter)}`);
+    const testFilter = document.getElementById("recon-test-filter")?.value || "real";
+    const data = await api(`/admin/api/reconciliation/summary?status=${encodeURIComponent(filter)}&test_mode=${encodeURIComponent(testFilter)}`);
     if (!data) return;
     renderReconMetrics(data);
     renderReconEvents(data.latest || []);
@@ -4572,7 +4698,15 @@ function closeSlideOver() {
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   const overlays = document.querySelectorAll(".admin-modal-overlay");
-  if (overlays.length) { overlays[overlays.length - 1].remove(); return; }
+  if (overlays.length) {
+    const top = overlays[overlays.length - 1];
+    if (top.dataset.closeOnEscape === "false" || top.dataset.modalBusy === "true") {
+      modalAttention(top);
+      return;
+    }
+    closeModalOverlay(top);
+    return;
+  }
   if (document.querySelector(".slide-over.open")) { closeSlideOver(); }
 });
 
