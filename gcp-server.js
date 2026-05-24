@@ -2972,6 +2972,135 @@ function isoBucket(ts, granularity = "day") {
   return d.toISOString().slice(0, 10);
 }
 
+const SAFE_OPERATIONAL_RECON_TYPES = new Set([
+  "duplicate_active_session_replaced",
+  "replaced_session_attempted_sync",
+  "stale_session_detected",
+  "stale_session_attempted_sync",
+  "inactive_session_attempted_sync",
+  "duplicate_sync_id_detected",
+  "legacy_missing_session_id",
+  "billing_sync_capped",
+]);
+
+const WARNING_RECON_TYPES = new Set([
+  "missing_final_sync",
+  "billing_rounding_drift_warning",
+  "shadow_credit_mismatch",
+  "invalid_billing_numeric_input",
+  "suspicious_sync_pattern",
+  "stale_active_session_attempted_sync",
+]);
+
+const DANGEROUS_RECON_TYPES = new Set([
+  "balance_drift_severe",
+  "decart_billing_mismatch_severe",
+  "billing_rounding_drift_severe",
+  "failed_billing_write",
+  "duplicate_live_deduction",
+  "invalid_live_billing",
+  "protected_legacy_mismatch_severe",
+  "orphan_active_session",
+]);
+
+function reconciliationEventCategory(event = {}) {
+  const type = String(event.type || "");
+  const severity = String(event.severity || "info");
+  if (severity === "critical" || DANGEROUS_RECON_TYPES.has(type) || /failed_billing|duplicate_live|invalid_live|mismatch_severe/.test(type)) {
+    return "DANGEROUS";
+  }
+  if (SAFE_OPERATIONAL_RECON_TYPES.has(type)) return "SAFE_OPERATIONAL";
+  if (severity === "high" || WARNING_RECON_TYPES.has(type) || /missing_final|drift_warning|suspicious/.test(type)) {
+    return "WARNING";
+  }
+  return severity === "warning" ? "WARNING" : "SAFE_OPERATIONAL";
+}
+
+function reconciliationExpectation(event = {}) {
+  const category = reconciliationEventCategory(event);
+  if (category === "DANGEROUS") return "Dangerous";
+  if (category === "WARNING") return "Investigate";
+  return "Expected";
+}
+
+function eventDriftAmount(event = {}) {
+  const details = event.details || {};
+  const explicit = Number(details.drift ?? details.drift_amount ?? details.delta ?? details.abs_drift);
+  if (Number.isFinite(explicit)) return Math.abs(explicit);
+  const requested = Number(details.requested ?? details.credits_requested);
+  const expected = Number(details.expected ?? details.credits_expected);
+  if (Number.isFinite(requested) && Number.isFinite(expected)) return Math.abs(requested - expected);
+  return 0;
+}
+
+function groupReconciliationEvents(events = []) {
+  const groups = new Map();
+  for (const event of events || []) {
+    const category = reconciliationEventCategory(event);
+    const expectation = reconciliationExpectation(event);
+    const drift = eventDriftAmount(event);
+    const isSmallDrift = event.type === "billing_rounding_drift_warning" && drift < 2;
+    const key = isSmallDrift
+      ? `${event.type}:small-drift`
+      : `${event.type}:${event.severity || "info"}:${category}:${event.resolved ? "resolved" : "active"}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        type: event.type || "unknown",
+        severity: event.severity || "info",
+        category,
+        expectation,
+        count: 0,
+        session_count: 0,
+        avg_drift: 0,
+        max_drift: 0,
+        latest_at: event.created_at,
+        sample: event,
+        sessions: new Set(),
+      });
+    }
+    const group = groups.get(key);
+    group.count += 1;
+    if (event.session_id) group.sessions.add(event.session_id);
+    group.latest_at = !group.latest_at || new Date(event.created_at) > new Date(group.latest_at) ? event.created_at : group.latest_at;
+    group.max_drift = Math.max(group.max_drift, drift);
+    group.avg_drift += drift;
+  }
+  return Array.from(groups.values()).map(group => ({
+    ...group,
+    session_count: group.sessions.size,
+    sessions: undefined,
+    avg_drift: group.count ? Number((group.avg_drift / group.count).toFixed(3)) : 0,
+    max_drift: Number(group.max_drift.toFixed(3)),
+  })).sort((a, b) => {
+    const rank = { DANGEROUS: 0, WARNING: 1, SAFE_OPERATIONAL: 2 };
+    return (rank[a.category] ?? 3) - (rank[b.category] ?? 3) || new Date(b.latest_at) - new Date(a.latest_at);
+  });
+}
+
+function healthInterpretationFor(score, categoryCounts = {}) {
+  const dangerous = categoryCounts.DANGEROUS || 0;
+  const warning = categoryCounts.WARNING || 0;
+  if (score >= 90 && dangerous === 0) {
+    return {
+      state: "HEALTHY",
+      message: "Billing protections are operating normally.",
+      guidance: "Recoverable operational events are being handled without active cutover blockers.",
+    };
+  }
+  if (score >= 70 && dangerous === 0) {
+    return {
+      state: "DEGRADED",
+      message: "Recoverable anomalies detected. Review before protected billing cutover.",
+      guidance: `${warning} warning-level signals are active in the current window.`,
+    };
+  }
+  return {
+    state: "DANGEROUS",
+    message: "Critical billing integrity issues detected.",
+    guidance: "Keep protected live billing disabled until dangerous anomalies are resolved.",
+  };
+}
+
 async function getRecentReconciliationRows(days = 7, includeResolved = false) {
   let query = supabaseAdmin
     .from("billing_reconciliation_events")
@@ -2999,7 +3128,9 @@ async function getRecentBillingSyncRows(days = 7) {
 function buildReconciliationAnalytics({ events = [], syncs = [] }) {
   const realEvents = events.filter(e => !isTestModeEvent(e));
   const testEvents = events.filter(isTestModeEvent);
-  const severeTypes = new Set(["billing_rounding_drift_severe", "balance_drift_severe", "decart_billing_mismatch_severe"]);
+  const categoryCounts = countBy(realEvents, reconciliationEventCategory);
+  const expectationCounts = countBy(realEvents, reconciliationExpectation);
+  const groupedAnomalies = groupReconciliationEvents(realEvents);
   const driftSyncs = syncs.filter(s => Math.abs(Number(s.credits_requested || 0) - Number(s.credits_expected || 0)) >= 0.5);
   const severeDriftSyncs = syncs.filter(s => Math.abs(Number(s.credits_requested || 0) - Number(s.credits_expected || 0)) >= 2);
   const scenarioStats = {};
@@ -3018,7 +3149,10 @@ function buildReconciliationAnalytics({ events = [], syncs = [] }) {
       real_events: realEvents.length,
       test_events: testEvents.length,
       billing_syncs: syncs.length,
-      severe_events: realEvents.filter(e => e.severity === "high" || e.severity === "critical" || severeTypes.has(e.type)).length,
+      operational_events: categoryCounts.SAFE_OPERATIONAL || 0,
+      warning_events: categoryCounts.WARNING || 0,
+      dangerous_events: categoryCounts.DANGEROUS || 0,
+      severe_events: realEvents.filter(e => e.severity === "high" || e.severity === "critical" || reconciliationEventCategory(e) === "DANGEROUS").length,
       critical_events: realEvents.filter(e => e.severity === "critical").length,
       duplicate_sync_events: realEvents.filter(e => e.type === "duplicate_sync_id_detected").length,
       missing_final_sync: realEvents.filter(e => e.type === "missing_final_sync").length,
@@ -3030,6 +3164,9 @@ function buildReconciliationAnalytics({ events = [], syncs = [] }) {
     },
     counts_by_type: countBy(realEvents, e => e.type),
     counts_by_severity: countBy(realEvents, e => e.severity || "info"),
+    counts_by_category: categoryCounts,
+    counts_by_expectation: expectationCounts,
+    grouped_anomalies: groupedAnomalies.slice(0, 25),
     scenario_stats: scenarioStats,
     drift: {
       average_abs_drift: syncs.length ? Number((syncs.reduce((sum, s) => sum + Math.abs(Number(s.credits_requested || 0) - Number(s.credits_expected || 0)), 0) / syncs.length).toFixed(3)) : 0,
@@ -3041,31 +3178,51 @@ function buildReconciliationAnalytics({ events = [], syncs = [] }) {
 
 function calculateBillingIntegrityScore(analytics) {
   const totals = analytics?.totals || {};
+  const categories = analytics?.counts_by_category || {};
   let score = 100;
-  score -= (totals.critical_events || 0) * 20;
-  score -= Math.max(0, (totals.severe_events || 0) - (totals.critical_events || 0)) * 10;
-  score -= (totals.duplicate_sync_events || 0) * 8;
-  score -= (totals.drift_severe_syncs || 0) * 8;
-  score -= (totals.missing_final_sync || 0) * 5;
-  score -= (totals.invalid_session_attempts || 0) * 4;
-  score -= (totals.stale_sessions || 0) * 3;
-  score -= Math.min(10, Math.floor((totals.drift_warning_syncs || 0) / 3));
+  const breakdown = [];
+  const applyPenalty = (label, points, count = 0) => {
+    const penalty = Math.max(0, Math.min(40, Number(points) || 0));
+    if (penalty > 0) breakdown.push({ label, points: penalty, count });
+    score -= penalty;
+  };
+  applyPenalty("Critical reconciliation events", (totals.critical_events || 0) * 18, totals.critical_events || 0);
+  applyPenalty("Dangerous billing integrity events", Math.max(0, (categories.DANGEROUS || 0) - (totals.critical_events || 0)) * 10, categories.DANGEROUS || 0);
+  applyPenalty("Severe drift", (totals.drift_severe_syncs || 0) * 7, totals.drift_severe_syncs || 0);
+  applyPenalty("Missing final syncs", Math.min(10, (totals.missing_final_sync || 0) * 2), totals.missing_final_sync || 0);
+  applyPenalty("Invalid session attempts", Math.min(8, Math.floor((totals.invalid_session_attempts || 0) / 3)), totals.invalid_session_attempts || 0);
+  applyPenalty("Operational warning volume", Math.min(6, Math.floor((categories.WARNING || 0) / 8)), categories.WARNING || 0);
+  applyPenalty("Rounding drift accumulation", Math.min(5, Math.floor((totals.drift_warning_syncs || 0) / 12)), totals.drift_warning_syncs || 0);
+  applyPenalty("Handled operational events", Math.min(3, Math.floor((categories.SAFE_OPERATIONAL || 0) / 25)), categories.SAFE_OPERATIONAL || 0);
   score = Math.max(0, Math.min(100, score));
   const label = score >= 90 ? "healthy" : score >= 70 ? "degraded" : "dangerous";
   const color = score >= 90 ? "green" : score >= 70 ? "amber" : "red";
-  const explanation = score >= 90
-    ? "No severe active billing integrity risks are currently dominating the window."
-    : score >= 70
-      ? "Warning-level anomalies exist; review before protected billing cutover."
-      : "Severe or repeated anomalies exist; protected billing cutover is blocked.";
-  return { score, label, color, explanation };
+  const health = healthInterpretationFor(score, categories);
+  return { score, label, color, explanation: health.message, health, breakdown };
 }
 
 function buildReconciliationTrends({ events = [], syncs = [] }) {
   const realEvents = events.filter(e => !isTestModeEvent(e));
+  const series = realEvents.map(event => ({
+    bucket: isoBucket(event.created_at, "day"),
+    severity: event.severity || "info",
+    category: reconciliationEventCategory(event),
+    type: event.type || "unknown",
+  }));
   return {
     hourly: countBy(realEvents, e => isoBucket(e.created_at, "hour")),
     daily: countBy(realEvents, e => isoBucket(e.created_at, "day")),
+    by_severity_daily: {
+      info: countBy(series.filter(e => e.severity === "info"), e => e.bucket),
+      warning: countBy(series.filter(e => e.severity === "warning"), e => e.bucket),
+      high: countBy(series.filter(e => e.severity === "high"), e => e.bucket),
+      critical: countBy(series.filter(e => e.severity === "critical"), e => e.bucket),
+    },
+    by_category_daily: {
+      safe_operational: countBy(series.filter(e => e.category === "SAFE_OPERATIONAL"), e => e.bucket),
+      warning: countBy(series.filter(e => e.category === "WARNING"), e => e.bucket),
+      dangerous: countBy(series.filter(e => e.category === "DANGEROUS"), e => e.bucket),
+    },
     top_types: Object.entries(countBy(realEvents, e => e.type)).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([type, count]) => ({ type, count })),
     duplicate_sync_trend: countBy(realEvents.filter(e => e.type === "duplicate_sync_id_detected"), e => isoBucket(e.created_at, "day")),
     missing_final_trend: countBy(realEvents.filter(e => e.type === "missing_final_sync"), e => isoBucket(e.created_at, "day")),
@@ -3202,9 +3359,14 @@ app.get("/admin/api/reconciliation/summary", adminAuth, async (req, res) => {
       if (!autoResolvedRes.error) autoResolvedCount = autoResolvedRes.count || 0;
     } catch (_) {}
 
+    const annotatedEvents = events.map(event => ({
+      ...event,
+      category: reconciliationEventCategory(event),
+      expectation: reconciliationExpectation(event),
+    }));
     const byType = {};
     const bySeverity = { info: 0, warning: 0, high: 0, critical: 0 };
-    for (const event of events) {
+    for (const event of annotatedEvents) {
       byType[event.type] = (byType[event.type] || 0) + 1;
       bySeverity[event.severity] = (bySeverity[event.severity] || 0) + 1;
     }
@@ -3216,8 +3378,8 @@ app.get("/admin/api/reconciliation/summary", adminAuth, async (req, res) => {
       test_mode: testMode,
       resolution_lifecycle_available: !eventsRes.resolutionFallback,
       total_sessions: sessionsRes.count || 0,
-      total_anomalies: events.length,
-      active_anomaly_count: status === "active" ? events.length : null,
+      total_anomalies: annotatedEvents.length,
+      active_anomaly_count: status === "active" ? annotatedEvents.length : null,
       resolved_anomaly_count: resolvedCount,
       auto_resolved_count: autoResolvedCount,
       auto_resolved_during_request: autoResolvedDuringRequest,
@@ -3234,7 +3396,8 @@ app.get("/admin/api/reconciliation/summary", adminAuth, async (req, res) => {
       billing_sync_count: syncsRes.count || 0,
       counts_by_type: byType,
       counts_by_severity: bySeverity,
-      latest: events.slice(0, 20),
+      grouped_latest: groupReconciliationEvents(annotatedEvents).slice(0, 20),
+      latest: annotatedEvents.slice(0, 50),
     });
   } catch (err) {
     console.warn("[RECON SUMMARY] Error:", err.message);

@@ -260,6 +260,7 @@ main { padding:20px; max-width:1400px; margin:0 auto; }
 }
 .integrity-score-card,
 .billing-mode-card,
+.health-interpretation-card,
 .trend-card {
   background:var(--bg); border:1px solid var(--border); border-radius:var(--r); padding:12px;
   min-width:0;
@@ -268,14 +269,32 @@ main { padding:20px; max-width:1400px; margin:0 auto; }
 .integrity-score-value.green { color:var(--success); }
 .integrity-score-value.amber { color:var(--warning); }
 .integrity-score-value.red { color:var(--danger); }
-.trend-bars { display:flex; align-items:flex-end; gap:5px; height:86px; padding-top:8px; }
-.trend-bar {
-  flex:1; min-width:8px; border-radius:4px 4px 0 0;
-  background:linear-gradient(180deg,var(--accent),var(--electric));
-  opacity:.82;
-}
+.trend-chart { width:100%; height:120px; display:block; margin-top:8px; overflow:visible; }
+.trend-axis { stroke:rgba(148,163,184,.18); stroke-width:1; }
+.trend-line-safe { stroke:var(--success); fill:none; stroke-width:2; }
+.trend-line-warning { stroke:var(--warning); fill:none; stroke-width:2; }
+.trend-line-danger { stroke:var(--danger); fill:none; stroke-width:2.5; }
+.trend-dot { stroke:var(--bg); stroke-width:1.5; }
+.trend-legend { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; font-size:10px; color:var(--muted); }
+.trend-legend i { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:4px; }
 .top-anomaly-list { display:grid; gap:6px; margin-top:8px; }
 .top-anomaly-row { display:flex; justify-content:space-between; gap:10px; font-size:11px; color:var(--text2); }
+.health-interpretation-card.healthy { border-color:rgba(34,197,94,.35); }
+.health-interpretation-card.degraded { border-color:rgba(245,158,11,.4); }
+.health-interpretation-card.dangerous { border-color:rgba(239,68,68,.5); }
+.health-title { font-size:18px; font-weight:850; margin-top:4px; }
+.health-title.healthy { color:var(--success); }
+.health-title.degraded { color:var(--warning); }
+.health-title.dangerous { color:var(--danger); }
+.recon-toolbar-option { display:inline-flex; align-items:center; gap:5px; color:var(--muted); font-size:10px; white-space:nowrap; }
+.recon-event-stack { display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+.badge-expected { background:rgba(34,197,94,.12); color:#4ade80; }
+.badge-investigate { background:rgba(245,158,11,.15); color:#fbbf24; }
+.badge-dangerous { background:rgba(239,68,68,.16); color:#f87171; }
+.billing-state-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px; }
+.billing-state-item { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px; min-width:0; }
+.billing-state-label { font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+.billing-state-value { margin-top:3px; font-size:12px; font-weight:750; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .billing-mode-pill {
   display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px;
   border:1px solid var(--border); font-size:11px; font-weight:700; color:var(--text);
@@ -293,6 +312,7 @@ main { padding:20px; max-width:1400px; margin:0 auto; }
 @media(max-width:640px) {
   .recon-analytics-grid { grid-template-columns:1fr; }
   .mini-field-row { flex-direction:column; }
+  .billing-state-grid { grid-template-columns:1fr; }
 }
 
 /* ── Two-col layout ────────────────────────────────────────────── */
@@ -1646,6 +1666,13 @@ kbd {
         <option value="md">Markdown</option>
         <option value="csv">CSV</option>
       </select>
+      <select id="recon-analytics-window" class="recon-filter" onchange="loadReconciliationAnalytics()">
+        <option value="1">24h</option>
+        <option value="7" selected>7d</option>
+        <option value="30">30d</option>
+      </select>
+      <label class="recon-toolbar-option"><input id="recon-compact-mode" type="checkbox" checked onchange="loadReconciliation()"> Compact</label>
+      <label class="recon-toolbar-option"><input id="recon-show-repeated" type="checkbox" onchange="loadReconciliation()"> Show repeated rows</label>
       <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="loadReconciliation()">Refresh</button>
     </div>
     <div class="panel-body">
@@ -1658,7 +1685,10 @@ kbd {
       </div>
       <div class="recon-analytics-grid">
         <div class="integrity-score-card" id="integrity-score-card">
-          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Integrity Score</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Integrity Score</div>
+            <button class="btn btn-ghost btn-xs" style="margin-left:auto" onclick="openIntegrityBreakdown()">Why?</button>
+          </div>
           <div class="integrity-score-value" id="integrity-score-value">--</div>
           <div id="integrity-score-label" style="font-size:12px;color:var(--muted);margin-top:4px">Loading analytics...</div>
         </div>
@@ -1667,8 +1697,14 @@ kbd {
             <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Anomaly Trend</div>
             <span id="analytics-window-label" style="font-size:10px;color:var(--muted);margin-left:auto">7 days</span>
           </div>
-          <div class="trend-bars" id="anomaly-trend-bars"></div>
+          <div id="anomaly-trend-bars"></div>
           <div class="top-anomaly-list" id="top-anomaly-list"></div>
+        </div>
+        <div class="health-interpretation-card" id="health-interpretation-card">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">System Health Interpretation</div>
+          <div class="health-title" id="health-interpretation-title">--</div>
+          <div id="health-interpretation-message" style="font-size:12px;color:var(--text2);margin-top:6px">Loading health signal...</div>
+          <div id="health-interpretation-guidance" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
         </div>
         <div class="billing-mode-card">
           <div style="display:flex;align-items:center;gap:8px">
@@ -1676,18 +1712,13 @@ kbd {
             <span id="billing-mode-pill" class="billing-mode-pill legacy" style="margin-left:auto">legacy_only</span>
           </div>
           <div id="billing-mode-note" style="font-size:11px;color:var(--muted);margin-top:8px">Legacy billing remains authoritative.</div>
-          <div id="billing-mode-controls" class="billing-mode-controls">
-            <label><input type="checkbox" id="flag-shadow-compare" onchange="updateProtectedBillingFlags()"> Shadow compare</label>
-            <label><input type="checkbox" id="flag-test-users" onchange="updateProtectedBillingFlags()"> Enable test-user framework</label>
-            <label><input type="checkbox" id="flag-global-live" onchange="updateProtectedBillingFlags()"> Global protected live (do not enable yet)</label>
-            <label><input type="checkbox" id="flag-force-legacy" onchange="updateProtectedBillingFlags()"> Force legacy billing</label>
-            <div class="mini-field-row">
-              <input id="protected-user-id" class="modal-input" style="padding:5px 8px;font-size:11px" placeholder="Test user UUID">
-              <button class="btn btn-ghost btn-xs" onclick="setProtectedBillingTestUser(true)">Enable</button>
-              <button class="btn btn-ghost btn-xs" onclick="setProtectedBillingTestUser(false)">Disable</button>
-            </div>
-            <button class="btn btn-red btn-sm" onclick="forceLegacyBilling()">Force Legacy Billing</button>
+          <div class="billing-state-grid">
+            <div class="billing-state-item"><div class="billing-state-label">Current Mode</div><div class="billing-state-value" id="cutover-current-mode">legacy_only</div></div>
+            <div class="billing-state-item"><div class="billing-state-label">Shadow Compare</div><div class="billing-state-value" id="cutover-shadow-state">--</div></div>
+            <div class="billing-state-item"><div class="billing-state-label">Test Users</div><div class="billing-state-value" id="cutover-test-state">--</div></div>
+            <div class="billing-state-item"><div class="billing-state-label">Rollback State</div><div class="billing-state-value" id="cutover-rollback-state">--</div></div>
           </div>
+          <button id="billing-mode-controls" class="btn btn-ghost btn-sm" style="margin-top:10px;width:100%;justify-content:center" onclick="openAdvancedBillingControls()">Advanced Billing Controls</button>
         </div>
       </div>
       <div class="table-wrap" style="margin-bottom:0">
@@ -3643,6 +3674,37 @@ function reconSeverityBadge(event) {
   return `<span class="badge ${reconSeverityClass(event.severity)}">${esc(event.severity || "info")}</span>`;
 }
 
+function reconCategory(event) {
+  if (event?.category) return event.category;
+  const type = String(event?.type || "");
+  const severity = String(event?.severity || "info");
+  if (severity === "critical" || /severe|failed_billing|duplicate_live|invalid_live|orphan|mismatch_severe/.test(type)) return "DANGEROUS";
+  if (/duplicate_active_session_replaced|replaced_session_attempted_sync|stale_session_detected|stale_session_attempted_sync|inactive_session_attempted_sync|duplicate_sync_id_detected|legacy_missing_session_id/.test(type)) return "SAFE_OPERATIONAL";
+  if (severity === "high" || severity === "warning" || /missing_final|drift_warning|suspicious|invalid_billing/.test(type)) return "WARNING";
+  return "SAFE_OPERATIONAL";
+}
+
+function reconExpectation(event) {
+  if (event?.expectation) return event.expectation;
+  const category = reconCategory(event);
+  if (category === "DANGEROUS") return "Dangerous";
+  if (category === "WARNING") return "Investigate";
+  return "Expected";
+}
+
+function reconExpectationBadge(event) {
+  const label = reconExpectation(event);
+  const cls = label === "Dangerous" ? "badge-dangerous" : label === "Investigate" ? "badge-investigate" : "badge-expected";
+  return `<span class="badge ${cls}">${esc(label)}</span>`;
+}
+
+function reconPriority(event) {
+  const category = reconCategory(event);
+  const categoryRank = { DANGEROUS: 0, WARNING: 1, SAFE_OPERATIONAL: 2 }[category] ?? 3;
+  const severityRank = { critical: 0, high: 1, warning: 2, info: 3 }[String(event?.severity || "info")] ?? 4;
+  return categoryRank * 10 + severityRank;
+}
+
 function shortSessionId(sessionId) {
   const s = String(sessionId || "");
   if (!s) return "--";
@@ -3697,11 +3759,17 @@ function renderReconMetrics(data) {
   `).join("");
 }
 
-function renderReconEvents(events) {
+function renderReconEvents(events, groupedEvents = null) {
   const tbody = document.getElementById("recon-events-tbody");
   if (!tbody) return;
   window._reconVisibleRows = events || [];
-  if (!events.length) {
+  const showRepeated = document.getElementById("recon-show-repeated")?.checked === true;
+  const compact = document.getElementById("recon-compact-mode")?.checked !== false;
+  const rows = showRepeated
+    ? [...(events || [])].sort((a, b) => reconPriority(a) - reconPriority(b) || new Date(b.created_at) - new Date(a.created_at))
+    : (groupedEvents || groupReconEventsForDisplay(events || []));
+  window._reconDisplayedRows = rows;
+  if (!rows.length) {
     const mode = document.getElementById("recon-test-filter")?.value || "real";
     const message = mode === "test"
       ? "No synthetic soak test rows found."
@@ -3709,22 +3777,43 @@ function renderReconEvents(events) {
     tbody.innerHTML = `<tr><td colspan="6" class="td-empty">${esc(message)}</td></tr>`;
     return;
   }
-  tbody.innerHTML = events.slice(0, 20).map((event, idx) => {
+  tbody.innerHTML = rows.slice(0, 20).map((event, idx) => {
     const detailsId = `recon-details-${idx}`;
-    const details = reconDetailsText(event.details);
+    const isGroup = event.count > 1 && event.sample;
+    const sample = event.sample || event;
+    const details = isGroup
+      ? reconDetailsText({
+          grouped: true,
+          type: event.type,
+          count: event.count,
+          category: event.category,
+          expectation: event.expectation,
+          avg_drift: event.avg_drift,
+          max_drift: event.max_drift,
+          sample: sample.details || {},
+        })
+      : reconDetailsText(event.details);
     const resolvedText = event.resolved
       ? `Resolved ${relTime(event.resolved_at)}${event.resolved_reason ? " - " + event.resolved_reason : ""}`
       : "";
     const action = event.resolved
       ? `<span class="badge badge-resolved">ok</span>`
-      : `<button class="btn btn-ghost btn-xs" onclick="event.stopPropagation(); resolveReconEvent('${esc(event.id || "")}')">Resolve</button>`;
+      : isGroup
+        ? `<span class="badge badge-muted">${fmtN(event.count)} rows</span>`
+        : `<button class="btn btn-ghost btn-xs" onclick="event.stopPropagation(); resolveReconEvent('${esc(event.id || "")}')">Resolve</button>`;
+    const preview = isGroup
+      ? `${fmtN(event.count)} grouped events${event.avg_drift ? ` - avg drift ${event.avg_drift}, max ${event.max_drift}` : ""}`
+      : (resolvedText || reconPreview(event));
+    const typeCell = isGroup
+      ? `<div class="recon-event-stack"><strong>${esc(event.type || "unknown")}</strong><span class="badge badge-muted">Count ${fmtN(event.count)}</span></div>`
+      : esc(event.type || "unknown");
     return `
       <tr class="recon-row ${event.resolved ? "resolved" : ""}" onclick="toggleReconDetails('${detailsId}')">
-        <td class="td-mono">${esc(relTime(event.created_at))}</td>
-        <td>${esc(event.type || "unknown")}</td>
-        <td>${reconSeverityBadge(event)}</td>
-        <td class="td-mono" title="${esc(event.session_id || "")}">${esc(shortSessionId(event.session_id))}</td>
-        <td><div class="recon-preview" title="${esc(resolvedText)}">${esc(resolvedText || reconPreview(event))}</div></td>
+        <td class="td-mono">${esc(relTime(event.latest_at || event.created_at))}</td>
+        <td>${typeCell}</td>
+        <td><div class="recon-event-stack">${reconSeverityBadge(event)} ${reconExpectationBadge(event)}</div></td>
+        <td class="td-mono" title="${esc(sample.session_id || "")}">${esc(isGroup ? `${fmtN(event.session_count || 0)} sessions` : shortSessionId(event.session_id))}</td>
+        <td><div class="recon-preview" title="${esc(preview)}">${esc(compact ? preview : reconPreview(sample))}</div></td>
         <td>${action}</td>
       </tr>
       <tr id="${detailsId}" class="recon-details">
@@ -3732,6 +3821,46 @@ function renderReconEvents(events) {
       </tr>
     `;
   }).join("");
+}
+
+function groupReconEventsForDisplay(events) {
+  const groups = new Map();
+  for (const event of events || []) {
+    const category = reconCategory(event);
+    const key = event.type === "billing_rounding_drift_warning"
+      ? `${event.type}:small-drift:${event.resolved ? "resolved" : "active"}`
+      : `${event.type}:${event.severity || "info"}:${category}:${event.resolved ? "resolved" : "active"}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        type: event.type || "unknown",
+        severity: event.severity || "info",
+        category,
+        expectation: reconExpectation(event),
+        count: 0,
+        session_count: 0,
+        avg_drift: 0,
+        max_drift: 0,
+        latest_at: event.created_at,
+        sample: event,
+        sessions: new Set(),
+      });
+    }
+    const group = groups.get(key);
+    const details = event.details || {};
+    const drift = Math.abs(Number(details.drift ?? details.drift_amount ?? details.delta ?? (Number(details.requested ?? details.credits_requested) - Number(details.expected ?? details.credits_expected)) ?? 0)) || 0;
+    group.count += 1;
+    if (event.session_id) group.sessions.add(event.session_id);
+    group.latest_at = new Date(event.created_at) > new Date(group.latest_at || 0) ? event.created_at : group.latest_at;
+    group.avg_drift += drift;
+    group.max_drift = Math.max(group.max_drift, drift);
+  }
+  return Array.from(groups.values()).map(group => ({
+    ...group,
+    session_count: group.sessions.size,
+    sessions: undefined,
+    avg_drift: group.count ? Number((group.avg_drift / group.count).toFixed(3)) : 0,
+    max_drift: Number(group.max_drift.toFixed(3)),
+  })).sort((a, b) => reconPriority(a) - reconPriority(b) || new Date(b.latest_at) - new Date(a.latest_at));
 }
 
 function reconExportRows(rows) {
@@ -3778,16 +3907,99 @@ function renderIntegrityScore(integrity) {
   value.className = `integrity-score-value ${integrity?.color || ""}`;
   value.textContent = integrity?.score ?? "--";
   label.textContent = `${integrity?.label || "unknown"} - ${integrity?.explanation || ""}`;
+  renderHealthInterpretation(integrity?.health);
+}
+
+function renderHealthInterpretation(health) {
+  const card = document.getElementById("health-interpretation-card");
+  const title = document.getElementById("health-interpretation-title");
+  const message = document.getElementById("health-interpretation-message");
+  const guidance = document.getElementById("health-interpretation-guidance");
+  if (!card || !title || !message) return;
+  const state = String(health?.state || "UNKNOWN").toLowerCase();
+  card.className = `health-interpretation-card ${state}`;
+  title.className = `health-title ${state}`;
+  title.textContent = health?.state || "--";
+  message.textContent = health?.message || "Health interpretation unavailable.";
+  if (guidance) guidance.textContent = health?.guidance || "";
+}
+
+function openIntegrityBreakdown() {
+  const integrity = window._reconAnalytics?.integrity || {};
+  const analytics = window._reconAnalytics?.analytics || {};
+  const breakdown = integrity.breakdown || [];
+  const rows = breakdown.length
+    ? breakdown.map(item => `<tr><td>${esc(item.label)}</td><td>${fmtN(item.count || 0)}</td><td>-${fmtN(item.points || 0)}</td></tr>`).join("")
+    : `<tr><td colspan="3" class="td-empty">No active penalties in this window.</td></tr>`;
+  showModal({
+    title: "Integrity Score Breakdown",
+    size: "lg",
+    persistent: true,
+    showClose: true,
+    confirmLabel: "Close",
+    cancelable: false,
+    body: `
+      <p style="color:var(--text2);margin-bottom:12px">${esc(integrity.health?.message || integrity.explanation || "")}</p>
+      <div class="recon-grid" style="margin-bottom:12px">
+        <div class="recon-metric"><div class="rval">${fmtN(integrity.score || 0)}</div><div class="rlbl">Score</div></div>
+        <div class="recon-metric"><div class="rval">${fmtN(analytics.totals?.operational_events || 0)}</div><div class="rlbl">Operational</div></div>
+        <div class="recon-metric warning"><div class="rval">${fmtN(analytics.totals?.warning_events || 0)}</div><div class="rlbl">Warnings</div></div>
+        <div class="recon-metric critical"><div class="rval">${fmtN(analytics.totals?.dangerous_events || 0)}</div><div class="rlbl">Dangerous</div></div>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Penalty</th><th>Count</th><th>Points</th></tr></thead><tbody>${rows}</tbody></table></div>
+    `,
+  });
 }
 
 function renderTrendBars(trends) {
   const wrap = document.getElementById("anomaly-trend-bars");
   if (!wrap) return;
-  const entries = Object.entries(trends?.daily || {}).sort((a, b) => a[0].localeCompare(b[0])).slice(-7);
-  const max = Math.max(1, ...entries.map(([, count]) => Number(count) || 0));
-  wrap.innerHTML = entries.length
-    ? entries.map(([day, count]) => `<div class="trend-bar" title="${esc(day)}: ${fmtN(count)}" style="height:${Math.max(6, Math.round((count / max) * 82))}px"></div>`).join("")
-    : `<div style="color:var(--muted);font-size:12px">No trend data.</div>`;
+  const series = trends?.by_category_daily || {};
+  const days = Array.from(new Set([
+    ...Object.keys(series.safe_operational || {}),
+    ...Object.keys(series.warning || {}),
+    ...Object.keys(series.dangerous || {}),
+    ...Object.keys(trends?.daily || {}),
+  ])).sort().slice(-30);
+  if (!days.length) {
+    wrap.innerHTML = `<div style="color:var(--muted);font-size:12px;margin-top:12px">No trend data.</div>`;
+    return;
+  }
+  const width = 520;
+  const height = 118;
+  const pad = 14;
+  const max = Math.max(1, ...days.flatMap(day => [
+    Number(series.safe_operational?.[day] || 0),
+    Number(series.warning?.[day] || 0),
+    Number(series.dangerous?.[day] || 0),
+  ]));
+  const point = (day, idx, values) => {
+    const x = days.length === 1 ? width / 2 : pad + idx * ((width - pad * 2) / (days.length - 1));
+    const y = height - pad - (Number(values?.[day] || 0) / max) * (height - pad * 2);
+    return [Number(x.toFixed(1)), Number(y.toFixed(1))];
+  };
+  const poly = values => days.map((day, idx) => point(day, idx, values).join(",")).join(" ");
+  const dots = (values, cls, fill) => days.map((day, idx) => {
+    const [x, y] = point(day, idx, values);
+    const count = Number(values?.[day] || 0);
+    return count ? `<circle class="trend-dot ${cls}" cx="${x}" cy="${y}" r="3" fill="${fill}"><title>${esc(day)}: ${fmtN(count)}</title></circle>` : "";
+  }).join("");
+  wrap.innerHTML = `
+    <svg class="trend-chart" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="Reconciliation anomaly trends">
+      <line class="trend-axis" x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}"></line>
+      <line class="trend-axis" x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - pad}"></line>
+      <polyline class="trend-line-safe" points="${poly(series.safe_operational || {})}"></polyline>
+      <polyline class="trend-line-warning" points="${poly(series.warning || {})}"></polyline>
+      <polyline class="trend-line-danger" points="${poly(series.dangerous || {})}"></polyline>
+      ${dots(series.safe_operational || {}, "safe", "#22c55e")}
+      ${dots(series.warning || {}, "warning", "#f59e0b")}
+      ${dots(series.dangerous || {}, "danger", "#ef4444")}
+    </svg>
+    <div class="trend-legend">
+      <span><i style="background:var(--success)"></i>Expected</span>
+      <span><i style="background:var(--warning)"></i>Investigate</span>
+      <span><i style="background:var(--danger)"></i>Dangerous</span>
+    </div>`;
 }
 
 function renderTopAnomalies(trends) {
@@ -3812,20 +4024,59 @@ function renderBillingCutoverStatus(status) {
     note.textContent = status?.note || "Legacy billing remains authoritative.";
   }
   const flags = status?.flags || {};
+  const modeEl = document.getElementById("cutover-current-mode");
+  const shadowEl = document.getElementById("cutover-shadow-state");
+  const testEl = document.getElementById("cutover-test-state");
+  const rollbackEl = document.getElementById("cutover-rollback-state");
+  if (modeEl) modeEl.textContent = status?.mode || "legacy_only";
+  if (shadowEl) shadowEl.textContent = flags.protected_billing_shadow_compare ? "On" : "Off";
+  if (testEl) testEl.textContent = flags.enable_protected_billing_test_users ? `${fmtN(status?.allowlist?.length || 0)} enabled` : "Disabled";
+  if (rollbackEl) rollbackEl.textContent = flags.protected_billing_force_legacy ? "Forced legacy" : "Not forced";
   const set = (id, value) => { const el = document.getElementById(id); if (el) el.checked = value === true; };
   set("flag-shadow-compare", flags.protected_billing_shadow_compare);
   set("flag-test-users", flags.enable_protected_billing_test_users);
   set("flag-global-live", flags.enable_protected_billing_global);
   set("flag-force-legacy", flags.protected_billing_force_legacy);
   const controls = document.getElementById("billing-mode-controls");
-  if (controls) controls.style.display = window._adminRole === "super_admin" ? "grid" : "none";
+  if (controls) controls.style.display = window._adminRole === "super_admin" ? "inline-flex" : "none";
+}
+
+function openAdvancedBillingControls() {
+  if (window._adminRole !== "super_admin") return toast("Super admin required", "error");
+  const status = window._billingCutoverStatus || {};
+  const flags = status.flags || {};
+  showModal({
+    title: "Advanced Billing Controls",
+    size: "lg",
+    persistent: true,
+    showClose: true,
+    confirmLabel: "Close",
+    cancelable: false,
+    body: `
+      <p style="color:var(--text2);margin-bottom:12px">Framework only. Legacy billing remains authoritative until a later approved cutover.</p>
+      <div class="billing-mode-controls" style="display:grid">
+        <label><input type="checkbox" id="flag-shadow-compare" ${flags.protected_billing_shadow_compare ? "checked" : ""} onchange="updateProtectedBillingFlags()"> Shadow compare</label>
+        <label><input type="checkbox" id="flag-test-users" ${flags.enable_protected_billing_test_users ? "checked" : ""} onchange="updateProtectedBillingFlags()"> Enable test-user framework</label>
+        <label><input type="checkbox" id="flag-global-live" ${flags.enable_protected_billing_global ? "checked" : ""} onchange="updateProtectedBillingFlags()"> Global protected live (do not enable yet)</label>
+        <label><input type="checkbox" id="flag-force-legacy" ${flags.protected_billing_force_legacy ? "checked" : ""} onchange="updateProtectedBillingFlags()"> Force legacy billing</label>
+        <div class="mini-field-row">
+          <input id="protected-user-id" class="modal-input" style="padding:5px 8px;font-size:11px" placeholder="Test user UUID">
+          <button class="btn btn-ghost btn-xs" onclick="setProtectedBillingTestUser(true)">Enable</button>
+          <button class="btn btn-ghost btn-xs" onclick="setProtectedBillingTestUser(false)">Disable</button>
+        </div>
+        <div class="recon-status" style="display:block;color:var(--text2);border-color:var(--border);background:var(--surface)">Current rollback state: ${esc(flags.protected_billing_force_legacy ? "Force legacy is active" : "Force legacy is not active")}</div>
+        <button class="btn btn-red btn-sm" onclick="forceLegacyBilling()">Force Legacy Billing</button>
+      </div>
+    `,
+  });
 }
 
 async function loadReconciliationAnalytics() {
   try {
+    const days = document.getElementById("recon-analytics-window")?.value || "7";
     const [analytics, trends, cutover] = await Promise.all([
-      api("/admin/api/reconciliation/analytics"),
-      api("/admin/api/reconciliation/trends"),
+      api(`/admin/api/reconciliation/analytics?days=${encodeURIComponent(days)}`),
+      api(`/admin/api/reconciliation/trends?days=${encodeURIComponent(days)}`),
       api("/admin/api/billing-cutover/status"),
     ]);
     window._reconAnalytics = analytics;
@@ -3835,7 +4086,7 @@ async function loadReconciliationAnalytics() {
     renderTopAnomalies(trends?.trends);
     renderBillingCutoverStatus(cutover);
     const lbl = document.getElementById("analytics-window-label");
-    if (lbl) lbl.textContent = `${analytics?.window_days || 7} days`;
+    if (lbl) lbl.textContent = days === "1" ? "24 hours" : `${analytics?.window_days || 7} days`;
   } catch (e) {
     console.warn("loadReconciliationAnalytics:", e.message);
     renderIntegrityScore({ score: "--", label: "unavailable", color: "", explanation: e.message });
@@ -3847,9 +4098,12 @@ function analyticsExportRows() {
   const totals = analytics.totals || {};
   const rows = Object.entries(totals).map(([metric, value]) => ({ section: "totals", metric, value }));
   for (const [type, count] of Object.entries(analytics.counts_by_type || {})) rows.push({ section: "type", metric: type, value: count });
+  for (const [category, count] of Object.entries(analytics.counts_by_category || {})) rows.push({ section: "category", metric: category, value: count });
+  for (const group of analytics.grouped_anomalies || []) rows.push({ section: "grouped_anomaly", metric: group.type, value: JSON.stringify({ count: group.count, category: group.category, expectation: group.expectation, avg_drift: group.avg_drift, max_drift: group.max_drift }) });
   for (const [scenario, stat] of Object.entries(analytics.scenario_stats || {})) rows.push({ section: "soak_scenario", metric: scenario, value: JSON.stringify(stat) });
   rows.push({ section: "integrity", metric: "score", value: window._reconAnalytics?.integrity?.score ?? "" });
   rows.push({ section: "integrity", metric: "label", value: window._reconAnalytics?.integrity?.label ?? "" });
+  rows.push({ section: "health", metric: "interpretation", value: window._reconAnalytics?.integrity?.health?.message ?? "" });
   return rows;
 }
 
@@ -3863,6 +4117,9 @@ function exportReconciliationAnalytics(format) {
     metadata: {
       integrity_score: window._reconAnalytics?.integrity?.score ?? null,
       integrity_label: window._reconAnalytics?.integrity?.label ?? null,
+      health_interpretation: window._reconAnalytics?.integrity?.health?.message || "",
+      dangerous_anomaly_count: window._reconAnalytics?.analytics?.totals?.dangerous_events || 0,
+      operational_anomaly_count: window._reconAnalytics?.analytics?.totals?.operational_events || 0,
       billing_mode: window._billingCutoverStatus?.mode || "legacy_only",
       legacy_authoritative: window._billingCutoverStatus?.legacy_authoritative !== false,
     },
@@ -4319,7 +4576,7 @@ async function loadReconciliation() {
     if (!data) return;
     window._reconLastData = data;
     renderReconMetrics(data);
-    renderReconEvents(data.latest || []);
+    renderReconEvents(data.latest || [], data.grouped_latest || null);
     loadReconciliationAnalytics();
     const updated = document.getElementById("recon-updated");
     if (updated) updated.textContent = `Updated ${new Date().toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })}`;
