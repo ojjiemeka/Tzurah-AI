@@ -326,9 +326,11 @@ const BILLING_ROUNDING_DRIFT_SEVERE = 2.0;
 const BILLING_BALANCE_DRIFT_WARNING = 1.0;
 const BILLING_BALANCE_DRIFT_SEVERE = 5.0;
 const BILLING_MISSING_FINAL_MIN_SECONDS = 15;
+const BILLING_FINAL_COVERAGE_GRACE_SECONDS = 5;
 const BILLING_ORPHAN_ACTIVE_MS = 5 * 60 * 1000;
 const BILLING_TINY_SYNC_SECONDS = 1;
 let _billingShadowRpcAvailable = null;
+const _activityWarningCache = new Map();
 
 function finiteNonNegativeNumber(value) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
@@ -451,6 +453,20 @@ async function wasRecentReconciliationLogged(type, sessionId, sinceMs = 30 * 60 
 async function logReconciliationEventOnce(event, sinceMs = 30 * 60 * 1000) {
   if (event?.sessionId && await wasRecentReconciliationLogged(event.type, event.sessionId, sinceMs)) return;
   await logBillingReconciliationEvent(event);
+}
+
+async function logActivityWarningOnce(type, details = {}, sinceMs = 30 * 60 * 1000) {
+  const key = `${type}:${details.source || "activity"}:${details.user_id || "no-user"}:${details.reason || ""}`;
+  const last = _activityWarningCache.get(key) || 0;
+  if (Date.now() - last < sinceMs) return;
+  _activityWarningCache.set(key, Date.now());
+  await logBillingReconciliationEvent({
+    userId: details.user_id || null,
+    sessionId: details.session_id || null,
+    type,
+    severity: "info",
+    details,
+  });
 }
 
 async function detectDuplicateSyncId({ userId, sessionId, syncId, source }) {
@@ -602,29 +618,120 @@ async function detectSuspiciousSyncPattern({ userId, sessionId, syncId, source, 
   }
 }
 
-async function detectMissingFinalSync(session) {
-  if (!session?.session_id || !session.started_at || !session.last_ping) return;
-  const durationSecs = Math.max(0, Math.round((new Date(session.last_ping) - new Date(session.started_at)) / 1000));
-  if (durationSecs < BILLING_MISSING_FINAL_MIN_SECONDS) return;
+function billingSecondsBetween(a, b) {
+  const start = new Date(a).getTime();
+  const end = new Date(b).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return Math.round((end - start) / 1000);
+}
+
+function sessionSyncCoversEnd(session) {
+  if (!session?.last_sync_at || !session?.last_ping) return null;
+  const remainingSecs = billingSecondsBetween(session.last_sync_at, session.last_ping);
+  if (remainingSecs === null) return null;
+  if (remainingSecs <= BILLING_FINAL_COVERAGE_GRACE_SECONDS) {
+    return {
+      finalized: true,
+      finalized_by: "interval_coverage",
+      remaining_secs: Math.max(0, remainingSecs),
+      grace_secs: BILLING_FINAL_COVERAGE_GRACE_SECONDS,
+      last_sync_at: session.last_sync_at,
+      ended_at: session.last_ping,
+    };
+  }
+  return {
+    finalized: false,
+    remaining_secs: remainingSecs,
+    grace_secs: BILLING_FINAL_COVERAGE_GRACE_SECONDS,
+    last_sync_at: session.last_sync_at,
+    ended_at: session.last_ping,
+  };
+}
+
+async function getSessionFinalizationStatus(session) {
+  if (!session?.session_id || !session.started_at || !session.last_ping) {
+    return { finalized: false, finalized_by: "insufficient_session_data", reason: "missing_session_timestamps" };
+  }
+
+  const coverage = sessionSyncCoversEnd(session);
   try {
-    const { data, error } = await supabaseAdmin
+    const { data: explicit, error: explicitErr } = await supabaseAdmin
       .from("billing_syncs")
-      .select("source")
+      .select("source, created_at")
       .eq("session_id", session.session_id)
       .in("source", ["final", "manual_stop", "app_shutdown"])
+      .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (error) {
-      if (!isMissingBillingMigrationError(error)) console.warn("[BILLING RECON] Missing final lookup error:", error.message);
-      return;
+    if (explicitErr) {
+      if (!isMissingBillingMigrationError(explicitErr)) console.warn("[BILLING RECON] Final sync lookup error:", explicitErr.message);
+    } else if (explicit) {
+      return {
+        finalized: true,
+        finalized_by: explicit.source === "app_shutdown" ? "shutdown_sync" : "explicit_final",
+        final_source: explicit.source,
+        final_sync_at: explicit.created_at,
+      };
     }
-    if (!data) {
+
+    if (coverage?.finalized) return coverage;
+
+    const { data: latest, error: latestErr } = await supabaseAdmin
+      .from("billing_syncs")
+      .select("source, created_at")
+      .eq("session_id", session.session_id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestErr) {
+      if (!isMissingBillingMigrationError(latestErr)) console.warn("[BILLING RECON] Latest sync lookup error:", latestErr.message);
+    } else if (latest?.created_at && session.last_ping) {
+      const latestDeltaSecs = billingSecondsBetween(latest.created_at, session.last_ping);
+      if (latestDeltaSecs !== null && latestDeltaSecs <= BILLING_FINAL_COVERAGE_GRACE_SECONDS) {
+        return {
+          finalized: true,
+          finalized_by: "interval_coverage",
+          latest_source: latest.source,
+          latest_sync_at: latest.created_at,
+          remaining_secs: Math.max(0, latestDeltaSecs),
+          grace_secs: BILLING_FINAL_COVERAGE_GRACE_SECONDS,
+        };
+      }
+    }
+  } catch (err) {
+    if (!isMissingBillingMigrationError(err)) console.warn("[BILLING RECON] Finalization status failed:", err.message);
+  }
+
+  return {
+    finalized: false,
+    finalized_by: null,
+    reason: "no_final_or_interval_coverage",
+    ...(coverage || {}),
+  };
+}
+
+async function detectMissingFinalSync(session) {
+  if (!session?.session_id || !session.started_at || !session.last_ping) return;
+  const durationSecs = Math.max(0, billingSecondsBetween(session.started_at, session.last_ping) || 0);
+  if (durationSecs < BILLING_MISSING_FINAL_MIN_SECONDS) return;
+  try {
+    const finalization = await getSessionFinalizationStatus(session);
+    if (!finalization.finalized) {
       await logReconciliationEventOnce({
         userId: session.user_id || null,
         sessionId: session.session_id,
         type: "missing_final_sync",
         severity: "warning",
-        details: { duration_secs: durationSecs, started_at: session.started_at, last_ping: session.last_ping },
+        details: {
+          duration_secs: durationSecs,
+          started_at: session.started_at,
+          last_ping: session.last_ping,
+          last_sync_at: session.last_sync_at || null,
+          finalized_by: finalization.finalized_by,
+          reason: finalization.reason,
+          remaining_secs: finalization.remaining_secs ?? null,
+          grace_secs: BILLING_FINAL_COVERAGE_GRACE_SECONDS,
+        },
       }, 24 * 60 * 60 * 1000);
     }
   } catch (err) {
@@ -678,7 +785,7 @@ async function detectSessionAnomalies() {
     const inactiveCutoff = new Date(Date.now() - 60 * 1000).toISOString();
     const { data: inactiveSessions, error: inactiveErr } = await supabaseAdmin
       .from("sessions")
-      .select("user_id, session_id, started_at, last_ping, is_active")
+      .select("user_id, session_id, started_at, last_ping, last_sync_at, is_active")
       .eq("is_active", false)
       .gte("last_ping", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
       .lte("last_ping", inactiveCutoff)
@@ -2760,15 +2867,136 @@ app.get("/admin/api/reconciliation/summary", adminAuth, async (_req, res) => {
   }
 });
 
+function formatGiftActivityDetail(purchase) {
+  const credits = safeBillingNumber(Number(purchase.credits_added || 0));
+  const packName = String(purchase.pack_name || "").trim();
+  const hasUsefulName = packName && !["gift", "admin gift"].includes(packName.toLowerCase());
+  if (credits && credits > 0 && hasUsefulName) return `received gift: +${credits} credits (${packName})`;
+  if (credits && credits > 0) return `received gift: +${credits} credits`;
+  if (hasUsefulName) return `received gift: ${packName}`;
+  return "received gift: Admin gift";
+}
+
+async function resolveActivityUserLabels(events) {
+  const userIds = [...new Set(events.map(e => e.user_id).filter(id => validateUUID(id || "")))];
+  const profileNames = new Map();
+  if (userIds.length) {
+    const { data: profiles, error: profileErr } = await supabaseAdmin
+      .from("profiles")
+      .select("id, display_name")
+      .in("id", userIds);
+    if (profileErr) console.warn("[ACTIVITY] Profile label lookup error:", profileErr.message);
+    for (const profile of profiles || []) {
+      if (profile.display_name) profileNames.set(profile.id, profile.display_name);
+    }
+  }
+
+  for (const event of events) {
+    if (!event.user_id || !validateUUID(event.user_id)) {
+      event.email = "Unknown User";
+      await logActivityWarningOnce("malformed_activity_row", {
+        source: "activity_feed",
+        reason: "missing_or_invalid_user_id",
+        type: event.type || null,
+        detail: event.detail || null,
+        user_id: event.user_id || null,
+      });
+      continue;
+    }
+    try {
+      const { data: au, error: authErr } = await supabaseAdmin.auth.admin.getUserById(event.user_id);
+      if (authErr) throw new Error(authErr.message);
+      event.email = au?.user?.email || profileNames.get(event.user_id) || "Unknown User";
+      if (event.email === "Unknown User") {
+        await logActivityWarningOnce("malformed_activity_row", {
+          source: "activity_feed",
+          reason: "user_label_unresolved",
+          type: event.type || null,
+          user_id: event.user_id,
+        });
+      }
+    } catch (err) {
+      event.email = profileNames.get(event.user_id) || "Unknown User";
+      await logActivityWarningOnce("malformed_activity_row", {
+        source: "activity_feed",
+        reason: "auth_user_lookup_failed",
+        type: event.type || null,
+        user_id: event.user_id,
+        error: err.message,
+      });
+    }
+  }
+}
+
+function collapseSessionActivity(usageRows) {
+  const oneHourAgo = Date.now() - 60 * 60 * 1000;
+  const grouped = new Map();
+  const singles = [];
+  for (const row of usageRows || []) {
+    const ts = row.ended_at || row.created_at;
+    const t = new Date(ts).getTime();
+    if (!row.user_id || !Number.isFinite(t)) continue;
+    if (t >= oneHourAgo) {
+      const group = grouped.get(row.user_id) || { user_id: row.user_id, count: 0, seconds: 0, credits: 0, ts };
+      group.count += 1;
+      group.seconds += Number(row.session_seconds || 0);
+      group.credits += Number(row.credits_used || 0);
+      if (new Date(ts) > new Date(group.ts)) group.ts = ts;
+      grouped.set(row.user_id, group);
+    } else {
+      singles.push(row);
+    }
+  }
+
+  const events = [];
+  for (const group of grouped.values()) {
+    if (group.count > 1) {
+      const mins = Math.floor(group.seconds / 60);
+      const secs = Math.round(group.seconds % 60);
+      events.push({
+        type: "session",
+        user_id: group.user_id,
+        detail: `completed ${group.count} sessions in the last hour (${mins}m ${secs}s, ${Math.round(group.credits)} cr)`,
+        ts: group.ts,
+        grouped: true,
+        count: group.count,
+      });
+    } else {
+      singles.push({ user_id: group.user_id, session_seconds: group.seconds, credits_used: group.credits, ended_at: group.ts, created_at: group.ts });
+    }
+  }
+
+  for (const row of singles) {
+    const seconds = Math.max(0, Math.round(Number(row.session_seconds || 0)));
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    events.push({
+      type: "session",
+      user_id: row.user_id,
+      detail: `session ended (${m}m ${s}s, ${Math.round(Number(row.credits_used || 0))} cr)`,
+      ts: row.ended_at || row.created_at,
+    });
+  }
+  return events;
+}
+
+function cleanActivityEvents(events) {
+  return events.filter((event) => {
+    if (!event || !event.type || !event.detail || !event.ts) return false;
+    const t = new Date(event.ts).getTime();
+    return Number.isFinite(t);
+  });
+}
+
 app.get("/admin/api/activity", adminAuth, async (_req, res) => {
   try {
     const [purchRes, usageRes, signupRes] = await Promise.all([
       supabaseAdmin.from("purchases")
-        .select("user_id, pack_name, price_usd, created_at")
-        .order("created_at", { ascending: false }).limit(10),
+        .select("user_id, pack_name, price_usd, credits_added, created_at")
+        .order("created_at", { ascending: false }).limit(20),
       supabaseAdmin.from("usage")
         .select("user_id, session_seconds, credits_used, ended_at, created_at")
-        .order("created_at", { ascending: false }).limit(10),
+        .order("created_at", { ascending: false }).limit(30),
       supabaseAdmin.from("profiles")
         .select("id, display_name, created_at")
         .order("created_at", { ascending: false }).limit(10),
@@ -2782,20 +3010,11 @@ app.get("/admin/api/activity", adminAuth, async (_req, res) => {
         user_id: p.user_id,
         detail:  p.price_usd > 0
           ? `purchased ${p.pack_name} ($${p.price_usd})`
-          : `received gift: ${p.pack_name}`,
+          : formatGiftActivityDetail(p),
         ts: p.created_at,
       });
     }
-    for (const u of usageRes.data || []) {
-      const m = Math.floor((u.session_seconds || 0) / 60);
-      const s = (u.session_seconds || 0) % 60;
-      events.push({
-        type:    "session",
-        user_id: u.user_id,
-        detail:  `session ended (${m}m ${s}s, ${Math.round(u.credits_used || 0)} cr)`,
-        ts:      u.ended_at || u.created_at,
-      });
-    }
+    events.push(...collapseSessionActivity(usageRes.data || []));
     for (const p of signupRes.data || []) {
       events.push({
         type:    "signup",
@@ -2805,15 +3024,19 @@ app.get("/admin/api/activity", adminAuth, async (_req, res) => {
       });
     }
 
-    events.sort((a, b) => new Date(b.ts) - new Date(a.ts));
-    const top = events.slice(0, 15);
+    const cleaned = cleanActivityEvents(events);
+    const malformedCount = events.length - cleaned.length;
+    if (malformedCount > 0) {
+      await logActivityWarningOnce("malformed_activity_row", {
+        source: "activity_feed",
+        reason: "missing_type_detail_or_timestamp",
+        malformed_count: malformedCount,
+      });
+    }
+    cleaned.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+    const top = cleaned.slice(0, 15);
 
-    await Promise.all(top.slice(0, 10).map(async (e) => {
-      try {
-        const { data: au } = await supabaseAdmin.auth.admin.getUserById(e.user_id);
-        e.email = au?.user?.email || "unknown";
-      } catch { e.email = "unknown"; }
-    }));
+    await resolveActivityUserLabels(top);
 
     res.json({ ok: true, events: top });
   } catch (err) {
