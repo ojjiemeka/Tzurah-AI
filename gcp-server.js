@@ -320,6 +320,7 @@ function validateUUID(str) {
 const BILLING_BURN_RATE = 2.18;
 const BILLING_MAX_SYNC_SECONDS = 10 * 60;
 const BILLING_MAX_SYNC_CREDITS = BILLING_BURN_RATE * BILLING_MAX_SYNC_SECONDS;
+const BILLING_STALE_MS = 90 * 1000;
 let _billingShadowRpcAvailable = null;
 
 function finiteNonNegativeNumber(value) {
@@ -333,6 +334,28 @@ function clampBillingNumber(value, max) {
 
 function makeLegacyBillingSyncId(source) {
   return `legacy-${source}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function logBillingReconciliationEvent({ userId, sessionId, type, severity = "warning", details = {} }) {
+  try {
+    const { error } = await supabaseAdmin
+      .from("billing_reconciliation_events")
+      .insert({
+        user_id: validateUUID(userId || "") ? userId : null,
+        session_id: sessionId || null,
+        type,
+        severity,
+        details,
+        created_at: new Date().toISOString(),
+      });
+    if (error && !isMissingBillingMigrationError(error)) {
+      console.warn("[BILLING RECON] Insert error:", error.message);
+    }
+  } catch (err) {
+    if (!isMissingBillingMigrationError(err)) {
+      console.warn("[BILLING RECON] Non-fatal error:", err.message);
+    }
+  }
 }
 
 async function resolveActiveBillingSessionId(userId) {
@@ -365,6 +388,130 @@ function isMissingBillingMigrationError(error) {
          msg.includes("billing_syncs") ||
          msg.includes("billing_reconciliation_events") ||
          msg.includes("does not exist");
+}
+
+function badBillingNumberResponse(res, label, value) {
+  console.warn("[BILLING] Invalid numeric input:", label, value);
+  return res.status(400).json({ error: `${label} must be a finite non-negative number` });
+}
+
+function safeBillingNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+async function validateBillingSession(userId, sessionId, source = "legacy") {
+  if (!userId || !validateUUID(userId)) {
+    return { ok: false, status: 400, reason: "invalid_user_id" };
+  }
+
+  if (!sessionId) {
+    await logBillingReconciliationEvent({
+      userId,
+      sessionId: null,
+      type: "legacy_missing_session_id",
+      severity: "warning",
+      details: { source, allowed_temporarily: true },
+    });
+    console.warn("[BILLING] Legacy request without session_id allowed temporarily:", { userId, source });
+    return { ok: true, legacy: true, reason: "legacy_missing_session_id" };
+  }
+
+  const { data: session, error } = await supabaseAdmin
+    .from("sessions")
+    .select("id, user_id, session_id, is_active, kill_signal, kill_reason, started_at, last_ping")
+    .eq("user_id", userId)
+    .eq("session_id", sessionId)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("[BILLING] Session validation query error:", error.message);
+    return { ok: false, status: 500, reason: "session_validation_error" };
+  }
+
+  if (!session) {
+    await logBillingReconciliationEvent({
+      userId,
+      sessionId,
+      type: "invalid_billing_session",
+      severity: "warning",
+      details: { source, reason: "session_not_found" },
+    });
+    return { ok: false, status: 409, reason: "session_not_found" };
+  }
+
+  if (session.kill_signal) {
+    await logBillingReconciliationEvent({
+      userId,
+      sessionId,
+      type: "killed_session_attempted_sync",
+      severity: "warning",
+      details: { source, kill_reason: session.kill_reason || null },
+    });
+    return { ok: false, status: 409, reason: "session_killed", session };
+  }
+
+  if (!session.is_active) {
+    const lowerReason = String(session.kill_reason || "").toLowerCase();
+    const type = lowerReason.includes("replaced")
+      ? "replaced_session_attempted_sync"
+      : lowerReason.includes("timed out") || lowerReason.includes("stale")
+        ? "stale_session_attempted_sync"
+        : "inactive_session_attempted_sync";
+    await logBillingReconciliationEvent({
+      userId,
+      sessionId,
+      type,
+      severity: "warning",
+      details: { source, kill_reason: session.kill_reason || null },
+    });
+    return { ok: false, status: 409, reason: type, session };
+  }
+
+  if (session.last_ping) {
+    const ageMs = Date.now() - new Date(session.last_ping).getTime();
+    if (Number.isFinite(ageMs) && ageMs > BILLING_STALE_MS) {
+      await logBillingReconciliationEvent({
+        userId,
+        sessionId,
+        type: "stale_active_session_attempted_sync",
+        severity: "warning",
+        details: { source, last_ping: session.last_ping, age_ms: ageMs },
+      });
+      return { ok: false, status: 409, reason: "session_stale", session };
+    }
+  }
+
+  const { data: newestActive, error: activeErr } = await supabaseAdmin
+    .from("sessions")
+    .select("session_id, started_at")
+    .eq("user_id", userId)
+    .eq("is_active", true)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (activeErr) {
+    console.warn("[BILLING] Active session lookup error:", activeErr.message);
+    return { ok: false, status: 500, reason: "active_session_lookup_error" };
+  }
+
+  if (newestActive?.session_id && newestActive.session_id !== sessionId) {
+    await logBillingReconciliationEvent({
+      userId,
+      sessionId,
+      type: "replaced_session_attempted_sync",
+      severity: "warning",
+      details: {
+        source,
+        current_session_id: newestActive.session_id,
+        current_started_at: newestActive.started_at || null,
+      },
+    });
+    return { ok: false, status: 409, reason: "session_replaced", current_session_id: newestActive.session_id, session };
+  }
+
+  return { ok: true, session };
 }
 
 async function recordBillingShadowSync({
@@ -629,20 +776,78 @@ app.post("/internal/bust-token-cache", (req, res) => {
  * Body: { credits: number, session_seconds: number }
  */
 app.post("/credits/deduct", requireAuth, async (req, res) => {
-  const { credits, session_seconds, duration_secs, session_id, sync_id, sync_sequence, source, client_ts } = req.body || {};
+  let { credits, session_seconds, duration_secs, session_id, sync_id, sync_sequence, source, client_ts } = req.body || {};
 
   console.log("[DEDUCT] user:", req.userId, "credits:", credits, "seconds:", session_seconds);
 
-  if (typeof credits !== "number" || credits < 0) {
-    console.warn("[DEDUCT] Bad credits value:", credits);
-    return res.status(400).json({ error: "credits must be a non-negative number" });
+  const safeCredits = safeBillingNumber(credits);
+  const safeSeconds = safeBillingNumber(duration_secs ?? session_seconds ?? 0);
+  if (safeCredits === null) {
+    await logBillingReconciliationEvent({
+      userId: req.userId,
+      sessionId: session_id || null,
+      type: "invalid_billing_numeric_input",
+      severity: "warning",
+      details: { endpoint: "credits_deduct", field: "credits", value: credits, source: source || "legacy" },
+    });
+    return badBillingNumberResponse(res, "credits", credits);
+  }
+  if (safeSeconds === null) {
+    await logBillingReconciliationEvent({
+      userId: req.userId,
+      sessionId: session_id || null,
+      type: "invalid_billing_numeric_input",
+      severity: "warning",
+      details: { endpoint: "credits_deduct", field: "session_seconds", value: duration_secs ?? session_seconds, source: source || "legacy" },
+    });
+    return badBillingNumberResponse(res, "session_seconds", duration_secs ?? session_seconds);
+  }
+  credits = Math.min(safeCredits, BILLING_MAX_SYNC_CREDITS);
+  session_seconds = Math.min(safeSeconds, BILLING_MAX_SYNC_SECONDS);
+  if (credits !== safeCredits || session_seconds !== safeSeconds) {
+    await logBillingReconciliationEvent({
+      userId: req.userId,
+      sessionId: session_id || null,
+      type: "billing_sync_capped",
+      severity: "warning",
+      details: {
+        endpoint: "credits_deduct",
+        source: source || "legacy",
+        requested_credits: safeCredits,
+        requested_seconds: safeSeconds,
+        capped_credits: credits,
+        capped_seconds: session_seconds,
+      },
+    });
+  }
+
+  const sessionValidation = await validateBillingSession(req.userId, session_id || null, source || "credits_deduct");
+  if (!sessionValidation.ok) {
+    console.warn("[DEDUCT] Blocked invalid billing session:", {
+      userId: req.userId,
+      session_id: session_id || null,
+      source: source || "credits_deduct",
+      reason: sessionValidation.reason,
+    });
+    const { data: currentProfile } = await supabaseAdmin
+      .from("profiles")
+      .select("credits")
+      .eq("id", req.userId)
+      .maybeSingle();
+    return res.status(sessionValidation.status || 409).json({
+      ok: false,
+      error: "Invalid billing session",
+      reason: sessionValidation.reason,
+      credits_remaining: currentProfile?.credits ?? null,
+      current_session_id: sessionValidation.current_session_id || null,
+    });
   }
 
   const { data: profile, error: fetchErr } = await supabaseAdmin
     .from("profiles")
     .select("credits, total_credits_used")
     .eq("id", req.userId)
-    .single();
+    .maybeSingle();
 
   console.log("[DEDUCT] current balance:", profile?.credits, "fetch error:", fetchErr?.message || "none");
 
@@ -660,7 +865,7 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
     sessionId: session_id || null,
     syncId: sync_id || null,
     syncSequence: sync_sequence,
-    durationSecs: Number(duration_secs ?? session_seconds) || 0,
+    durationSecs: session_seconds,
     creditsRequested: credits,
     clientTs: client_ts || null,
     source: source || "credits_deduct",
@@ -694,11 +899,13 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
     if (usageInsertErr) console.warn("[DEDUCT] usage insert error:", usageInsertErr.message);
 
     // Track last sync time so /session/end can deduct only the remaining unsync'd period
-    const { error: sessionSyncErr } = await supabaseAdmin
+    let syncUpdateQuery = supabaseAdmin
       .from("sessions")
       .update({ last_sync_at: now })
       .eq("user_id", req.userId)
       .eq("is_active", true);
+    if (session_id) syncUpdateQuery = syncUpdateQuery.eq("session_id", session_id);
+    const { error: sessionSyncErr } = await syncUpdateQuery;
     if (sessionSyncErr) console.warn("[DEDUCT] session last_sync_at update error:", sessionSyncErr.message);
   }
 
@@ -714,6 +921,62 @@ app.post("/credits/sync", requireAuth, async (req, res) => {
   const { usage_logs, session_id, sync_id, sync_sequence, source, client_ts } = req.body || {};
 
   if (Array.isArray(usage_logs) && usage_logs.length > 0) {
+    const totalCreditsRaw = usage_logs.reduce((s, l) => s + Number(l.credits_used || 0), 0);
+    const totalSecondsRaw = usage_logs.reduce((s, l) => s + Number(l.session_seconds || 0), 0);
+    const safeCredits = safeBillingNumber(totalCreditsRaw);
+    const safeSeconds = safeBillingNumber(totalSecondsRaw);
+    if (safeCredits === null || safeSeconds === null) {
+      await logBillingReconciliationEvent({
+        userId: req.userId,
+        sessionId: session_id || null,
+        type: "invalid_billing_numeric_input",
+        severity: "warning",
+        details: { endpoint: "credits_sync", total_credits: totalCreditsRaw, total_seconds: totalSecondsRaw, source: source || "legacy" },
+      });
+      return res.status(400).json({ ok: false, error: "usage_logs contain invalid billing numbers" });
+    }
+
+    const totalCredits = Math.min(safeCredits, BILLING_MAX_SYNC_CREDITS);
+    const totalSeconds = Math.min(safeSeconds, BILLING_MAX_SYNC_SECONDS);
+    if (totalCredits !== safeCredits || totalSeconds !== safeSeconds) {
+      await logBillingReconciliationEvent({
+        userId: req.userId,
+        sessionId: session_id || null,
+        type: "billing_sync_capped",
+        severity: "warning",
+        details: {
+          endpoint: "credits_sync",
+          source: source || "legacy",
+          requested_credits: safeCredits,
+          requested_seconds: safeSeconds,
+          capped_credits: totalCredits,
+          capped_seconds: totalSeconds,
+        },
+      });
+    }
+
+    const sessionValidation = await validateBillingSession(req.userId, session_id || null, source || "credits_sync");
+    if (!sessionValidation.ok) {
+      console.warn("[SYNC] Blocked invalid billing session:", {
+        userId: req.userId,
+        session_id: session_id || null,
+        source: source || "credits_sync",
+        reason: sessionValidation.reason,
+      });
+      const { data: currentProfile } = await supabaseAdmin
+        .from("profiles")
+        .select("credits")
+        .eq("id", req.userId)
+        .maybeSingle();
+      return res.status(sessionValidation.status || 409).json({
+        ok: false,
+        error: "Invalid billing session",
+        reason: sessionValidation.reason,
+        credits_remaining: currentProfile?.credits ?? 0,
+        current_session_id: sessionValidation.current_session_id || null,
+      });
+    }
+
     const rows = usage_logs.map((log) => ({
       user_id:         req.userId,
       session_seconds: log.session_seconds,
@@ -726,12 +989,9 @@ app.post("/credits/sync", requireAuth, async (req, res) => {
     const { error: usageInsertErr } = await supabaseAdmin.from("usage").insert(rows);
     if (usageInsertErr) console.warn("[SYNC] usage insert error:", usageInsertErr.message);
 
-    const totalCredits = usage_logs.reduce((s, l) => s + (l.credits_used || 0), 0);
-    const totalSeconds = usage_logs.reduce((s, l) => s + (l.session_seconds || 0), 0);
-
     // Fetch and deduct atomically
     const { data: profile } = await supabaseAdmin
-      .from("profiles").select("credits").eq("id", req.userId).single();
+      .from("profiles").select("credits").eq("id", req.userId).maybeSingle();
 
     if (profile) {
       const legacyBalanceAfter = Math.max(0, profile.credits - totalCredits);
@@ -754,7 +1014,7 @@ app.post("/credits/sync", requireAuth, async (req, res) => {
   }
 
   const { data: profile } = await supabaseAdmin
-    .from("profiles").select("credits").eq("id", req.userId).single();
+    .from("profiles").select("credits").eq("id", req.userId).maybeSingle();
 
   res.json({ ok: true, credits_remaining: profile?.credits ?? 0 });
 });
@@ -1670,6 +1930,26 @@ app.post("/session/ping", async (req, res) => {
   if (!user_id) return res.status(400).json({ error: "user_id required" });
   if (!validateUUID(user_id)) return res.status(400).json({ error: "Invalid user_id format" });
   try {
+    if (session_id) {
+      const { data: requestedSession, error: requestedErr } = await supabaseAdmin
+        .from("sessions")
+        .select("id, started_at, is_active, session_id, kill_signal, kill_reason, last_sync_at")
+        .eq("user_id", user_id)
+        .eq("session_id", session_id)
+        .maybeSingle();
+
+      if (requestedErr) console.warn("[PING] requested session lookup error:", requestedErr.message);
+      if (requestedSession && (requestedSession.kill_signal || (!requestedSession.is_active && requestedSession.kill_reason))) {
+        console.log("[PING] Requested session is no longer valid:", session_id, requestedSession.kill_reason);
+        return res.json({
+          ok: true,
+          kill: true,
+          reason: requestedSession.kill_reason || "session_inactive",
+          current_session_invalid: true,
+        });
+      }
+    }
+
     const { data: existing } = await supabaseAdmin
       .from("sessions")
       .select("id, started_at, is_active, session_id, kill_signal, kill_reason, last_sync_at")
@@ -1687,7 +1967,7 @@ app.post("/session/ping", async (req, res) => {
         if (remainingSecs > 0) deductDecartCredits(remainingSecs, existing.session_id).catch(() => {});
       }
       await supabaseAdmin.from("sessions")
-        .update({ kill_signal: false, is_active: false })
+        .update({ is_active: false })
         .eq("id", existing.id);
       return res.json({ ok: true, kill: true, reason: existing.kill_reason || null });
     }
@@ -1699,7 +1979,7 @@ app.post("/session/ping", async (req, res) => {
     if (profile && profile.credits <= 0) {
       // Deduct remaining unsync'd Decart time before closing
       const { data: sess } = session_id
-        ? await supabaseAdmin.from("sessions").select("started_at, last_sync_at").eq("session_id", session_id).maybeSingle()
+        ? await supabaseAdmin.from("sessions").select("started_at, last_sync_at").eq("user_id", user_id).eq("session_id", session_id).maybeSingle()
         : { data: null };
       if (sess?.started_at) {
         const lastSync      = new Date(sess.last_sync_at || sess.started_at);
@@ -1731,8 +2011,15 @@ app.post("/session/ping", async (req, res) => {
         const dupSecs      = Math.max(0, Math.round((Date.now() - dupLastSync.getTime()) / 1000));
         if (dupSecs > 0) deductDecartCredits(dupSecs, dupSess.session_id).catch(() => {});
         await supabaseAdmin.from("sessions")
-          .update({ is_active: false, kill_reason: "Replaced by new session" })
+          .update({ is_active: false, kill_signal: true, kill_reason: "replaced_by_new_session" })
           .eq("session_id", dupSess.session_id);
+        await logBillingReconciliationEvent({
+          userId: user_id,
+          sessionId: dupSess.session_id,
+          type: "duplicate_active_session_replaced",
+          severity: "warning",
+          details: { new_session_id: session_id, replaced_unbilled_secs: dupSecs },
+        });
       }
     }
 
@@ -1752,6 +2039,8 @@ app.post("/session/ping", async (req, res) => {
           credits_used: Number(credits_used) || 0,
           email:        email || "unknown",
           is_active:    true,
+          kill_signal:  false,
+          kill_reason:  null,
           session_id:   session_id || null,
         }).eq("id", existing.id);
       } else {
@@ -1769,11 +2058,13 @@ app.post("/session/ping", async (req, res) => {
     } else {
       console.log("[PING] UPDATE session for:", user_id);
       await supabaseAdmin.from("sessions").update({
-        last_ping:    now,
-        credits_used: Number(credits_used) || 0,
-        email:        email || "unknown",
-        is_active:    true,
-      }).eq("id", existing.id);
+          last_ping:    now,
+          credits_used: Number(credits_used) || 0,
+          email:        email || "unknown",
+          is_active:    true,
+          kill_signal:  false,
+          kill_reason:  null,
+        }).eq("id", existing.id);
     }
 
     res.json({ ok: true });
@@ -1793,10 +2084,11 @@ app.post("/session/end", async (req, res) => {
     // Look up session — by session_id if provided, else by user_id + active
     let sessResult;
     if (session_id) {
-      sessResult = await supabaseAdmin.from("sessions")
+      let sessionEndQuery = supabaseAdmin.from("sessions")
         .select("id, is_active, started_at, last_sync_at, session_id")
-        .eq("session_id", session_id)
-        .maybeSingle();
+        .eq("session_id", session_id);
+      if (user_id) sessionEndQuery = sessionEndQuery.eq("user_id", user_id);
+      sessResult = await sessionEndQuery.maybeSingle();
     } else {
       sessResult = await supabaseAdmin.from("sessions")
         .select("id, is_active, started_at, last_sync_at, session_id")
