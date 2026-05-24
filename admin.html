@@ -141,6 +141,41 @@ main { padding:20px; max-width:1400px; margin:0 auto; }
 .stat-card.hi { border-color:var(--accent); }
 .stat-card.warn { border-color:var(--warning); }
 
+/* Billing reconciliation diagnostics */
+.recon-grid {
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(118px,1fr));
+  gap:10px; margin-bottom:12px;
+}
+.recon-metric {
+  background:var(--bg); border:1px solid var(--border);
+  border-radius:var(--r); padding:10px 12px; min-height:58px;
+}
+.recon-metric .rval { font-size:20px; font-weight:800; color:var(--text); line-height:1; }
+.recon-metric .rlbl {
+  margin-top:5px; font-size:10px; text-transform:uppercase;
+  letter-spacing:.5px; color:var(--muted);
+}
+.recon-metric.critical { border-color:rgba(239,68,68,.65); }
+.recon-metric.high { border-color:rgba(249,115,22,.65); }
+.recon-metric.warning { border-color:rgba(245,158,11,.6); }
+.recon-status {
+  display:none; margin-bottom:10px; padding:8px 10px; border-radius:6px;
+  background:rgba(245,158,11,.1); border:1px solid rgba(245,158,11,.25);
+  color:#fbbf24; font-size:11px;
+}
+.recon-details {
+  display:none; background:var(--bg); color:var(--muted);
+  font-family:monospace; font-size:11px; white-space:pre-wrap;
+  max-height:180px; overflow:auto;
+}
+.recon-details td { background:var(--bg); color:var(--muted); }
+.recon-row { cursor:pointer; }
+.badge-high { background:rgba(249,115,22,.16); color:#fb923c; }
+.recon-preview {
+  max-width:420px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  color:var(--muted);
+}
+
 /* ── Two-col layout ────────────────────────────────────────────── */
 .two-col { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
 @media(max-width:800px) { .two-col { grid-template-columns:1fr; } }
@@ -1229,6 +1264,34 @@ kbd {
     </div>
   </div>
 
+  <!-- Billing Reconciliation -->
+  <div class="panel-card" style="margin-top:16px">
+    <div class="panel-hdr">
+      <span class="ptitle">Billing Reconciliation</span>
+      <span id="recon-updated" style="font-size:11px;color:var(--muted);margin-left:auto">--</span>
+      <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="loadReconciliation()">Refresh</button>
+    </div>
+    <div class="panel-body">
+      <div class="recon-status" id="recon-status"></div>
+      <div class="recon-grid" id="recon-metrics">
+        <div class="recon-metric"><div class="rval">--</div><div class="rlbl">Total Anomalies</div></div>
+        <div class="recon-metric"><div class="rval">--</div><div class="rlbl">Critical</div></div>
+        <div class="recon-metric"><div class="rval">--</div><div class="rlbl">High</div></div>
+        <div class="recon-metric"><div class="rval">--</div><div class="rlbl">Warnings</div></div>
+      </div>
+      <div class="table-wrap" style="margin-bottom:0">
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Type</th><th>Severity</th><th>Session</th><th>Details</th></tr>
+          </thead>
+          <tbody id="recon-events-tbody">
+            <tr><td colspan="5" class="loading-cell"><div class="spinner"></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <!-- System Health -->
   <div class="panel-card health-panel" style="margin-top:16px">
     <div class="panel-hdr"><span class="ptitle">System Health</span></div>
@@ -2174,6 +2237,7 @@ let revDays = 30;
 let autoOn      = true;
 let overviewInt = null;
 let liveInt     = null;
+let reconInt    = null;
 let cdValue     = 30;
 let cdInterval  = null;
 
@@ -2511,7 +2575,7 @@ function switchTab(tab) {
     if (show) { p.classList.remove("tab-entering"); void p.offsetWidth; p.classList.add("tab-entering"); }
   });
   switch(tab) {
-    case 'overview':      if (!cache.stats) loadStats(); break;
+    case 'overview':      if (!cache.stats) loadStats(); loadReconciliation(); break;
     case 'users':         if (!cache.users.length) loadUsersData(); break;
     case 'revenue':       if (!cache.allPurchases.length) loadRevenuePurchases(); break;
     case 'purchases':     if (!allPurchases.length) loadPurchasesData(); break;
@@ -2543,6 +2607,7 @@ function startAutoRefresh() {
   clearIntervals();
   overviewInt = setInterval(() => { loadActivity(); }, 30000);
   liveInt     = setInterval(() => loadLiveSessions(), 30000); // fallback if SSE drops
+  reconInt    = setInterval(() => loadReconciliation(), 30000);
   cdInterval  = setInterval(() => {
     if (!autoOn) return;
     const secs = Math.floor((Date.now() - lastRefreshTime) / 1000);
@@ -2551,7 +2616,7 @@ function startAutoRefresh() {
   }, 1000);
 }
 function clearIntervals() {
-  clearInterval(overviewInt); clearInterval(liveInt); clearInterval(cdInterval);
+  clearInterval(overviewInt); clearInterval(liveInt); clearInterval(reconInt); clearInterval(cdInterval);
 }
 function toggleAuto() {
   autoOn = !autoOn;
@@ -2560,7 +2625,7 @@ function toggleAuto() {
   else        { clearIntervals(); btn.textContent = "⏸ Paused"; btn.classList.remove("btn-ghost"); btn.classList.add("btn-amber");
                 document.getElementById("refresh-cd").textContent = ""; }
 }
-function manualRefresh() { loadStats(); loadLiveSessions(); loadActivity(); }
+function manualRefresh() { loadStats(); loadLiveSessions(); loadActivity(); loadReconciliation(); }
 
 // ══════════════════════════════════════════════════════════════════
 // OVERVIEW
@@ -2786,6 +2851,120 @@ async function loadActivity() {
       </li>`;
     }).join("");
   } catch(e) { console.error("loadActivity:", e.message); }
+}
+
+function reconSeverityClass(severity) {
+  const s = String(severity || "info").toLowerCase();
+  if (s === "critical") return "badge-red";
+  if (s === "high") return "badge-high";
+  if (s === "warning") return "badge-amber";
+  return "badge-muted";
+}
+
+function shortSessionId(sessionId) {
+  const s = String(sessionId || "");
+  if (!s) return "--";
+  return s.length > 18 ? `${s.slice(0, 8)}...${s.slice(-6)}` : s;
+}
+
+function reconDetailsText(details) {
+  if (!details) return "";
+  if (typeof details === "string") return details;
+  try { return JSON.stringify(details, null, 2); }
+  catch (_) { return String(details); }
+}
+
+function reconPreview(event) {
+  const details = event.details || {};
+  if (details.message) return details.message;
+  if (details.reason) return details.reason;
+  if (details.sync_id) return `sync ${details.sync_id}`;
+  if (details.delta != null) return `delta ${details.delta}`;
+  return reconDetailsText(details).replace(/\s+/g, " ").slice(0, 120) || "--";
+}
+
+function toggleReconDetails(id) {
+  const row = document.getElementById(id);
+  if (!row) return;
+  row.style.display = row.style.display === "table-row" ? "none" : "table-row";
+}
+
+function renderReconMetrics(data) {
+  const sev = data.counts_by_severity || {};
+  const drift = data.drift_totals || {};
+  const metrics = [
+    { label:"Total Anomalies", value:data.total_anomalies || 0 },
+    { label:"Critical", value:sev.critical || 0, cls:"critical" },
+    { label:"High", value:sev.high || 0, cls:"high" },
+    { label:"Warnings", value:sev.warning || 0, cls:"warning" },
+    { label:"Duplicate Syncs", value:data.duplicate_sync_count || 0 },
+    { label:"Missing Finals", value:data.missing_final_sync_count || 0 },
+    { label:"Stale Sessions", value:data.stale_session_count || 0 },
+    { label:"Balance Drift", value:(drift.balance_warning || 0) + (drift.balance_severe || 0) },
+    { label:"Orphan Sessions", value:(data.counts_by_type || {}).orphan_active_session || 0 },
+  ];
+  const wrap = document.getElementById("recon-metrics");
+  if (!wrap) return;
+  wrap.innerHTML = metrics.map(m => `
+    <div class="recon-metric ${m.cls || ""}">
+      <div class="rval">${fmtN(m.value)}</div>
+      <div class="rlbl">${esc(m.label)}</div>
+    </div>
+  `).join("");
+}
+
+function renderReconEvents(events) {
+  const tbody = document.getElementById("recon-events-tbody");
+  if (!tbody) return;
+  if (!events.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="td-empty">No reconciliation anomalies detected.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = events.slice(0, 20).map((event, idx) => {
+    const detailsId = `recon-details-${idx}`;
+    const details = reconDetailsText(event.details);
+    return `
+      <tr class="recon-row" onclick="toggleReconDetails('${detailsId}')">
+        <td class="td-mono">${esc(relTime(event.created_at))}</td>
+        <td>${esc(event.type || "unknown")}</td>
+        <td><span class="badge ${reconSeverityClass(event.severity)}">${esc(event.severity || "info")}</span></td>
+        <td class="td-mono" title="${esc(event.session_id || "")}">${esc(shortSessionId(event.session_id))}</td>
+        <td><div class="recon-preview">${esc(reconPreview(event))}</div></td>
+      </tr>
+      <tr id="${detailsId}" class="recon-details">
+        <td colspan="5">${esc(details || "No details")}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+async function loadReconciliation() {
+  const status = document.getElementById("recon-status");
+  try {
+    const data = await api("/admin/api/reconciliation/summary");
+    if (!data) return;
+    renderReconMetrics(data);
+    renderReconEvents(data.latest || []);
+    const updated = document.getElementById("recon-updated");
+    if (updated) updated.textContent = `Updated ${new Date().toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })}`;
+    if (status) {
+      if (data.error) {
+        status.style.display = "block";
+        status.textContent = `Reconciliation endpoint warning: ${data.error}`;
+      } else {
+        status.style.display = "none";
+        status.textContent = "";
+      }
+    }
+  } catch(e) {
+    console.error("loadReconciliation:", e.message);
+    if (status) {
+      status.style.display = "block";
+      status.textContent = `Unable to load reconciliation diagnostics: ${e.message}`;
+    }
+    const tbody = document.getElementById("recon-events-tbody");
+    if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="td-empty">Reconciliation diagnostics unavailable.</td></tr>`;
+  }
 }
 
 // ── Decart Balance ────────────────────────────────────────────────
@@ -6638,6 +6817,7 @@ async function init() {
   updateSystemStatus();
   loadStats();       // initial full render (sets sval IDs for SSE to update)
   loadActivity();
+  loadReconciliation();
   connectSSE();      // real-time stats + live sessions every 5s
   startAutoRefresh(); // activity feed + fallback polling
   checkHealth();

@@ -2710,7 +2710,7 @@ app.get("/admin/api/reconciliation/summary", adminAuth, async (_req, res) => {
     const [eventsRes, sessionsRes, staleRes, syncsRes] = await Promise.all([
       supabaseAdmin
         .from("billing_reconciliation_events")
-        .select("type, severity, created_at")
+        .select("type, severity, details, session_id, created_at")
         .gte("created_at", since)
         .order("created_at", { ascending: false })
         .limit(1000),
