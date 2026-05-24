@@ -399,7 +399,7 @@ async function recordBillingShadowSync({
       p_user_id: userId,
       p_session_id: resolvedSessionId,
       p_sync_id: syncId || makeLegacyBillingSyncId(source || "deduct"),
-      p_sync_sequence: Number.isInteger(syncSequence) ? syncSequence : null,
+      p_sync_sequence: Number.isInteger(Number(syncSequence)) ? Number(syncSequence) : null,
       p_duration_secs: safeDuration,
       p_credits_requested: safeCredits,
       p_client_ts: clientTs || null,
@@ -419,8 +419,19 @@ async function recordBillingShadowSync({
     }
 
     _billingShadowRpcAvailable = true;
-    if (data?.duplicate) console.warn("[BILLING SHADOW] Duplicate sync detected:", data);
-    else if (data?.status && data.status !== "shadow_ok") console.warn("[BILLING SHADOW] Shadow warning:", data);
+    const shadowLog = {
+      sync_id: syncId || null,
+      sync_sequence: Number.isInteger(Number(syncSequence)) ? Number(syncSequence) : null,
+      source: source || "legacy",
+      duration_secs: safeDuration,
+      credits_requested: safeCredits,
+      credits_expected: data?.credits_expected,
+      status: data?.status,
+      duplicate: !!data?.duplicate,
+    };
+    if (data?.duplicate) console.warn("[BILLING SHADOW] Duplicate sync detected:", shadowLog);
+    else if (data?.status && data.status !== "shadow_ok") console.warn("[BILLING SHADOW] Shadow warning:", shadowLog);
+    else console.log("[BILLING SHADOW] Recorded:", shadowLog);
     return data;
   } catch (err) {
     console.warn("[BILLING SHADOW] Non-fatal error:", err.message);
@@ -618,7 +629,7 @@ app.post("/internal/bust-token-cache", (req, res) => {
  * Body: { credits: number, session_seconds: number }
  */
 app.post("/credits/deduct", requireAuth, async (req, res) => {
-  const { credits, session_seconds, session_id, sync_id, sync_sequence, client_ts } = req.body || {};
+  const { credits, session_seconds, duration_secs, session_id, sync_id, sync_sequence, source, client_ts } = req.body || {};
 
   console.log("[DEDUCT] user:", req.userId, "credits:", credits, "seconds:", session_seconds);
 
@@ -649,10 +660,10 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
     sessionId: session_id || null,
     syncId: sync_id || null,
     syncSequence: sync_sequence,
-    durationSecs: Number(session_seconds) || 0,
+    durationSecs: Number(duration_secs ?? session_seconds) || 0,
     creditsRequested: credits,
     clientTs: client_ts || null,
-    source: "credits_deduct",
+    source: source || "credits_deduct",
     legacyBalanceAfter: newBalance,
   });
 
@@ -700,7 +711,7 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
  * Body: { usage_logs: [{ session_seconds, credits_used, started_at, ended_at }] }
  */
 app.post("/credits/sync", requireAuth, async (req, res) => {
-  const { usage_logs, session_id, sync_id, sync_sequence, client_ts } = req.body || {};
+  const { usage_logs, session_id, sync_id, sync_sequence, source, client_ts } = req.body || {};
 
   if (Array.isArray(usage_logs) && usage_logs.length > 0) {
     const rows = usage_logs.map((log) => ({
@@ -732,7 +743,7 @@ app.post("/credits/sync", requireAuth, async (req, res) => {
         durationSecs: Number(totalSeconds) || 0,
         creditsRequested: Number(totalCredits) || 0,
         clientTs: client_ts || null,
-        source: "credits_sync",
+        source: source || "credits_sync",
         legacyBalanceAfter,
       });
 
