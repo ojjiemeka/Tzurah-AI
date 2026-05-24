@@ -585,6 +585,24 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   color:#f87171; font-size:11px; background:rgba(239,68,68,.1);
   padding:7px 10px; border-radius:6px; margin-top:8px;
 }
+.user-picker-results {
+  margin-top:8px; max-height:190px; overflow-y:auto;
+  border:1px solid var(--border); border-radius:8px; background:var(--bg);
+}
+.user-picker-option {
+  width:100%; display:block; text-align:left; background:none; border:0;
+  border-bottom:1px solid var(--border); padding:9px 10px;
+  color:var(--text); cursor:pointer;
+}
+.user-picker-option:hover,
+.user-picker-option.selected { background:var(--surface2); }
+.user-picker-option:last-child { border-bottom:0; }
+.user-picker-main { display:flex; align-items:center; gap:8px; min-width:0; }
+.user-picker-email { font-size:12px; font-weight:700; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.user-picker-meta { font-size:11px; color:var(--muted); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.user-picker-status { margin-left:auto; flex:0 0 auto; text-transform:capitalize; }
+.user-picker-selected { font-size:11px; color:var(--muted); margin-top:6px; }
+.user-picker-actions { display:flex; justify-content:flex-end; margin-top:6px; }
 .modal-footer {
   flex:0 0 auto; display:flex; gap:8px; justify-content:flex-end; margin:0;
   padding:12px 18px; background:#1a1a2e; border-top:1px solid var(--border); flex-wrap:wrap;
@@ -4044,11 +4062,134 @@ function renderBillingCutoverStatus(status) {
   if (controls) controls.style.display = window._adminRole === "super_admin" ? "inline-flex" : "none";
 }
 
+const UserPicker = {
+  state: {},
+  markup(id, {
+    label = "User",
+    placeholder = "Search email, display name, or user ID",
+    hint = "",
+    advanced = false,
+    advancedPlaceholder = "Auth/profile UUID",
+  } = {}) {
+    return `
+      <div class="modal-field user-picker" id="${esc(id)}">
+        <label>${esc(label)}</label>
+        <input id="${esc(id)}-search" class="modal-input" placeholder="${esc(placeholder)}" autocomplete="off" oninput="UserPicker.debounce('${esc(id)}', this.value)">
+        <input id="${esc(id)}-id" type="hidden">
+        <div id="${esc(id)}-selected" class="user-picker-selected">Select a user to continue.</div>
+        <div id="${esc(id)}-results" class="user-picker-results">
+          <div style="padding:10px;color:var(--muted);font-size:12px">Search to load users.</div>
+        </div>
+        <div class="user-picker-actions"><button type="button" class="btn btn-ghost btn-xs" onclick="UserPicker.clear('${esc(id)}')">Clear</button></div>
+        ${advanced ? `
+          <details style="margin-top:8px">
+            <summary style="font-size:11px;color:var(--muted);cursor:pointer">Advanced: paste user UUID</summary>
+            <input id="${esc(id)}-advanced" class="modal-input" style="margin-top:8px" placeholder="${esc(advancedPlaceholder)}" autocomplete="off" oninput="UserPicker.syncAdvanced('${esc(id)}')">
+          </details>
+        ` : ""}
+        ${hint ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">${esc(hint)}</div>` : ""}
+      </div>`;
+  },
+  mount(id, options = {}) {
+    this.state[id] = {
+      endpoint: options.endpoint || "/admin/api/users/search",
+      users: [],
+      selected: null,
+      timer: null,
+      onSelect: options.onSelect || null,
+    };
+    this.search(id, "");
+  },
+  label(user) {
+    const email = user?.email || "unknown";
+    const name = user?.display_name || "—";
+    const credits = fmtN(user?.credits || 0);
+    const status = user?.status || "unknown";
+    return `${email} - ${name} - ${credits} cr - ${status}`;
+  },
+  debounce(id, query) {
+    const state = this.state[id] || (this.state[id] = {});
+    clearTimeout(state.timer);
+    state.timer = setTimeout(() => this.search(id, query), 250);
+  },
+  async search(id, query = "") {
+    const state = this.state[id];
+    const results = document.getElementById(`${id}-results`);
+    if (!state || !results) return;
+    results.innerHTML = `<div style="padding:10px;color:var(--muted);font-size:12px">Searching...</div>`;
+    try {
+      const data = await api(`${state.endpoint}?q=${encodeURIComponent(query || "")}`);
+      state.users = data?.users || [];
+      this.render(id);
+    } catch (e) {
+      results.innerHTML = `<div style="padding:10px;color:var(--danger);font-size:12px">User search failed: ${esc(e.message)}</div>`;
+    }
+  },
+  render(id) {
+    const state = this.state[id];
+    const results = document.getElementById(`${id}-results`);
+    if (!state || !results) return;
+    if (!state.users.length) {
+      results.innerHTML = `<div style="padding:10px;color:var(--muted);font-size:12px">No users found.</div>`;
+      return;
+    }
+    results.innerHTML = state.users.map((user, idx) => {
+      const selected = state.selected?.id === user.id ? " selected" : "";
+      const badgeCls = user.status === "banned" ? "badge-red" : user.status === "active" ? "badge-green" : "badge-muted";
+      return `
+        <button type="button" class="user-picker-option${selected}" onclick="UserPicker.selectByIndex('${esc(id)}', ${idx})">
+          <div class="user-picker-main">
+            <span class="user-picker-email">${esc(user.email || "unknown")}</span>
+            <span class="badge ${badgeCls} user-picker-status">${esc(user.status || "unknown")}</span>
+          </div>
+          <div class="user-picker-meta">${esc(user.display_name || "—")} · ${fmtN(user.credits || 0)} cr · ${esc(shortSessionId(user.id))}</div>
+        </button>`;
+    }).join("");
+  },
+  selectByIndex(id, index) {
+    const user = this.state[id]?.users?.[index];
+    if (user) this.select(id, user);
+  },
+  select(id, user) {
+    const state = this.state[id] || (this.state[id] = {});
+    state.selected = user || null;
+    const hidden = document.getElementById(`${id}-id`);
+    const search = document.getElementById(`${id}-search`);
+    const selected = document.getElementById(`${id}-selected`);
+    if (hidden) hidden.value = user?.id || "";
+    if (search) search.value = user ? this.label(user) : "";
+    if (selected) {
+      selected.innerHTML = user
+        ? `Selected: <strong style="color:var(--text)">${esc(this.label(user))}</strong>`
+        : "Select a user to continue.";
+    }
+    state.onSelect?.(user || null);
+    this.render(id);
+  },
+  clear(id) {
+    const advanced = document.getElementById(`${id}-advanced`);
+    if (advanced) advanced.value = "";
+    this.select(id, null);
+  },
+  syncAdvanced(id) {
+    const advanced = document.getElementById(`${id}-advanced`)?.value.trim();
+    const hidden = document.getElementById(`${id}-id`);
+    if (hidden) hidden.value = isValidUuid(advanced) ? advanced : "";
+    this.state[id]?.onSelect?.(null);
+  },
+  getSelectedId(id) {
+    const selected = document.getElementById(`${id}-id`)?.value.trim();
+    if (isValidUuid(selected)) return selected;
+    const advanced = document.getElementById(`${id}-advanced`)?.value.trim();
+    return isValidUuid(advanced) ? advanced : "";
+  },
+};
+
 function openAdvancedBillingControls() {
   if (window._adminRole !== "super_admin") return toast("Super admin required", "error");
   const status = window._billingCutoverStatus || {};
   const flags = status.flags || {};
-  showModal({
+  const ov = showModal({
     title: "Advanced Billing Controls",
     size: "lg",
     persistent: true,
@@ -4062,8 +4203,12 @@ function openAdvancedBillingControls() {
         <label><input type="checkbox" id="flag-test-users" ${flags.enable_protected_billing_test_users ? "checked" : ""} onchange="updateProtectedBillingFlags()"> Enable test-user framework</label>
         <label><input type="checkbox" id="flag-global-live" ${flags.enable_protected_billing_global ? "checked" : ""} onchange="updateProtectedBillingFlags()"> Global protected live (do not enable yet)</label>
         <label><input type="checkbox" id="flag-force-legacy" ${flags.protected_billing_force_legacy ? "checked" : ""} onchange="updateProtectedBillingFlags()"> Force legacy billing</label>
+        ${UserPicker.markup("protected-billing-user-picker", {
+          label: "Protected billing test user",
+          hint: "Select a user by email or display name. UUID is sent internally only.",
+          advanced: true,
+        })}
         <div class="mini-field-row">
-          <input id="protected-user-id" class="modal-input" style="padding:5px 8px;font-size:11px" placeholder="Test user UUID">
           <button class="btn btn-ghost btn-xs" onclick="setProtectedBillingTestUser(true)">Enable</button>
           <button class="btn btn-ghost btn-xs" onclick="setProtectedBillingTestUser(false)">Disable</button>
         </div>
@@ -4072,6 +4217,7 @@ function openAdvancedBillingControls() {
       </div>
     `,
   });
+  if (ov) setTimeout(() => UserPicker.mount("protected-billing-user-picker"), 50);
 }
 
 async function loadReconciliationAnalytics() {
@@ -4150,9 +4296,8 @@ async function updateProtectedBillingFlags() {
 
 async function setProtectedBillingTestUser(enabled) {
   if (window._adminRole !== "super_admin") return toast("Super admin required", "error");
-  const input = document.getElementById("protected-user-id");
-  const userId = input?.value?.trim();
-  if (!isValidUuid(userId)) return toast("Enter a valid user UUID", "error");
+  const userId = UserPicker.getSelectedId("protected-billing-user-picker");
+  if (!isValidUuid(userId)) return toast("Select a valid user first.", "error");
   try {
     const data = await apiPost("/admin/api/billing-cutover/test-users", { user_id: userId, enabled });
     renderBillingCutoverStatus(data.status);
@@ -4224,18 +4369,11 @@ function openSoakTestModal() {
     closeOnEscape: false,
     body: `
       <div class="modal-field">
-        <label>Test user</label>
-        <input id="soak-user-search" class="modal-input" placeholder="Search email, display name, or user ID" autocomplete="off" oninput="debounceSoakUserSearch(this.value)">
-        <input id="soak-user-id" type="hidden">
-        <div id="soak-selected-user" style="font-size:11px;color:var(--muted);margin-top:6px">Select a user to continue.</div>
-        <div id="soak-user-results" style="margin-top:8px;max-height:190px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;background:var(--bg)">
-          <div style="padding:10px;color:var(--muted);font-size:12px">Loading users...</div>
-        </div>
-        <details style="margin-top:8px">
-          <summary style="font-size:11px;color:var(--muted);cursor:pointer">Advanced: paste user UUID</summary>
-          <input id="soak-advanced-user-id" class="modal-input" style="margin-top:8px" placeholder="Auth/profile UUID" autocomplete="off" oninput="updateSoakRunState()">
-        </details>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px">Used only as a foreign-key anchor. Credits are not mutated in dry-run mode.</div>
+        ${UserPicker.markup("soak-user-picker", {
+          label: "Test user",
+          hint: "Used only as a foreign-key anchor. Credits are not mutated in dry-run mode.",
+          advanced: true,
+        })}
       </div>
       <div class="modal-field">
         <label>Scenario</label>
@@ -4277,7 +4415,10 @@ function openSoakTestModal() {
     `,
   });
   ov?.querySelector(".admin-modal-card")?.classList.add("soak-modal-card");
-  setTimeout(() => searchSoakUsers(""), 50);
+  setTimeout(() => UserPicker.mount("soak-user-picker", {
+    endpoint: "/admin/api/soak-test/users",
+    onSelect: updateSoakRunState,
+  }), 50);
 }
 
 async function runSoakTestFromModal(btn) {
@@ -4449,10 +4590,7 @@ function isValidUuid(value) {
 }
 
 function getSelectedSoakUserId() {
-  const selected = document.getElementById("soak-user-id")?.value.trim();
-  if (isValidUuid(selected)) return selected;
-  const advanced = document.getElementById("soak-advanced-user-id")?.value.trim();
-  return isValidUuid(advanced) ? advanced : "";
+  return UserPicker.getSelectedId("soak-user-picker");
 }
 
 function updateSoakRunState() {

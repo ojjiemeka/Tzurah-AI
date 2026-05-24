@@ -4040,6 +4040,42 @@ function buildSoakBillingRows({ userId, scenario, sessionCount, adminEmail, bala
   return { rows, sessions, runId };
 }
 
+async function searchAdminUsers(q = "") {
+  const query = String(q || "").toLowerCase().trim();
+  const { merged } = await fetchAllUsersData();
+  return (merged || [])
+    .filter(user => {
+      if (!query) return true;
+      return String(user.email || "").toLowerCase().includes(query) ||
+        String(user.name || "").toLowerCase().includes(query) ||
+        String(user.id || "").toLowerCase().includes(query);
+    })
+    .sort((a, b) => new Date(b.last_seen_at || b.created_at || 0) - new Date(a.last_seen_at || a.created_at || 0))
+    .slice(0, 25)
+    .map(user => {
+      const lastSeen = user.last_seen_at || null;
+      const recentlyActive = lastSeen && Date.now() - new Date(lastSeen).getTime() < 24 * 60 * 60 * 1000;
+      return {
+        id: user.id,
+        email: user.email || "—",
+        display_name: user.name || "—",
+        credits: safeBillingNumber(Number(user.credits_balance)) ?? 0,
+        status: user.is_banned ? "banned" : recentlyActive ? "active" : "inactive",
+        last_seen: lastSeen,
+      };
+    });
+}
+
+// GET /admin/api/users/search - reusable safe admin user picker
+app.get("/admin/api/users/search", adminAuth, async (req, res) => {
+  try {
+    return res.json({ ok: true, users: await searchAdminUsers(req.query.q || "") });
+  } catch (err) {
+    console.warn("[USER SEARCH] Error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /admin/api/soak-test/users - super-admin-only user picker for dry-run soak tests
 app.get("/admin/api/soak-test/users", adminAuth, async (req, res) => {
   if (!requireSoakSuperAdmin(req, res)) return;
