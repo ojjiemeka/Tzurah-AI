@@ -3099,6 +3099,264 @@ app.post("/admin/api/reconciliation/:id/resolve", adminAuth, async (req, res) =>
   }
 });
 
+const SOAK_TEST_SCENARIOS = new Set([
+  "normal_short_session",
+  "normal_medium_session",
+  "stop_start_loop",
+  "duplicate_sync_replay",
+  "missing_final_sync",
+  "stale_session",
+  "admin_killed_session",
+  "replaced_session",
+  "invalid_numeric_input",
+]);
+
+function requireSoakSuperAdmin(req, res) {
+  if (req.session.adminRole !== "super_admin") {
+    res.status(403).json({ error: "Super admin required" });
+    return false;
+  }
+  return true;
+}
+
+function soakScenarioPlan(scenario) {
+  const plans = {
+    normal_short_session: [
+      { duration: 5, source: "interval", status: "shadow_ok" },
+      { duration: 3, source: "manual_stop", status: "shadow_ok" },
+    ],
+    normal_medium_session: [
+      { duration: 10, source: "interval", status: "shadow_ok" },
+      { duration: 10, source: "interval", status: "shadow_ok" },
+      { duration: 10, source: "interval", status: "shadow_ok" },
+      { duration: 5, source: "final", status: "shadow_ok" },
+    ],
+    stop_start_loop: [
+      { duration: 4, source: "interval", status: "shadow_ok" },
+      { duration: 2, source: "manual_stop", status: "shadow_ok" },
+    ],
+    duplicate_sync_replay: [
+      { duration: 6, source: "interval", status: "shadow_ok" },
+    ],
+    missing_final_sync: [
+      { duration: 12, source: "interval", status: "shadow_ok" },
+    ],
+    stale_session: [
+      { duration: 8, source: "interval", status: "shadow_inactive_session", reason: "soak_stale_session" },
+    ],
+    admin_killed_session: [
+      { duration: 6, source: "interval", status: "shadow_killed_session", reason: "soak_admin_killed" },
+    ],
+    replaced_session: [
+      { duration: 6, source: "interval", status: "shadow_inactive_session", reason: "soak_replaced_session" },
+    ],
+    invalid_numeric_input: [
+      { duration: 0, source: "invalid_input", status: "shadow_invalid", reason: "soak_invalid_numeric_input" },
+    ],
+  };
+  return plans[scenario] || plans.normal_short_session;
+}
+
+function soakScenarioEvents(scenario) {
+  const events = {
+    duplicate_sync_replay: [{ type: "duplicate_sync_id_detected", severity: "warning", reason: "soak_duplicate_replay" }],
+    missing_final_sync: [{ type: "missing_final_sync", severity: "warning", reason: "soak_missing_terminal_sync" }],
+    stale_session: [{ type: "stale_session_detected", severity: "warning", reason: "soak_stale_session" }],
+    admin_killed_session: [{ type: "killed_session_attempted_sync", severity: "warning", reason: "soak_admin_kill_blocks_sync" }],
+    replaced_session: [{ type: "replaced_session_attempted_sync", severity: "warning", reason: "soak_replaced_session_blocks_sync" }],
+    invalid_numeric_input: [{ type: "invalid_session_duration", severity: "warning", reason: "soak_invalid_numeric_input" }],
+  };
+  return events[scenario] || [];
+}
+
+function buildSoakBillingRows({ userId, scenario, sessionCount, adminEmail, balanceBefore }) {
+  const runId = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const rows = [];
+  const sessions = [];
+  const plan = soakScenarioPlan(scenario);
+  for (let i = 0; i < sessionCount; i++) {
+    const sessionId = `soak_${scenario}_${runId}_${i + 1}`;
+    sessions.push(sessionId);
+    let sequence = 0;
+    for (const step of plan) {
+      sequence += 1;
+      const safeDuration = Math.min(Math.max(Number(step.duration) || 0, 0), BILLING_MAX_SYNC_SECONDS);
+      const expected = calculateExpectedCredits(safeDuration) || 0;
+      const requested = scenario === "invalid_numeric_input" ? 0 : Math.ceil(expected);
+      const source = `soak_test_${step.source || scenario}`;
+      rows.push({
+        user_id: userId,
+        session_id: sessionId,
+        sync_id: `${sessionId}:${sequence}:${source}`,
+        sync_sequence: sequence,
+        source,
+        duration_secs: safeDuration,
+        credits_requested: requested,
+        credits_expected: expected,
+        credits_deducted: 0,
+        balance_before: balanceBefore,
+        balance_after: balanceBefore,
+        status: step.status || "shadow_ok",
+        reason: step.reason || `test_mode:${scenario}:${adminEmail || "admin"}:${runId}`,
+        shadow_only: true,
+        client_ts: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      });
+    }
+  }
+  return { rows, sessions, runId };
+}
+
+// POST /admin/api/reconciliation/soak-test - internal dry-run synthetic billing rows
+app.post("/admin/api/reconciliation/soak-test", adminAuth, async (req, res) => {
+  if (!requireSoakSuperAdmin(req, res)) return;
+
+  const dryRun = req.body?.dry_run !== false;
+  if (!dryRun) return res.status(400).json({ error: "Live soak mode is disabled. Use dry_run=true." });
+
+  const scenario = String(req.body?.scenario || "normal_short_session");
+  if (!SOAK_TEST_SCENARIOS.has(scenario)) return res.status(400).json({ error: "Invalid soak test scenario" });
+
+  const sessionCountRaw = Number(req.body?.session_count ?? 10);
+  if (!Number.isInteger(sessionCountRaw) || sessionCountRaw < 1) {
+    return res.status(400).json({ error: "session_count must be an integer >= 1" });
+  }
+  const sessionCount = Math.min(sessionCountRaw, 100);
+
+  const userId = String(req.body?.user_id || req.body?.test_user_id || "").trim();
+  if (!validateUUID(userId)) return res.status(400).json({ error: "Valid user_id or test_user_id required" });
+
+  try {
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from("profiles")
+      .select("id, credits")
+      .eq("id", userId)
+      .maybeSingle();
+    if (profileError) throw new Error(profileError.message);
+    if (!profile) return res.status(404).json({ error: "Test profile not found" });
+
+    const balanceBefore = safeBillingNumber(profile.credits) ?? 0;
+    const { rows, sessions, runId } = buildSoakBillingRows({
+      userId,
+      scenario,
+      sessionCount,
+      adminEmail: req.session.adminEmail,
+      balanceBefore,
+    });
+
+    const { data: insertedSyncs, error: syncError } = await supabaseAdmin
+      .from("billing_syncs")
+      .insert(rows)
+      .select("id, session_id, sync_id, source, status");
+    if (syncError) throw new Error(syncError.message);
+
+    const eventRows = [];
+    for (const sessionId of sessions) {
+      for (const event of soakScenarioEvents(scenario)) {
+        eventRows.push({
+          user_id: userId,
+          session_id: sessionId,
+          type: event.type,
+          severity: event.severity,
+          details: {
+            test_mode: true,
+            scenario,
+            generated_by: req.session.adminEmail || "admin",
+            run_id: runId,
+            session_id: sessionId,
+            dry_run: true,
+            reason: event.reason,
+            source: "soak_test",
+          },
+          created_at: new Date().toISOString(),
+        });
+      }
+    }
+
+    let insertedEvents = [];
+    if (eventRows.length) {
+      const { data, error } = await supabaseAdmin
+        .from("billing_reconciliation_events")
+        .insert(eventRows)
+        .select("id, type, severity, session_id");
+      if (error) throw new Error(error.message);
+      insertedEvents = data || [];
+    }
+
+    await logAction("run_billing_soak_test", req.session.adminEmail, req.session.adminRole, userId, {
+      scenario,
+      session_count: sessionCount,
+      dry_run: true,
+      run_id: runId,
+      billing_sync_rows: insertedSyncs?.length || 0,
+      reconciliation_events: insertedEvents.length,
+    }, req);
+
+    return res.json({
+      ok: true,
+      dry_run: true,
+      run_id: runId,
+      scenario,
+      session_count: sessionCount,
+      user_id: userId,
+      billing_sync_rows: insertedSyncs?.length || 0,
+      reconciliation_events: insertedEvents.length,
+      sessions: sessions.slice(0, 10),
+      note: "Synthetic dry-run rows inserted only; no Decart call and no profile credit mutation.",
+    });
+  } catch (err) {
+    console.warn("[SOAK TEST] Error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /admin/api/reconciliation/soak-test/cleanup - clean only synthetic soak rows
+app.post("/admin/api/reconciliation/soak-test/cleanup", adminAuth, async (req, res) => {
+  if (!requireSoakSuperAdmin(req, res)) return;
+  try {
+    const sourceDelete = await supabaseAdmin.from("billing_syncs").delete().like("source", "soak_test%").select("id");
+    const sessionDelete = await supabaseAdmin.from("billing_syncs").delete().like("session_id", "soak_%").select("id");
+    const syncDelete = await supabaseAdmin.from("billing_syncs").delete().like("sync_id", "soak_%").select("id");
+    const eventResolve = await supabaseAdmin
+      .from("billing_reconciliation_events")
+      .update({
+        resolved: true,
+        resolved_at: new Date().toISOString(),
+        resolved_reason: "soak_test_cleanup",
+        resolved_by: req.session.adminEmail || "admin",
+        auto_resolved: false,
+      })
+      .contains("details", { test_mode: true })
+      .eq("resolved", false)
+      .select("id");
+
+    const errors = [sourceDelete.error, sessionDelete.error, syncDelete.error, eventResolve.error].filter(Boolean);
+    if (errors.length) throw new Error(errors.map(e => e.message).join("; "));
+
+    const deletedSyncIds = new Set([
+      ...(sourceDelete.data || []).map(row => row.id),
+      ...(sessionDelete.data || []).map(row => row.id),
+      ...(syncDelete.data || []).map(row => row.id),
+    ]);
+    const resolvedEvents = eventResolve.data?.length || 0;
+
+    await logAction("cleanup_billing_soak_test", req.session.adminEmail, req.session.adminRole, null, {
+      deleted_billing_sync_rows: deletedSyncIds.size,
+      resolved_reconciliation_events: resolvedEvents,
+    }, req);
+
+    return res.json({
+      ok: true,
+      deleted_billing_sync_rows: deletedSyncIds.size,
+      resolved_reconciliation_events: resolvedEvents,
+      note: "Only rows marked with soak_test source/session/sync prefixes or details.test_mode=true were touched.",
+    });
+  } catch (err) {
+    console.warn("[SOAK CLEANUP] Error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 function formatGiftActivityDetail(purchase) {
   const credits = safeBillingNumber(Number(purchase.credits_added || 0));
   const packName = String(purchase.pack_name || "").trim();

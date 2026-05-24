@@ -1492,6 +1492,7 @@ kbd {
         <option value="resolved">Resolved</option>
         <option value="all">All</option>
       </select>
+      <button id="soak-test-btn" class="btn btn-amber btn-sm" style="display:none;font-size:10px" onclick="openSoakTestModal()">Run Soak Test</button>
       <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="loadReconciliation()">Refresh</button>
     </div>
     <div class="panel-body">
@@ -3347,6 +3348,119 @@ async function resolveReconEvent(id) {
     loadReconciliation();
   } catch (e) {
     toast("Resolve failed: " + e.message, "error");
+  }
+}
+
+function openSoakTestModal() {
+  if (window._adminRole !== "super_admin") {
+    toast("Super admin required", "error");
+    return;
+  }
+  showModal(`
+    <div class="modal-header">Internal Billing Soak Test</div>
+    <div class="modal-body">
+      <div class="modal-field">
+        <label>Test user ID</label>
+        <input id="soak-user-id" class="modal-input" placeholder="Auth/profile UUID" autocomplete="off">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">Used only as a foreign-key anchor. Credits are not mutated in dry-run mode.</div>
+      </div>
+      <div class="modal-field">
+        <label>Scenario</label>
+        <select id="soak-scenario" class="modal-input">
+          <option value="normal_short_session">Normal short session</option>
+          <option value="normal_medium_session">Normal medium session</option>
+          <option value="stop_start_loop">Stop -> Start loop</option>
+          <option value="duplicate_sync_replay">Duplicate sync replay</option>
+          <option value="missing_final_sync">Missing final sync</option>
+          <option value="stale_session">Stale session</option>
+          <option value="admin_killed_session">Admin-killed session</option>
+          <option value="replaced_session">Replaced session</option>
+          <option value="invalid_numeric_input">Invalid numeric input</option>
+        </select>
+      </div>
+      <div class="modal-field">
+        <label>Session count</label>
+        <input id="soak-session-count" class="modal-input" type="number" min="1" max="100" value="10">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">Default 10. Hard cap 100.</div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;width:auto;color:var(--text);margin-top:10px">
+        <input id="soak-dry-run" type="checkbox" checked disabled>
+        Dry run only - no Decart call, no profile credit mutation
+      </label>
+      <div id="soak-result" class="recon-status" style="display:block;margin-top:12px;color:var(--muted)">Ready.</div>
+    </div>
+    <div class="modal-footer">
+      <button class="modal-btn-cancel">Close</button>
+      <button class="btn btn-ghost" type="button" onclick="cleanupSoakTestRows(this)">Cleanup test rows</button>
+      <button class="btn btn-amber" type="button" onclick="runSoakTestFromModal(this)">Run dry-run</button>
+    </div>
+  `);
+}
+
+async function runSoakTestFromModal(btn) {
+  const result = document.getElementById("soak-result");
+  const userId = document.getElementById("soak-user-id")?.value.trim();
+  const scenario = document.getElementById("soak-scenario")?.value;
+  const count = parseInt(document.getElementById("soak-session-count")?.value || "10", 10);
+  if (!userId) { toast("Enter a test user ID", "error"); return; }
+  if (!Number.isInteger(count) || count < 1 || count > 100) {
+    toast("Session count must be 1-100", "error");
+    return;
+  }
+  const done = btnLoading(btn, "Running");
+  if (result) result.textContent = "Running synthetic dry-run...";
+  try {
+    const data = await apiPost("/admin/api/reconciliation/soak-test", {
+      user_id: userId,
+      scenario,
+      session_count: count,
+      dry_run: true,
+    });
+    if (result) {
+      result.innerHTML = `
+        <strong style="color:var(--success)">Dry-run complete.</strong><br>
+        Run: <code>${esc(data.run_id || "--")}</code><br>
+        Sync rows: ${fmtN(data.billing_sync_rows || 0)} · Events: ${fmtN(data.reconciliation_events || 0)}<br>
+        ${esc(data.note || "")}
+      `;
+    }
+    toast("Soak test rows generated", "success");
+    loadReconciliation();
+  } catch (e) {
+    if (result) result.textContent = `Failed: ${e.message}`;
+    toast("Soak test failed: " + e.message, "error");
+  } finally {
+    done();
+  }
+}
+
+async function cleanupSoakTestRows(btn) {
+  const confirmed = await showModalConfirm("Resolve soak-test reconciliation events and delete synthetic billing sync rows only?", {
+    title: "Cleanup Soak Test Rows",
+    confirmLabel: "Cleanup",
+    variant: "danger",
+  });
+  if (!confirmed) return;
+  const result = document.getElementById("soak-result");
+  const done = btnLoading(btn, "Cleaning");
+  if (result) result.textContent = "Cleaning synthetic rows...";
+  try {
+    const data = await apiPost("/admin/api/reconciliation/soak-test/cleanup", {});
+    if (result) {
+      result.innerHTML = `
+        <strong style="color:var(--success)">Cleanup complete.</strong><br>
+        Deleted sync rows: ${fmtN(data.deleted_billing_sync_rows || 0)}<br>
+        Resolved test events: ${fmtN(data.resolved_reconciliation_events || 0)}<br>
+        ${esc(data.note || "")}
+      `;
+    }
+    toast("Soak test rows cleaned", "success");
+    loadReconciliation();
+  } catch (e) {
+    if (result) result.textContent = `Cleanup failed: ${e.message}`;
+    toast("Cleanup failed: " + e.message, "error");
+  } finally {
+    done();
   }
 }
 
@@ -6137,6 +6251,8 @@ function applyRoleUI(role) {
     badge.style.cssText = `font-size:9px;font-weight:700;letter-spacing:1px;padding:2px 8px;border-radius:4px;` +
       `color:${cfg.color};background:${cfg.bg};border:1px solid ${cfg.color}40;text-transform:uppercase`;
   });
+  const soakBtn = document.getElementById("soak-test-btn");
+  if (soakBtn) soakBtn.style.display = role === "super_admin" ? "" : "none";
   buildMobileDrawerNav();
 }
 
