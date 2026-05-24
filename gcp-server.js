@@ -3207,6 +3207,36 @@ function buildSoakBillingRows({ userId, scenario, sessionCount, adminEmail, bala
   return { rows, sessions, runId };
 }
 
+// GET /admin/api/soak-test/users - super-admin-only user picker for dry-run soak tests
+app.get("/admin/api/soak-test/users", adminAuth, async (req, res) => {
+  if (!requireSoakSuperAdmin(req, res)) return;
+  const q = String(req.query.q || "").toLowerCase().trim();
+  try {
+    const { merged } = await fetchAllUsersData();
+    const filtered = (merged || [])
+      .filter(user => {
+        if (!q) return true;
+        return String(user.email || "").toLowerCase().includes(q) ||
+          String(user.name || "").toLowerCase().includes(q) ||
+          String(user.id || "").toLowerCase().includes(q);
+      })
+      .sort((a, b) => new Date(b.last_seen_at || b.created_at || 0) - new Date(a.last_seen_at || a.created_at || 0))
+      .slice(0, 25)
+      .map(user => ({
+        id: user.id,
+        email: user.email || "—",
+        display_name: user.name || "—",
+        credits: safeBillingNumber(Number(user.credits_balance)) ?? 0,
+        last_seen: user.last_seen_at || null,
+      }));
+
+    return res.json({ ok: true, users: filtered });
+  } catch (err) {
+    console.warn("[SOAK USERS] Error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /admin/api/reconciliation/soak-test - internal dry-run synthetic billing rows
 app.post("/admin/api/reconciliation/soak-test", adminAuth, async (req, res) => {
   if (!requireSoakSuperAdmin(req, res)) return;
@@ -3224,7 +3254,7 @@ app.post("/admin/api/reconciliation/soak-test", adminAuth, async (req, res) => {
   const sessionCount = Math.min(sessionCountRaw, 100);
 
   const userId = String(req.body?.user_id || req.body?.test_user_id || "").trim();
-  if (!validateUUID(userId)) return res.status(400).json({ error: "Valid user_id or test_user_id required" });
+  if (!validateUUID(userId)) return res.status(400).json({ error: "Select a valid test user first." });
 
   try {
     const { data: profile, error: profileError } = await supabaseAdmin

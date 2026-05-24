@@ -3356,12 +3356,22 @@ function openSoakTestModal() {
     toast("Super admin required", "error");
     return;
   }
+  window._soakSelectedUser = null;
   showModal(`
     <div class="modal-header">Internal Billing Soak Test</div>
     <div class="modal-body">
       <div class="modal-field">
-        <label>Test user ID</label>
-        <input id="soak-user-id" class="modal-input" placeholder="Auth/profile UUID" autocomplete="off">
+        <label>Test user</label>
+        <input id="soak-user-search" class="modal-input" placeholder="Search email, display name, or user ID" autocomplete="off" oninput="debounceSoakUserSearch(this.value)">
+        <input id="soak-user-id" type="hidden">
+        <div id="soak-selected-user" style="font-size:11px;color:var(--muted);margin-top:6px">Select a user to continue.</div>
+        <div id="soak-user-results" style="margin-top:8px;max-height:190px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;background:var(--bg)">
+          <div style="padding:10px;color:var(--muted);font-size:12px">Loading users...</div>
+        </div>
+        <details style="margin-top:8px">
+          <summary style="font-size:11px;color:var(--muted);cursor:pointer">Advanced: paste user UUID</summary>
+          <input id="soak-advanced-user-id" class="modal-input" style="margin-top:8px" placeholder="Auth/profile UUID" autocomplete="off" oninput="updateSoakRunState()">
+        </details>
         <div style="font-size:11px;color:var(--muted);margin-top:4px">Used only as a foreign-key anchor. Credits are not mutated in dry-run mode.</div>
       </div>
       <div class="modal-field">
@@ -3392,17 +3402,18 @@ function openSoakTestModal() {
     <div class="modal-footer">
       <button class="modal-btn-cancel">Close</button>
       <button class="btn btn-ghost" type="button" onclick="cleanupSoakTestRows(this)">Cleanup test rows</button>
-      <button class="btn btn-amber" type="button" onclick="runSoakTestFromModal(this)">Run dry-run</button>
+      <button id="soak-run-btn" class="btn btn-amber" type="button" onclick="runSoakTestFromModal(this)" disabled>Run dry-run</button>
     </div>
   `);
+  setTimeout(() => searchSoakUsers(""), 50);
 }
 
 async function runSoakTestFromModal(btn) {
   const result = document.getElementById("soak-result");
-  const userId = document.getElementById("soak-user-id")?.value.trim();
+  const userId = getSelectedSoakUserId();
   const scenario = document.getElementById("soak-scenario")?.value;
   const count = parseInt(document.getElementById("soak-session-count")?.value || "10", 10);
-  if (!userId) { toast("Enter a test user ID", "error"); return; }
+  if (!userId) { toast("Select a valid test user first.", "error"); return; }
   if (!Number.isInteger(count) || count < 1 || count > 100) {
     toast("Session count must be 1-100", "error");
     return;
@@ -3411,7 +3422,7 @@ async function runSoakTestFromModal(btn) {
   if (result) result.textContent = "Running synthetic dry-run...";
   try {
     const data = await apiPost("/admin/api/reconciliation/soak-test", {
-      user_id: userId,
+      test_user_id: userId,
       scenario,
       session_count: count,
       dry_run: true,
@@ -3432,6 +3443,85 @@ async function runSoakTestFromModal(btn) {
   } finally {
     done();
   }
+}
+
+let soakUserSearchTimer = null;
+
+function soakUserLabel(user) {
+  const email = user.email || "unknown";
+  const name = user.display_name || "—";
+  const credits = fmtN(user.credits || 0);
+  return `${email} - ${name} - ${credits} cr`;
+}
+
+function isValidUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(value || "").trim());
+}
+
+function getSelectedSoakUserId() {
+  const selected = document.getElementById("soak-user-id")?.value.trim();
+  if (isValidUuid(selected)) return selected;
+  const advanced = document.getElementById("soak-advanced-user-id")?.value.trim();
+  return isValidUuid(advanced) ? advanced : "";
+}
+
+function updateSoakRunState() {
+  const btn = document.getElementById("soak-run-btn");
+  if (btn) btn.disabled = !getSelectedSoakUserId();
+}
+
+function debounceSoakUserSearch(query) {
+  clearTimeout(soakUserSearchTimer);
+  soakUserSearchTimer = setTimeout(() => searchSoakUsers(query), 250);
+}
+
+async function searchSoakUsers(query = "") {
+  const results = document.getElementById("soak-user-results");
+  if (!results) return;
+  results.innerHTML = `<div style="padding:10px;color:var(--muted);font-size:12px">Searching...</div>`;
+  try {
+    const data = await api(`/admin/api/soak-test/users?q=${encodeURIComponent(query || "")}`);
+    renderSoakUserResults(data?.users || []);
+  } catch (e) {
+    results.innerHTML = `<div style="padding:10px;color:var(--danger);font-size:12px">User search failed: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderSoakUserResults(users) {
+  const results = document.getElementById("soak-user-results");
+  if (!results) return;
+  window._soakUserResults = users || [];
+  if (!users.length) {
+    results.innerHTML = `<div style="padding:10px;color:var(--muted);font-size:12px">No users found.</div>`;
+    return;
+  }
+  results.innerHTML = users.map((user, idx) => `
+    <button type="button" class="soak-user-option" onclick="selectSoakUserByIndex(${idx})"
+      style="width:100%;display:block;text-align:left;background:none;border:0;border-bottom:1px solid var(--border);padding:9px 10px;color:var(--text);cursor:pointer">
+      <div style="font-size:12px;font-weight:700">${esc(user.email || "unknown")}</div>
+      <div style="font-size:11px;color:var(--muted)">${esc(user.display_name || "—")} · ${fmtN(user.credits || 0)} cr · ${esc(user.id)}</div>
+    </button>
+  `).join("");
+}
+
+function selectSoakUserByIndex(index) {
+  const user = (window._soakUserResults || [])[index];
+  if (user) selectSoakUser(user);
+}
+
+function selectSoakUser(user) {
+  window._soakSelectedUser = user || null;
+  const idEl = document.getElementById("soak-user-id");
+  const selectedEl = document.getElementById("soak-selected-user");
+  const searchEl = document.getElementById("soak-user-search");
+  if (idEl) idEl.value = user?.id || "";
+  if (searchEl) searchEl.value = user ? soakUserLabel(user) : "";
+  if (selectedEl) {
+    selectedEl.innerHTML = user
+      ? `Selected: <strong style="color:var(--text)">${esc(soakUserLabel(user))}</strong>`
+      : "Select a user to continue.";
+  }
+  updateSoakRunState();
 }
 
 async function cleanupSoakTestRows(btn) {
