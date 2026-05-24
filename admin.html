@@ -4122,7 +4122,7 @@ const UserPicker = {
       state.users = data?.users || [];
       this.render(id);
     } catch (e) {
-      results.innerHTML = `<div style="padding:10px;color:var(--danger);font-size:12px">User search failed: ${esc(e.message)}</div>`;
+      results.innerHTML = `<div style="padding:10px;color:var(--danger);font-size:12px">Could not load users. Try again or use Advanced UUID fallback.</div>`;
     }
   },
   render(id) {
@@ -4611,7 +4611,7 @@ async function searchSoakUsers(query = "") {
     const data = await api(`/admin/api/soak-test/users?q=${encodeURIComponent(query || "")}`);
     renderSoakUserResults(data?.users || []);
   } catch (e) {
-    results.innerHTML = `<div style="padding:10px;color:var(--danger);font-size:12px">User search failed: ${esc(e.message)}</div>`;
+    results.innerHTML = `<div style="padding:10px;color:var(--danger);font-size:12px">Could not load users. Try again or use Advanced UUID fallback.</div>`;
   }
 }
 
