@@ -481,7 +481,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 .admin-modal-overlay {
   position:fixed; inset:0; background:rgba(0,0,0,.7); backdrop-filter:blur(4px);
   display:flex; align-items:center; justify-content:center;
-  z-index:99999; animation:mfade .18s ease;
+  z-index:99999; animation:mfade .18s ease; padding:18px;
 }
 @keyframes mfade { from{opacity:0;transform:scale(.96)} to{opacity:1;transform:scale(1)} }
 .admin-modal-card {
@@ -527,6 +527,75 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 .modal-btn-confirm.btn-purple { background:#8b5cf6; }
 .modal-btn-confirm.btn-amber  { background:#f59e0b; color:#000; }
 .modal-btn-confirm:hover { filter:brightness(1.1); }
+
+#soak-test-modal .admin-modal-card {
+  width:min(760px, calc(100vw - 24px));
+  max-width:min(760px, calc(100vw - 24px));
+  min-width:0;
+  max-height:calc(100vh - 32px);
+  padding:0;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+}
+#soak-test-modal .soak-modal-card {
+  max-height:calc(100vh - 32px);
+}
+#soak-test-modal .modal-header {
+  position:sticky;
+  top:0;
+  z-index:2;
+  flex:0 0 auto;
+  margin:0;
+  padding:16px 18px;
+  background:#1a1a2e;
+  border-bottom:1px solid var(--border);
+}
+#soak-test-modal .modal-body {
+  flex:1 1 auto;
+  min-height:0;
+  overflow-y:auto;
+  padding:16px 18px;
+  margin:0;
+  overscroll-behavior:contain;
+}
+#soak-test-modal .modal-footer {
+  position:sticky;
+  bottom:0;
+  z-index:2;
+  flex:0 0 auto;
+  margin:0;
+  padding:12px 18px;
+  background:#1a1a2e;
+  border-top:1px solid var(--border);
+  flex-wrap:wrap;
+}
+#soak-test-modal .table-wrap {
+  overflow:auto;
+  -webkit-overflow-scrolling:touch;
+}
+#soak-test-modal .table-wrap table {
+  min-width:520px;
+}
+@media(max-width:480px) {
+  .admin-modal-overlay { padding:10px; }
+  #soak-test-modal .admin-modal-card {
+    width:calc(100vw - 20px);
+    max-width:calc(100vw - 20px);
+    max-height:calc(100vh - 20px);
+  }
+  #soak-test-modal .modal-header,
+  #soak-test-modal .modal-body,
+  #soak-test-modal .modal-footer {
+    padding-left:12px;
+    padding-right:12px;
+  }
+  #soak-test-modal .modal-footer > button,
+  #soak-test-modal .modal-footer > .btn {
+    flex:1 1 100%;
+    justify-content:center;
+  }
+}
 
 /* ── Toast system ──────────────────────────────────────────────── */
 #toast-container {
@@ -1506,6 +1575,7 @@ kbd {
         <option value="all">All rows</option>
       </select>
       <button id="soak-test-btn" class="btn btn-amber btn-sm" style="display:none;font-size:10px" onclick="openSoakTestModal()">Run Soak Test</button>
+      <button id="soak-cleanup-card-btn" class="btn btn-ghost btn-sm" style="display:none;font-size:10px" onclick="cleanupSoakTestRows(this)">Cleanup Test Rows</button>
       <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="loadReconciliation()">Refresh</button>
     </div>
     <div class="panel-body">
@@ -2695,6 +2765,16 @@ function closeModalOverlay(ov) {
   ov.remove();
 }
 
+function requestModalCancel(ov, onCancel) {
+  if (!ov) return;
+  if (ov.dataset.modalBusy === "true") {
+    modalAttention(ov);
+    return;
+  }
+  onCancel?.();
+  closeModalOverlay(ov);
+}
+
 function showModal(htmlOrOpts, opts = {}) {
   // Object API: showModal({ title, body, onConfirm, confirmLabel, confirmClass })
   if (typeof htmlOrOpts !== "string") {
@@ -2716,7 +2796,9 @@ function showModal(htmlOrOpts, opts = {}) {
         </div>
       </div>`;
     document.body.appendChild(ov);
-    ov.querySelector(".modal-btn-cancel")?.addEventListener("click", () => { onCancel?.(); closeModalOverlay(ov); });
+    ov.querySelectorAll(".modal-btn-cancel").forEach(btn => {
+      btn.addEventListener("click", () => requestModalCancel(ov, onCancel));
+    });
     ov.addEventListener("click", e => {
       if (e.target !== ov || !behavior.cancelable) return;
       if (behavior.closeOnBackdrop && ov.dataset.modalBusy !== "true") {
@@ -2746,7 +2828,9 @@ function showModal(htmlOrOpts, opts = {}) {
   ov.innerHTML = `<div class="admin-modal-card">${htmlOrOpts}</div>`;
   document.body.appendChild(ov);
 
-  ov.querySelector(".modal-btn-cancel")?.addEventListener("click", () => { opts.onCancel?.(); closeModalOverlay(ov); });
+  ov.querySelectorAll(".modal-btn-cancel").forEach(btn => {
+    btn.addEventListener("click", () => requestModalCancel(ov, opts.onCancel));
+  });
   ov.addEventListener("click", e => {
     if (e.target !== ov || !behavior.cancelable) return;
     if (behavior.closeOnBackdrop && ov.dataset.modalBusy !== "true") {
@@ -3363,7 +3447,7 @@ function renderReconEvents(events) {
   if (!events.length) {
     const mode = document.getElementById("recon-test-filter")?.value || "real";
     const message = mode === "test"
-      ? "No test-mode reconciliation events detected. Normal soak scenarios may only create billing sync rows."
+      ? "No synthetic soak test rows found."
       : "No reconciliation anomalies detected.";
     tbody.innerHTML = `<tr><td colspan="6" class="td-empty">${esc(message)}</td></tr>`;
     return;
@@ -3479,7 +3563,10 @@ function openSoakTestModal() {
       <button id="soak-run-btn" class="btn btn-amber" type="button" onclick="runSoakTestFromModal(this)" disabled>Run dry-run</button>
     </div>
   `, { persistent: true, closeOnBackdrop: false, closeOnEscape: false });
-  if (ov) ov.id = "soak-test-modal";
+  if (ov) {
+    ov.id = "soak-test-modal";
+    ov.querySelector(".admin-modal-card")?.classList.add("soak-modal-card");
+  }
   setTimeout(() => searchSoakUsers(""), 50);
 }
 
@@ -3495,7 +3582,14 @@ async function runSoakTestFromModal(btn) {
   }
   const done = btnLoading(btn, "Running");
   const modal = document.getElementById("soak-test-modal");
-  if (modal) modal.dataset.modalBusy = "true";
+  if (modal) {
+    modal.dataset.modalBusy = "true";
+    modal.querySelectorAll(".modal-btn-cancel").forEach(closeBtn => {
+      closeBtn.disabled = true;
+      closeBtn.style.opacity = ".45";
+      closeBtn.style.cursor = "not-allowed";
+    });
+  }
   if (result) result.textContent = "Running synthetic dry-run...";
   try {
     const data = await apiPost("/admin/api/reconciliation/soak-test", {
@@ -3527,7 +3621,14 @@ async function runSoakTestFromModal(btn) {
     if (result) result.textContent = `Failed: ${e.message}`;
     toast("Soak test failed: " + e.message, "error");
   } finally {
-    if (modal) modal.dataset.modalBusy = "false";
+    if (modal) {
+      modal.dataset.modalBusy = "false";
+      modal.querySelectorAll(".modal-btn-cancel").forEach(closeBtn => {
+        closeBtn.disabled = false;
+        closeBtn.style.opacity = "";
+        closeBtn.style.cursor = "";
+      });
+    }
     done();
   }
 }
@@ -3650,6 +3751,10 @@ function selectSoakUser(user) {
 }
 
 async function cleanupSoakTestRows(btn) {
+  if (window._adminRole !== "super_admin") {
+    toast("Super admin required", "error");
+    return;
+  }
   const confirmed = await showModalConfirm("Resolve soak-test reconciliation events and delete synthetic billing sync rows only?", {
     title: "Cleanup Soak Test Rows",
     confirmLabel: "Cleanup",
@@ -3670,6 +3775,8 @@ async function cleanupSoakTestRows(btn) {
       `;
     }
     toast("Soak test rows cleaned", "success");
+    const reconTestFilter = document.getElementById("recon-test-filter");
+    if (reconTestFilter) reconTestFilter.value = "test";
     loadReconciliation();
   } catch (e) {
     if (result) result.textContent = `Cleanup failed: ${e.message}`;
@@ -3697,6 +3804,12 @@ async function loadReconciliation() {
       } else if (data.resolution_lifecycle_available === false) {
         status.style.display = "block";
         status.textContent = "Resolution migration has not been applied yet; showing legacy reconciliation rows.";
+      } else if (testFilter === "test") {
+        status.style.display = "block";
+        status.textContent = "Showing synthetic test-mode rows only.";
+      } else if (testFilter === "all") {
+        status.style.display = "block";
+        status.textContent = "Showing real and synthetic reconciliation rows.";
       } else {
         status.style.display = "none";
         status.textContent = "";
@@ -6477,6 +6590,8 @@ function applyRoleUI(role) {
   });
   const soakBtn = document.getElementById("soak-test-btn");
   if (soakBtn) soakBtn.style.display = role === "super_admin" ? "" : "none";
+  const soakCleanupBtn = document.getElementById("soak-cleanup-card-btn");
+  if (soakCleanupBtn) soakCleanupBtn.style.display = role === "super_admin" ? "" : "none";
   buildMobileDrawerNav();
 }
 
