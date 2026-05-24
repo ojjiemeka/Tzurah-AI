@@ -170,7 +170,14 @@ main { padding:20px; max-width:1400px; margin:0 auto; }
 }
 .recon-details td { background:var(--bg); color:var(--muted); }
 .recon-row { cursor:pointer; }
+.recon-row.resolved { opacity:.58; }
+.recon-row.resolved td { color:var(--muted); }
+.recon-filter {
+  background:var(--bg); border:1px solid var(--border); color:var(--text2);
+  border-radius:6px; padding:4px 8px; font-size:11px;
+}
 .badge-high { background:rgba(249,115,22,.16); color:#fb923c; }
+.badge-resolved { background:rgba(148,163,184,.12); color:#94a3b8; }
 .recon-preview {
   max-width:420px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   color:var(--muted);
@@ -1269,6 +1276,11 @@ kbd {
     <div class="panel-hdr">
       <span class="ptitle">Billing Reconciliation</span>
       <span id="recon-updated" style="font-size:11px;color:var(--muted);margin-left:auto">--</span>
+      <select id="recon-filter" class="recon-filter" onchange="loadReconciliation()">
+        <option value="active">Active</option>
+        <option value="resolved">Resolved</option>
+        <option value="all">All</option>
+      </select>
       <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="loadReconciliation()">Refresh</button>
     </div>
     <div class="panel-body">
@@ -1282,10 +1294,10 @@ kbd {
       <div class="table-wrap" style="margin-bottom:0">
         <table>
           <thead>
-            <tr><th>Time</th><th>Type</th><th>Severity</th><th>Session</th><th>Details</th></tr>
+            <tr><th>Time</th><th>Type</th><th>Severity</th><th>Session</th><th>Details</th><th></th></tr>
           </thead>
           <tbody id="recon-events-tbody">
-            <tr><td colspan="5" class="loading-cell"><div class="spinner"></div></td></tr>
+            <tr><td colspan="6" class="loading-cell"><div class="spinner"></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -2861,6 +2873,11 @@ function reconSeverityClass(severity) {
   return "badge-muted";
 }
 
+function reconSeverityBadge(event) {
+  if (event.resolved) return `<span class="badge badge-resolved">resolved</span>`;
+  return `<span class="badge ${reconSeverityClass(event.severity)}">${esc(event.severity || "info")}</span>`;
+}
+
 function shortSessionId(sessionId) {
   const s = String(sessionId || "");
   if (!s) return "--";
@@ -2902,6 +2919,8 @@ function renderReconMetrics(data) {
     { label:"Stale Sessions", value:data.stale_session_count || 0 },
     { label:"Balance Drift", value:(drift.balance_warning || 0) + (drift.balance_severe || 0) },
     { label:"Orphan Sessions", value:(data.counts_by_type || {}).orphan_active_session || 0 },
+    { label:"Resolved", value:data.resolved_anomaly_count || 0 },
+    { label:"Auto Resolved", value:data.auto_resolved_count || 0 },
   ];
   const wrap = document.getElementById("recon-metrics");
   if (!wrap) return;
@@ -2917,31 +2936,59 @@ function renderReconEvents(events) {
   const tbody = document.getElementById("recon-events-tbody");
   if (!tbody) return;
   if (!events.length) {
-    tbody.innerHTML = `<tr><td colspan="5" class="td-empty">No reconciliation anomalies detected.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="td-empty">No reconciliation anomalies detected.</td></tr>`;
     return;
   }
   tbody.innerHTML = events.slice(0, 20).map((event, idx) => {
     const detailsId = `recon-details-${idx}`;
     const details = reconDetailsText(event.details);
+    const resolvedText = event.resolved
+      ? `Resolved ${relTime(event.resolved_at)}${event.resolved_reason ? " - " + event.resolved_reason : ""}`
+      : "";
+    const action = event.resolved
+      ? `<span class="badge badge-resolved">ok</span>`
+      : `<button class="btn btn-ghost btn-xs" onclick="event.stopPropagation(); resolveReconEvent('${esc(event.id || "")}')">Resolve</button>`;
     return `
-      <tr class="recon-row" onclick="toggleReconDetails('${detailsId}')">
+      <tr class="recon-row ${event.resolved ? "resolved" : ""}" onclick="toggleReconDetails('${detailsId}')">
         <td class="td-mono">${esc(relTime(event.created_at))}</td>
         <td>${esc(event.type || "unknown")}</td>
-        <td><span class="badge ${reconSeverityClass(event.severity)}">${esc(event.severity || "info")}</span></td>
+        <td>${reconSeverityBadge(event)}</td>
         <td class="td-mono" title="${esc(event.session_id || "")}">${esc(shortSessionId(event.session_id))}</td>
-        <td><div class="recon-preview">${esc(reconPreview(event))}</div></td>
+        <td><div class="recon-preview" title="${esc(resolvedText)}">${esc(resolvedText || reconPreview(event))}</div></td>
+        <td>${action}</td>
       </tr>
       <tr id="${detailsId}" class="recon-details">
-        <td colspan="5">${esc(details || "No details")}</td>
+        <td colspan="6">${esc(details || "No details")}</td>
       </tr>
     `;
   }).join("");
 }
 
+async function resolveReconEvent(id) {
+  if (!id) return;
+  const note = prompt("Resolution note (optional):", "manual_admin_resolution");
+  if (note === null) return;
+  if (!confirm("Mark this reconciliation event as resolved?")) return;
+  try {
+    const res = await adminFetch(`/admin/api/reconciliation/${encodeURIComponent(id)}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ note: note.trim() }),
+    });
+    if (!res) return;
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    toast("Reconciliation event resolved", "success");
+    loadReconciliation();
+  } catch (e) {
+    toast("Resolve failed: " + e.message, "error");
+  }
+}
+
 async function loadReconciliation() {
   const status = document.getElementById("recon-status");
   try {
-    const data = await api("/admin/api/reconciliation/summary");
+    const filter = document.getElementById("recon-filter")?.value || "active";
+    const data = await api(`/admin/api/reconciliation/summary?status=${encodeURIComponent(filter)}`);
     if (!data) return;
     renderReconMetrics(data);
     renderReconEvents(data.latest || []);
@@ -2951,6 +2998,9 @@ async function loadReconciliation() {
       if (data.error) {
         status.style.display = "block";
         status.textContent = `Reconciliation endpoint warning: ${data.error}`;
+      } else if (data.resolution_lifecycle_available === false) {
+        status.style.display = "block";
+        status.textContent = "Resolution migration has not been applied yet; showing legacy reconciliation rows.";
       } else {
         status.style.display = "none";
         status.textContent = "";
@@ -2963,7 +3013,7 @@ async function loadReconciliation() {
       status.textContent = `Unable to load reconciliation diagnostics: ${e.message}`;
     }
     const tbody = document.getElementById("recon-events-tbody");
-    if (tbody) tbody.innerHTML = `<tr><td colspan="5" class="td-empty">Reconciliation diagnostics unavailable.</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="6" class="td-empty">Reconciliation diagnostics unavailable.</td></tr>`;
   }
 }
 

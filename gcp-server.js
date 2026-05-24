@@ -416,6 +416,12 @@ function isMissingBillingMigrationError(error) {
          msg.includes("does not exist");
 }
 
+function isMissingReconciliationResolutionError(error) {
+  const msg = String(error?.message || "").toLowerCase();
+  return isMissingBillingMigrationError(error) ||
+         (msg.includes("resolved") && (msg.includes("column") || msg.includes("schema cache")));
+}
+
 function badBillingNumberResponse(res, label, value) {
   console.warn("[BILLING] Invalid numeric input:", label, value);
   return res.status(400).json({ error: `${label} must be a finite non-negative number` });
@@ -453,6 +459,41 @@ async function wasRecentReconciliationLogged(type, sessionId, sinceMs = 30 * 60 
 async function logReconciliationEventOnce(event, sinceMs = 30 * 60 * 1000) {
   if (event?.sessionId && await wasRecentReconciliationLogged(event.type, event.sessionId, sinceMs)) return;
   await logBillingReconciliationEvent(event);
+}
+
+async function resolveReconciliationEvents({ userId, sessionId, type, reason, autoResolved = true, resolvedBy = "system" }) {
+  if (!sessionId || !type) return 0;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("billing_reconciliation_events")
+      .update({
+        resolved: true,
+        resolved_at: new Date().toISOString(),
+        resolved_reason: reason || "resolved",
+        resolved_by: resolvedBy,
+        auto_resolved: !!autoResolved,
+      })
+      .eq("session_id", sessionId)
+      .eq("type", type)
+      .eq("resolved", false)
+      .select("id");
+    if (error) {
+      if (!isMissingReconciliationResolutionError(error)) {
+        console.warn("[BILLING RECON] Resolve update error:", error.message);
+      }
+      return 0;
+    }
+    const count = data?.length || 0;
+    if (count > 0) {
+      console.log("[BILLING RECON] Resolved events:", { type, sessionId, count, reason });
+    }
+    return count;
+  } catch (err) {
+    if (!isMissingReconciliationResolutionError(err)) {
+      console.warn("[BILLING RECON] Resolve failed:", err.message);
+    }
+    return 0;
+  }
 }
 
 async function logActivityWarningOnce(type, details = {}, sinceMs = 30 * 60 * 1000) {
@@ -733,9 +774,74 @@ async function detectMissingFinalSync(session) {
           grace_secs: BILLING_FINAL_COVERAGE_GRACE_SECONDS,
         },
       }, 24 * 60 * 60 * 1000);
+    } else {
+      const reason = finalization.finalized_by === "interval_coverage"
+        ? "interval_coverage_verified"
+        : finalization.finalized_by === "shutdown_sync"
+          ? "late_final_sync_detected"
+          : "session_cleanly_closed";
+      await resolveReconciliationEvents({
+        userId: session.user_id || null,
+        sessionId: session.session_id,
+        type: "missing_final_sync",
+        reason,
+        autoResolved: true,
+        resolvedBy: "reconciliation_scan",
+      });
     }
   } catch (err) {
     if (!isMissingBillingMigrationError(err)) console.warn("[BILLING RECON] Missing final detection failed:", err.message);
+  }
+}
+
+async function autoResolveRecentMissingFinalFalsePositives(sinceIso) {
+  try {
+    const { data: candidates, error } = await supabaseAdmin
+      .from("billing_reconciliation_events")
+      .select("id, user_id, session_id, created_at")
+      .eq("type", "missing_final_sync")
+      .eq("resolved", false)
+      .gte("created_at", sinceIso)
+      .not("session_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(50);
+    if (error) {
+      if (!isMissingReconciliationResolutionError(error)) {
+        console.warn("[BILLING RECON] Auto-resolve candidate lookup error:", error.message);
+      }
+      return 0;
+    }
+
+    let resolved = 0;
+    for (const event of candidates || []) {
+      const { data: session, error: sessionErr } = await supabaseAdmin
+        .from("sessions")
+        .select("user_id, session_id, started_at, last_ping, last_sync_at, is_active")
+        .eq("session_id", event.session_id)
+        .maybeSingle();
+      if (sessionErr || !session || session.is_active) continue;
+      const finalization = await getSessionFinalizationStatus(session);
+      if (!finalization.finalized) continue;
+      const reason = finalization.finalized_by === "interval_coverage"
+        ? "interval_coverage_verified"
+        : finalization.finalized_by === "shutdown_sync"
+          ? "late_final_sync_detected"
+          : "session_cleanly_closed";
+      resolved += await resolveReconciliationEvents({
+        userId: session.user_id || event.user_id || null,
+        sessionId: event.session_id,
+        type: "missing_final_sync",
+        reason,
+        autoResolved: true,
+        resolvedBy: "summary_auto_resolution",
+      });
+    }
+    return resolved;
+  } catch (err) {
+    if (!isMissingReconciliationResolutionError(err)) {
+      console.warn("[BILLING RECON] Auto-resolve scan failed:", err.message);
+    }
+    return 0;
   }
 }
 
@@ -2811,16 +2917,28 @@ app.get("/admin/api/decart-log", adminAuth, async (_req, res) => {
 
 // ── Admin: recent activity feed ───────────────────────────────────
 // GET /admin/api/reconciliation/summary - lightweight billing anomaly summary
-app.get("/admin/api/reconciliation/summary", adminAuth, async (_req, res) => {
+app.get("/admin/api/reconciliation/summary", adminAuth, async (req, res) => {
   try {
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const status = ["active", "resolved", "all"].includes(String(req.query.status || "active"))
+      ? String(req.query.status || "active")
+      : "active";
+    const autoResolvedDuringRequest = await autoResolveRecentMissingFinalFalsePositives(since);
+    let eventsQuery = supabaseAdmin
+      .from("billing_reconciliation_events")
+      .select("id, type, severity, details, session_id, created_at, resolved, resolved_at, resolved_reason, resolved_by, auto_resolved")
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(1000);
+
+    if (status === "active") {
+      eventsQuery = eventsQuery.or("resolved.is.false,resolved.is.null");
+    } else if (status === "resolved") {
+      eventsQuery = eventsQuery.eq("resolved", true);
+    }
+
     const [eventsRes, sessionsRes, staleRes, syncsRes] = await Promise.all([
-      supabaseAdmin
-        .from("billing_reconciliation_events")
-        .select("type, severity, details, session_id, created_at")
-        .gte("created_at", since)
-        .order("created_at", { ascending: false })
-        .limit(1000),
+      eventsQuery,
       supabaseAdmin.from("sessions").select("id", { count: "exact", head: true }),
       supabaseAdmin
         .from("sessions")
@@ -2833,7 +2951,46 @@ app.get("/admin/api/reconciliation/summary", adminAuth, async (_req, res) => {
         .gte("created_at", since),
     ]);
 
+    if (eventsRes.error) {
+      if (!isMissingReconciliationResolutionError(eventsRes.error)) throw new Error(eventsRes.error.message);
+      const fallbackRes = await supabaseAdmin
+        .from("billing_reconciliation_events")
+        .select("id, type, severity, details, session_id, created_at")
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(1000);
+      if (fallbackRes.error) throw new Error(fallbackRes.error.message);
+      eventsRes.data = (fallbackRes.data || []).map(event => ({
+        ...event,
+        resolved: false,
+        resolved_at: null,
+        resolved_reason: null,
+        resolved_by: null,
+        auto_resolved: false,
+      }));
+      eventsRes.resolutionFallback = true;
+    }
+
     const events = eventsRes.data || [];
+    let resolvedCount = 0;
+    let autoResolvedCount = 0;
+    try {
+      const [resolvedRes, autoResolvedRes] = await Promise.all([
+        supabaseAdmin
+          .from("billing_reconciliation_events")
+          .select("id", { count: "exact", head: true })
+          .eq("resolved", true)
+          .gte("created_at", since),
+        supabaseAdmin
+          .from("billing_reconciliation_events")
+          .select("id", { count: "exact", head: true })
+          .eq("auto_resolved", true)
+          .gte("created_at", since),
+      ]);
+      if (!resolvedRes.error) resolvedCount = resolvedRes.count || 0;
+      if (!autoResolvedRes.error) autoResolvedCount = autoResolvedRes.count || 0;
+    } catch (_) {}
+
     const byType = {};
     const bySeverity = { info: 0, warning: 0, high: 0, critical: 0 };
     for (const event of events) {
@@ -2844,8 +3001,14 @@ app.get("/admin/api/reconciliation/summary", adminAuth, async (_req, res) => {
     return res.json({
       ok: true,
       window_days: 7,
+      status,
+      resolution_lifecycle_available: !eventsRes.resolutionFallback,
       total_sessions: sessionsRes.count || 0,
       total_anomalies: events.length,
+      active_anomaly_count: status === "active" ? events.length : null,
+      resolved_anomaly_count: resolvedCount,
+      auto_resolved_count: autoResolvedCount,
+      auto_resolved_during_request: autoResolvedDuringRequest,
       severe_anomalies: (bySeverity.high || 0) + (bySeverity.critical || 0),
       drift_totals: {
         rounding_warning: byType.billing_rounding_drift_warning || 0,
@@ -2864,6 +3027,49 @@ app.get("/admin/api/reconciliation/summary", adminAuth, async (_req, res) => {
   } catch (err) {
     console.warn("[RECON SUMMARY] Error:", err.message);
     return res.json({ ok: true, error: err.message, total_anomalies: 0 });
+  }
+});
+
+// POST /admin/api/reconciliation/:id/resolve - mark one anomaly resolved
+app.post("/admin/api/reconciliation/:id/resolve", adminAuth, async (req, res) => {
+  const id = req.params.id;
+  if (!validateUUID(id || "")) return res.status(400).json({ error: "Invalid reconciliation event id" });
+  const note = String(req.body?.note || "").trim();
+  const reason = note || "manual_admin_resolution";
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("billing_reconciliation_events")
+      .update({
+        resolved: true,
+        resolved_at: new Date().toISOString(),
+        resolved_reason: reason,
+        resolved_by: req.session.adminEmail || "admin",
+        auto_resolved: false,
+      })
+      .eq("id", id)
+      .select("id, user_id, session_id, type, severity, resolved")
+      .maybeSingle();
+
+    if (error) {
+      if (isMissingReconciliationResolutionError(error)) {
+        return res.status(400).json({ error: "Reconciliation resolution migration has not been applied yet" });
+      }
+      throw new Error(error.message);
+    }
+    if (!data) return res.status(404).json({ error: "Reconciliation event not found" });
+
+    await logAction("resolve_reconciliation_event", req.session.adminEmail, req.session.adminRole, data.user_id || null, {
+      event_id: id,
+      session_id: data.session_id || null,
+      type: data.type,
+      severity: data.severity,
+      reason,
+    }, req);
+
+    return res.json({ ok: true, event: data });
+  } catch (err) {
+    console.warn("[RECON RESOLVE] Error:", err.message);
+    return res.status(500).json({ error: err.message });
   }
 });
 
