@@ -4040,11 +4040,17 @@ function buildSoakBillingRows({ userId, scenario, sessionCount, adminEmail, bala
   return { rows, sessions, runId };
 }
 
-async function searchAdminUsersSafe(q = "") {
-  const query = String(q || "").toLowerCase().trim();
-  const profileMap = new Map();
-  const authMap = new Map();
+// Admin/UserSearch Lego modules:
+// Shared/SafeSupabase keeps each data source bounded and non-fatal.
+// Shared/UserMerge maps explicit picker rows without leaking raw auth/profile objects.
+function userSearchDelay(ms) {
+  return new Promise(resolve => {
+    const timer = setTimeout(resolve, ms);
+    if (timer.unref) timer.unref();
+  });
+}
 
+async function safeAdminSearchProfiles() {
   try {
     const { data, error } = await supabaseAdmin
       .from("profiles")
@@ -4052,86 +4058,206 @@ async function searchAdminUsersSafe(q = "") {
       .limit(1000);
 
     if (error) {
-      console.warn("[USER SEARCH] Profile lookup error:", error.message);
-    } else {
-      for (const profile of data || []) {
-        if (profile?.id) profileMap.set(profile.id, profile);
-      }
+      console.warn("[ADMIN USER SEARCH] profiles query failed:", error.message);
+      return { rows: [], error: error.message };
     }
-  } catch (err) {
-    console.warn("[USER SEARCH] Profile lookup failed:", err.message);
-  }
 
+    return {
+      rows: (data || []).filter(row => row?.id).map(row => ({
+        id: row.id,
+        display_name: row.display_name || null,
+        credits: Number(row.credits || 0),
+        status: row.status || null,
+        last_seen: row.last_seen || null,
+        created_at: row.created_at || null,
+      })),
+      error: null,
+    };
+  } catch (err) {
+    console.error("[ADMIN USER SEARCH] profiles query exception:", err);
+    return { rows: [], error: err?.message || "profiles query failed" };
+  }
+}
+
+async function safeAdminSearchAuthUsers() {
+  const rows = [];
   try {
     const perPage = 100;
     for (let page = 1; page <= 10; page++) {
       const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage });
       if (error) {
-        console.warn("[USER SEARCH] Auth lookup error:", error.message);
-        break;
+        console.warn("[ADMIN USER SEARCH] auth list failed:", error.message);
+        return { rows, error: error.message };
       }
 
       const users = data?.users || [];
       for (const user of users) {
         if (!user?.id) continue;
-        authMap.set(user.id, {
+        rows.push({
+          id: user.id,
           email: user.email || "unknown",
-          is_banned: user.banned_until ? new Date(user.banned_until) > new Date() : false,
+          display_name: user.user_metadata?.display_name || user.user_metadata?.full_name || user.user_metadata?.name || null,
+          status: user.banned_until && new Date(user.banned_until) > new Date() ? "banned" : null,
           created_at: user.created_at || null,
         });
       }
 
       if (users.length < perPage) break;
     }
-  } catch (err) {
-    console.warn("[USER SEARCH] Auth lookup failed:", err.message);
-  }
 
-  const userIds = new Set([...profileMap.keys(), ...authMap.keys()]);
-  return Array.from(userIds)
-    .map(id => {
-      const profile = profileMap.get(id) || {};
-      const auth = authMap.get(id) || {};
-      const lastSeen = profile.last_seen || null;
-      const recentlyActive = lastSeen && Date.now() - new Date(lastSeen).getTime() < 24 * 60 * 60 * 1000;
-      return {
+    return { rows, error: null };
+  } catch (err) {
+    console.error("[ADMIN USER SEARCH] auth list exception:", err);
+    return { rows, error: err?.message || "auth list failed" };
+  }
+}
+
+function mergeAdminSearchUsers(profileRows = [], authRows = [], query = "") {
+  const profileMap = new Map(profileRows.filter(row => row?.id).map(row => [row.id, row]));
+  const authMap = new Map(authRows.filter(row => row?.id).map(row => [row.id, row]));
+  const ids = new Set([...profileMap.keys(), ...authMap.keys()]);
+  const normalizedQuery = String(query || "").toLowerCase().trim();
+
+  return Array.from(ids).map(id => {
+    const profile = profileMap.get(id) || null;
+    const authUser = authMap.get(id) || null;
+    const lastSeen = profile?.last_seen || null;
+
+    return {
         id,
-        email: auth.email || "unknown",
-        display_name: profile.display_name || "Unknown User",
-        credits: safeBillingNumber(Number(profile.credits)) ?? 0,
-        status: auth.is_banned ? "banned" : recentlyActive ? "active" : "inactive",
+        email: authUser?.email || "unknown",
+        display_name: profile?.display_name || authUser?.display_name || null,
+        credits: Number(profile?.credits || 0),
+        status: profile?.status || authUser?.status || "unknown",
         last_seen: lastSeen,
-        created_at: profile.created_at || auth.created_at || null,
+        created_at: profile?.created_at || authUser?.created_at || null,
       };
-    })
-    .filter(user => {
-      if (!query) return true;
-      return String(user.email || "").toLowerCase().includes(query) ||
-        String(user.display_name || "").toLowerCase().includes(query) ||
-        String(user.id || "").toLowerCase().includes(query);
-    })
-    .sort((a, b) => new Date(b.last_seen || b.created_at || 0) - new Date(a.last_seen || a.created_at || 0))
-    .slice(0, 25);
+  }).filter(user => {
+    if (!user) return false;
+    if (!normalizedQuery) return true;
+    return String(user.email || "").toLowerCase().includes(normalizedQuery) ||
+      String(user.display_name || "").toLowerCase().includes(normalizedQuery) ||
+      String(user.id || "").toLowerCase().includes(normalizedQuery);
+  }).sort((a, b) => {
+    const aTs = new Date(a.last_seen || a.created_at || 0).getTime() || 0;
+    const bTs = new Date(b.last_seen || b.created_at || 0).getTime() || 0;
+    return bTs - aTs;
+  }).slice(0, 25);
+}
+
+async function safeAdminUserSearch(q = "", options = {}) {
+  const started = Date.now();
+  const timeoutMs = Number(options.timeoutMs || 5000);
+  const diagnostics = {
+    endpoint_healthy: true,
+    profiles_loaded_count: 0,
+    auth_loaded_count: 0,
+    degraded: false,
+    timeout: false,
+    duration_ms: 0,
+    errors: [],
+  };
+  const partial = { profiles: [], auth: [], profilesDone: false, authDone: false };
+  let completedBeforeTimeout = false;
+
+  const profilesPromise = safeAdminSearchProfiles().then(result => {
+    partial.profiles = result.rows || [];
+    partial.profilesDone = true;
+    diagnostics.profiles_loaded_count = partial.profiles.length;
+    if (result.error) diagnostics.errors.push(`profiles: ${result.error}`);
+  });
+
+  const authPromise = safeAdminSearchAuthUsers().then(result => {
+    partial.auth = result.rows || [];
+    partial.authDone = true;
+    diagnostics.auth_loaded_count = partial.auth.length;
+    if (result.error) diagnostics.errors.push(`auth: ${result.error}`);
+  });
+
+  await Promise.race([
+    Promise.allSettled([profilesPromise, authPromise]).then(() => {
+      completedBeforeTimeout = true;
+    }),
+    userSearchDelay(timeoutMs).then(() => {
+      if (!completedBeforeTimeout) {
+        diagnostics.timeout = true;
+        console.warn(`[ADMIN USER SEARCH] timed out after ${timeoutMs}ms; returning partial results`);
+      }
+    }),
+  ]);
+  completedBeforeTimeout = true;
+
+  diagnostics.duration_ms = Date.now() - started;
+  diagnostics.degraded = diagnostics.timeout || diagnostics.errors.length > 0 || !partial.profilesDone || !partial.authDone;
+
+  let users = mergeAdminSearchUsers(partial.profiles, partial.auth, q);
+  users = users.filter(Boolean);
+
+  return {
+    success: true,
+    ok: true,
+    users,
+    degraded: diagnostics.degraded,
+    diagnostics,
+  };
 }
 
 // GET /admin/api/users/search - reusable safe admin user picker
-app.get("/admin/api/users/search", adminAuth, async (req, res) => {
+app.get("/admin/api/users/search", (req, res, next) => {
+  const query = String(req.query.q || "");
+  console.log("[ADMIN USER SEARCH] query=", query);
+  next();
+}, adminAuth, async (req, res) => {
+  const query = String(req.query.q || "");
   try {
-    return res.json({ ok: true, users: await searchAdminUsersSafe(req.query.q || "") });
+    return res.json(await safeAdminUserSearch(query));
   } catch (err) {
-    console.warn("[USER SEARCH] Error:", err.message);
-    return res.status(500).json({ error: "User search failed", details: "Unable to load user search results." });
+    console.error("[ADMIN USER SEARCH ERROR]", err);
+    return res.json({
+      success: true,
+      ok: true,
+      users: [],
+      degraded: true,
+      diagnostics: {
+        endpoint_healthy: false,
+        profiles_loaded_count: 0,
+        auth_loaded_count: 0,
+        degraded: true,
+        timeout: false,
+        duration_ms: 0,
+        errors: [err?.message || "User search failed"],
+      },
+    });
   }
 });
 
 // GET /admin/api/soak-test/users - super-admin-only user picker for dry-run soak tests
-app.get("/admin/api/soak-test/users", adminAuth, async (req, res) => {
+app.get("/admin/api/soak-test/users", (req, res, next) => {
+  const query = String(req.query.q || "");
+  console.log("[ADMIN USER SEARCH] query=", query);
+  next();
+}, adminAuth, async (req, res) => {
   if (!requireSoakSuperAdmin(req, res)) return;
+  const query = String(req.query.q || "");
   try {
-    return res.json({ ok: true, users: await searchAdminUsersSafe(req.query.q || "") });
+    return res.json(await safeAdminUserSearch(query));
   } catch (err) {
-    console.warn("[SOAK USERS] Error:", err.message);
-    return res.status(500).json({ error: "User search failed", details: "Unable to load soak test users." });
+    console.error("[ADMIN USER SEARCH ERROR]", err);
+    return res.json({
+      success: true,
+      ok: true,
+      users: [],
+      degraded: true,
+      diagnostics: {
+        endpoint_healthy: false,
+        profiles_loaded_count: 0,
+        auth_loaded_count: 0,
+        degraded: true,
+        timeout: false,
+        duration_ms: 0,
+        errors: [err?.message || "User search failed"],
+      },
+    });
   }
 });
 

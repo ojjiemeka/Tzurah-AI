@@ -4097,6 +4097,8 @@ const UserPicker = {
       selected: null,
       timer: null,
       onSelect: options.onSelect || null,
+      diagnosticsId: options.diagnosticsId || null,
+      diagnostics: null,
     };
     this.search(id, "");
   },
@@ -4120,10 +4122,41 @@ const UserPicker = {
     try {
       const data = await api(`${state.endpoint}?q=${encodeURIComponent(query || "")}`);
       state.users = data?.users || [];
+      state.diagnostics = data?.diagnostics || null;
+      this.renderDiagnostics(id);
       this.render(id);
     } catch (e) {
       results.innerHTML = `<div style="padding:10px;color:var(--danger);font-size:12px">Could not load users. Try again or use Advanced UUID fallback.</div>`;
+      state.diagnostics = {
+        endpoint_healthy: false,
+        profiles_loaded_count: 0,
+        auth_loaded_count: 0,
+        degraded: true,
+        duration_ms: 0,
+      };
+      this.renderDiagnostics(id);
     }
+  },
+  renderDiagnostics(id) {
+    const state = this.state[id];
+    const el = state?.diagnosticsId ? document.getElementById(state.diagnosticsId) : null;
+    if (!state || !el) return;
+    const d = state.diagnostics || {};
+    const healthy = d.endpoint_healthy !== false;
+    const degraded = d.degraded === true;
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+        <strong>User Search Diagnostics</strong>
+        <span class="badge ${healthy && !degraded ? "badge-green" : "badge-amber"}">${healthy && !degraded ? "Healthy" : "Degraded"}</span>
+      </div>
+      <div class="billing-state-grid">
+        <div class="billing-state-item"><div class="billing-state-label">Endpoint</div><div class="billing-state-value">${healthy ? "healthy" : "fallback"}</div></div>
+        <div class="billing-state-item"><div class="billing-state-label">Profiles</div><div class="billing-state-value">${fmtN(d.profiles_loaded_count || 0)}</div></div>
+        <div class="billing-state-item"><div class="billing-state-label">Auth Users</div><div class="billing-state-value">${fmtN(d.auth_loaded_count || 0)}</div></div>
+        <div class="billing-state-item"><div class="billing-state-label">Last Query</div><div class="billing-state-value">${fmtN(d.duration_ms || 0)} ms</div></div>
+      </div>
+      ${degraded ? `<div style="color:var(--warning);font-size:11px;margin-top:8px">Degraded mode active. Results may be partial.</div>` : ""}
+    `;
   },
   render(id) {
     const state = this.state[id];
@@ -4208,6 +4241,10 @@ function openAdvancedBillingControls() {
           hint: "Select a user by email or display name. UUID is sent internally only.",
           advanced: true,
         })}
+        <div id="protected-billing-user-search-diagnostics" class="recon-status" style="display:block;color:var(--text2);border-color:var(--border);background:var(--surface)">
+          <strong>User Search Diagnostics</strong>
+          <div style="color:var(--muted);font-size:11px;margin-top:6px">Waiting for first search...</div>
+        </div>
         <div class="mini-field-row">
           <button class="btn btn-ghost btn-xs" onclick="setProtectedBillingTestUser(true)">Enable</button>
           <button class="btn btn-ghost btn-xs" onclick="setProtectedBillingTestUser(false)">Disable</button>
@@ -4217,7 +4254,9 @@ function openAdvancedBillingControls() {
       </div>
     `,
   });
-  if (ov) setTimeout(() => UserPicker.mount("protected-billing-user-picker"), 50);
+  if (ov) setTimeout(() => UserPicker.mount("protected-billing-user-picker", {
+    diagnosticsId: "protected-billing-user-search-diagnostics",
+  }), 50);
 }
 
 async function loadReconciliationAnalytics() {
