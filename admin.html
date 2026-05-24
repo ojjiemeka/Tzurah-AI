@@ -245,6 +245,10 @@ main { padding:20px; max-width:1400px; margin:0 auto; }
   background:var(--bg); border:1px solid var(--border); color:var(--text2);
   border-radius:6px; padding:4px 8px; font-size:11px;
 }
+.export-select {
+  background:var(--bg); border:1px solid var(--border); color:var(--text2);
+  border-radius:6px; padding:4px 8px; font-size:11px; max-width:130px;
+}
 .badge-high { background:rgba(249,115,22,.16); color:#fb923c; }
 .badge-resolved { background:rgba(148,163,184,.12); color:#94a3b8; }
 .recon-preview {
@@ -1590,6 +1594,13 @@ kbd {
       </select>
       <button id="soak-test-btn" class="btn btn-amber btn-sm" style="display:none;font-size:10px" onclick="openSoakTestModal()">Run Soak Test</button>
       <button id="soak-cleanup-card-btn" class="btn btn-ghost btn-sm" style="display:none;font-size:10px" onclick="cleanupSoakTestRows(this, 'all_test')">Cleanup all test rows</button>
+      <select class="export-select" onchange="exportReconciliationRows(this.value); this.value='';">
+        <option value="">Export</option>
+        <option value="json">JSON</option>
+        <option value="md">Markdown</option>
+        <option value="csv">CSV</option>
+        <option value="txt">TXT</option>
+      </select>
       <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="loadReconciliation()">Refresh</button>
     </div>
     <div class="panel-body">
@@ -2696,6 +2707,119 @@ async function apiPost(path, body) {
   return r.json();
 }
 
+const AdminExport = {
+  defaultColumns(rows) {
+    const keys = new Set();
+    (rows || []).forEach(row => Object.keys(row || {}).forEach(k => keys.add(k)));
+    return Array.from(keys).map(key => ({ key, label: key }));
+  },
+  normalizeColumns(rows, columns) {
+    if (columns?.length) return columns.map(col => typeof col === "string" ? { key: col, label: col } : col);
+    return this.defaultColumns(rows);
+  },
+  value(row, col) {
+    const raw = typeof col.value === "function" ? col.value(row) : row?.[col.key];
+    if (raw == null) return "";
+    if (typeof raw === "object") return JSON.stringify(raw);
+    return String(raw);
+  },
+  stamp() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
+  },
+  sanitizeFilename(name) {
+    return String(name || "tzurah-export").replace(/[^a-z0-9._-]+/gi, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  },
+  csvEscape(value) {
+    const s = String(value ?? "");
+    return `"${s.replace(/"/g, '""').replace(/\r?\n/g, " ")}"`;
+  },
+  mdEscape(value) {
+    return String(value ?? "").replace(/\|/g, "\\|").replace(/\r?\n/g, "<br>");
+  },
+  toCsv(rows, columns) {
+    const cols = this.normalizeColumns(rows, columns);
+    return [
+      cols.map(col => this.csvEscape(col.label || col.key)).join(","),
+      ...(rows || []).map(row => cols.map(col => this.csvEscape(this.value(row, col))).join(",")),
+    ].join("\n");
+  },
+  toMarkdown(rows, options = {}) {
+    const cols = this.normalizeColumns(rows, options.columns);
+    const meta = options.metadata || {};
+    const lines = [`# ${options.title || "Tzurah Export"}`, ""];
+    for (const [key, value] of Object.entries(meta)) {
+      lines.push(`${key}: ${typeof value === "object" ? JSON.stringify(value) : value}`);
+    }
+    if (Object.keys(meta).length) lines.push("");
+    lines.push(`Generated: ${new Date().toISOString()}`, "");
+    lines.push(`| ${cols.map(col => this.mdEscape(col.label || col.key)).join(" | ")} |`);
+    lines.push(`| ${cols.map(() => "---").join(" | ")} |`);
+    for (const row of rows || []) {
+      lines.push(`| ${cols.map(col => this.mdEscape(this.value(row, col))).join(" | ")} |`);
+    }
+    return lines.join("\n");
+  },
+  toText(rows, options = {}) {
+    const cols = this.normalizeColumns(rows, options.columns);
+    const lines = [options.title || "Tzurah Export", `Generated: ${new Date().toISOString()}`, ""];
+    (rows || []).forEach((row, idx) => {
+      lines.push(`Row ${idx + 1}`);
+      cols.forEach(col => lines.push(`${col.label || col.key}: ${this.value(row, col)}`));
+      lines.push("");
+    });
+    return lines.join("\n");
+  },
+  buildPayload(rows, options = {}) {
+    return {
+      title: options.title || "Tzurah Export",
+      generated_at: new Date().toISOString(),
+      metadata: options.metadata || {},
+      rows: rows || [],
+    };
+  },
+  download(content, filename, mime) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = this.sanitizeFilename(filename);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+  exportRows(rows, options = {}) {
+    const dataRows = rows || [];
+    if (!dataRows.length) {
+      toast("No rows to export", "error");
+      return false;
+    }
+    const format = String(options.format || "json").toLowerCase();
+    const base = this.sanitizeFilename(options.filename || `tzurah-export-${this.stamp()}`);
+    const ext = format === "markdown" ? "md" : format;
+    let content = "";
+    let mime = "text/plain";
+    if (format === "json") {
+      content = JSON.stringify(this.buildPayload(dataRows, options), null, 2);
+      mime = "application/json";
+    } else if (format === "md" || format === "markdown") {
+      content = this.toMarkdown(dataRows, options);
+      mime = "text/markdown";
+    } else if (format === "csv") {
+      content = this.toCsv(dataRows, options.columns);
+      mime = "text/csv";
+    } else {
+      content = this.toText(dataRows, options);
+      mime = "text/plain";
+    }
+    this.download(content, `${base}.${ext}`, mime);
+    toast(`Exported ${dataRows.length} rows`, "success");
+    return true;
+  },
+};
+
 // ── Toast v2 — stacking, progress bar, error persistence ─────────
 const _toastQueue = [];
 function toast(msg, type="success") {
@@ -3497,6 +3621,7 @@ function renderReconMetrics(data) {
 function renderReconEvents(events) {
   const tbody = document.getElementById("recon-events-tbody");
   if (!tbody) return;
+  window._reconVisibleRows = events || [];
   if (!events.length) {
     const mode = document.getElementById("recon-test-filter")?.value || "real";
     const message = mode === "test"
@@ -3528,6 +3653,43 @@ function renderReconEvents(events) {
       </tr>
     `;
   }).join("");
+}
+
+function reconExportRows(rows) {
+  return (rows || []).map(event => ({
+    time: event.created_at || "",
+    type: event.type || "",
+    severity: event.severity || "",
+    session_id: event.session_id || "",
+    resolved: !!event.resolved,
+    summary: reconPreview(event),
+    details: event.details || {},
+  }));
+}
+
+function exportReconciliationRows(format) {
+  if (!format) return;
+  const rows = reconExportRows(window._reconVisibleRows || []);
+  const status = document.getElementById("recon-filter")?.value || "active";
+  const testMode = document.getElementById("recon-test-filter")?.value || "real";
+  AdminExport.exportRows(rows, {
+    format,
+    title: "Tzurah Billing Reconciliation Export",
+    filename: `tzurah-reconciliation-${AdminExport.stamp()}`,
+    metadata: {
+      filters: { status, test_mode: testMode },
+      window_days: window._reconLastData?.window_days || 7,
+      total_anomalies: window._reconLastData?.total_anomalies ?? rows.length,
+    },
+    columns: [
+      { key: "time", label: "Time" },
+      { key: "type", label: "Type" },
+      { key: "severity", label: "Severity" },
+      { key: "session_id", label: "Session" },
+      { key: "resolved", label: "Resolved" },
+      { key: "summary", label: "Details" },
+    ],
+  });
 }
 
 async function resolveReconEvent(id) {
@@ -3617,6 +3779,13 @@ function openSoakTestModal() {
     footer: `
       <button class="modal-btn-cancel">Close</button>
       <button id="soak-cleanup-current-btn" class="btn btn-ghost" type="button" onclick="cleanupSoakTestRows(this, 'current_run')" disabled>Cleanup this run</button>
+      <select id="soak-export-select" class="export-select" onchange="exportSoakRun(this.value); this.value='';" disabled>
+        <option value="">Export run</option>
+        <option value="json">JSON</option>
+        <option value="md">Markdown</option>
+        <option value="csv">CSV</option>
+        <option value="txt">TXT</option>
+      </select>
       <button id="soak-run-btn" class="btn btn-amber" type="button" onclick="runSoakTestFromModal(this)" disabled>Run dry-run</button>
     `,
   });
@@ -3649,6 +3818,7 @@ async function runSoakTestFromModal(btn) {
       const anomalyEvents = data.anomaly_events ?? data.reconciliation_events;
       window._soakCurrentRunId = data.run_id || "";
       window._soakCurrentRunCleaned = false;
+      window._soakLastRunData = data;
       result.innerHTML = `
         <strong style="color:var(--success)">Dry-run complete.</strong><br>
         Run: <code>${esc(data.run_id || "--")}</code><br>
@@ -3661,6 +3831,8 @@ async function runSoakTestFromModal(btn) {
     }
     const cleanupCurrentBtn = document.getElementById("soak-cleanup-current-btn");
     if (cleanupCurrentBtn) cleanupCurrentBtn.disabled = !window._soakCurrentRunId;
+    const exportSelect = document.getElementById("soak-export-select");
+    if (exportSelect) exportSelect.disabled = !window._soakCurrentRunId;
     renderSoakResultTable(data);
     const reconFilter = document.getElementById("recon-filter");
     const reconTestFilter = document.getElementById("recon-test-filter");
@@ -3713,6 +3885,67 @@ function renderSoakResultTable(data) {
       </table>
     </div>
   `;
+}
+
+function soakExportRows(data) {
+  const syncs = (data?.latest_syncs || []).map(row => ({
+    row_type: "billing_sync",
+    run_id: data.run_id || "",
+    scenario: data.scenario || "",
+    session_id: row.session_id || "",
+    sync_id: row.sync_id || "",
+    source: row.source || "",
+    status: row.status || "",
+    severity: "",
+    details: row,
+  }));
+  const events = (data?.latest_events || []).map(row => ({
+    row_type: "reconciliation_event",
+    run_id: data.run_id || "",
+    scenario: data.scenario || "",
+    session_id: row.session_id || "",
+    sync_id: "",
+    source: row.details?.source || "soak_test",
+    status: row.type || "",
+    severity: row.severity || "",
+    details: row,
+  }));
+  return [...syncs, ...events];
+}
+
+function exportSoakRun(format) {
+  if (!format) return;
+  const data = window._soakLastRunData;
+  if (!data?.run_id) {
+    toast("Run a soak test before exporting", "error");
+    return;
+  }
+  const rows = soakExportRows(data);
+  AdminExport.exportRows(rows, {
+    format,
+    title: "Tzurah Soak Test Export",
+    filename: `tzurah-soak-test-${data.scenario || "scenario"}-${data.run_id}`,
+    metadata: {
+      run_id: data.run_id,
+      scenario: data.scenario,
+      session_count: data.session_count,
+      billing_sync_rows: data.billing_sync_rows,
+      reconciliation_events: data.reconciliation_events,
+      anomaly_events: data.anomaly_events,
+      dry_run: true,
+      generated_at: new Date().toISOString(),
+    },
+    columns: [
+      { key: "row_type", label: "Type" },
+      { key: "run_id", label: "Run ID" },
+      { key: "scenario", label: "Scenario" },
+      { key: "session_id", label: "Session" },
+      { key: "source", label: "Source" },
+      { key: "status", label: "Status/Event" },
+      { key: "severity", label: "Severity" },
+      { key: "details", label: "Details" },
+    ],
+  });
 }
 
 let soakUserSearchTimer = null;
@@ -3857,6 +4090,7 @@ async function loadReconciliation() {
     const testFilter = document.getElementById("recon-test-filter")?.value || "real";
     const data = await api(`/admin/api/reconciliation/summary?status=${encodeURIComponent(filter)}&test_mode=${encodeURIComponent(testFilter)}`);
     if (!data) return;
+    window._reconLastData = data;
     renderReconMetrics(data);
     renderReconEvents(data.latest || []);
     const updated = document.getElementById("recon-updated");
