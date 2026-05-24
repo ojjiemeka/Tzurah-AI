@@ -24,7 +24,7 @@
   --r:        10px;
 }
 *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
-html,body { height:100%; background:var(--bg); color:var(--text);
+html,body { height:100%; width:100%; max-width:100%; overflow-x:hidden; background:var(--bg); color:var(--text);
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   font-size:13px; line-height:1.5; }
 button { font-family:inherit; cursor:pointer; }
@@ -119,6 +119,15 @@ header {
 main { padding:20px; max-width:1400px; margin:0 auto; }
 .tab-panel { display:none; }
 .tab-panel.active { display:block; }
+.tab-panel,
+.panel-card,
+.panel-body,
+.two-col,
+.stage3-grid,
+.filter-row,
+.bulk-bar,
+.sec-hdr,
+.panel-hdr { min-width:0; }
 
 /* ── Stats grid ────────────────────────────────────────────────── */
 .stats-grid {
@@ -283,9 +292,11 @@ select option { background:var(--surface2); }
 /* ── Table ─────────────────────────────────────────────────────── */
 .table-wrap {
   background:var(--surface); border:1px solid var(--border);
-  border-radius:var(--r); overflow:hidden; margin-bottom:12px;
+  border-radius:var(--r); overflow-x:auto; overflow-y:hidden; margin-bottom:12px;
+  max-width:100%; -webkit-overflow-scrolling:touch;
 }
-table { width:100%; border-collapse:collapse; }
+table { width:100%; min-width:720px; border-collapse:collapse; }
+table.mobile-cards { min-width:0; }
 thead th {
   background:var(--surface2); padding:8px 12px; text-align:left;
   font-size:10px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted);
@@ -671,6 +682,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 .health-dot.unknown { background: var(--muted); }
 .health-name { flex: 1; color: var(--text2); }
 .health-val  { color: var(--muted); font-size: 11px; }
+.system-status-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:0; padding:0; }
 
 /* ── Last updated ──────────────────────────────────────────────── */
 .last-updated { font-size: 11px; color: var(--muted); }
@@ -934,6 +946,16 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 /* ── Alerts layout class (replaces inline style for mobile override) */
 .alerts-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 
+@media (max-width: 1024px) {
+  main { max-width:none; width:100%; padding:16px; }
+  .stats-grid { grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+  .system-status-grid { grid-template-columns:repeat(2, minmax(0, 1fr)) !important; }
+  .settings-row { align-items:flex-start; flex-wrap:wrap; }
+  .settings-row-label-wrap { min-width:160px; }
+  .settings-row-value { flex-basis:260px; }
+  .pricing-row { flex-wrap:wrap; }
+}
+
 /* ── Mobile responsive ────────────────────────────────────────── */
 @media (max-width: 768px) {
   /* Header: Row 1 = logo + live counter, Row 2 = action buttons */
@@ -947,6 +969,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
     width: 100%; margin-left: 0;
     display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
   }
+  .hdr-actions .btn { flex:1 1 auto; justify-content:center; min-height:34px; }
   .refresh-countdown { display: none; }
   #admin-name { font-size: 10px; }
 
@@ -960,7 +983,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   .tab-btn { padding: 10px 10px; font-size: 12px; }
 
   /* Main padding */
-  main { padding: 10px; }
+  main { padding: 10px; overflow-x:hidden; }
 
   /* Stats grid: 2 cols */
   .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }
@@ -982,9 +1005,25 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 
   /* Filter chips: wrap naturally */
   .chip-row { flex-wrap: wrap; }
+  .sec-hdr { flex-direction:column; align-items:stretch; gap:10px; }
+  .sec-hdr .btn { width:100%; justify-content:center; }
+  .panel-hdr { flex-wrap:wrap; align-items:flex-start; gap:8px; }
+  .panel-hdr .ptitle { min-width:0; }
+  .panel-hdr .btn,
+  .panel-hdr select { min-height:32px; }
+  .bulk-bar { flex-wrap:wrap; }
+  .bulk-bar .btn { flex:1 1 135px; justify-content:center; }
 
   /* Alerts layout: single column */
   .alerts-layout { grid-template-columns: 1fr; }
+  .recon-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  .recon-preview { max-width:220px; }
+  .system-status-grid { grid-template-columns:1fr !important; }
+  .system-status-grid > div {
+    border-right:none !important;
+    border-bottom:1px solid var(--border);
+  }
+  .system-status-grid > div:last-child { border-bottom:none; }
 
   /* Pager */
   .pager { flex-direction: column; align-items: flex-start; gap: 6px; }
@@ -997,8 +1036,13 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
     min-width: unset !important;
     width: calc(100vw - 32px) !important;
     max-width: calc(100vw - 32px) !important;
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
   }
   .admin-modal-overlay { align-items: flex-end; padding-bottom: 16px; }
+  .modal-footer { flex-wrap:wrap; }
+  .modal-footer button,
+  .modal-footer .btn { flex:1 1 120px; justify-content:center; min-height:36px; }
 
   /* Table → card layout on mobile */
   table.mobile-cards thead { display: none; }
@@ -1029,7 +1073,41 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   table.mobile-cards tbody td[data-label=""] { display: none; }
   table.mobile-cards tbody td[data-label="⋯"] { justify-content: flex-end; }
   table.mobile-cards tbody td[data-label="⋯"]::before { display: none; }
-  .table-wrap { border-radius: 0; border-left: none; border-right: none; }
+  .table-wrap {
+    width:100%; max-width:100%;
+    border-radius: 0; border-left: none; border-right: none;
+    overflow-x:auto;
+  }
+  .table-wrap table:not(.mobile-cards) { min-width:640px; }
+  .td-email, .td-mono, .audit-detail { max-width:180px; }
+  .settings-row,
+  .pricing-row {
+    flex-direction:column; align-items:stretch;
+  }
+  .settings-row-label-wrap { min-width:0; }
+  .settings-row-value {
+    width:100%; flex-basis:auto;
+    white-space:normal; overflow-wrap:anywhere;
+  }
+  .settings-row-actions {
+    width:100%; flex-wrap:wrap;
+  }
+  .settings-row-actions .btn { flex:1 1 auto; justify-content:center; }
+  .pricing-input { width:100%; text-align:left; }
+  .stage3-grid { grid-template-columns:1fr; gap:12px; }
+  .email-actions { flex-wrap:wrap; }
+  .email-actions .btn { flex:1 1 140px; justify-content:center; }
+  .stage3-toggle-row { align-items:flex-start; }
+  .stage3-toggle-row .email-input,
+  .stage3-toggle-row input[type="datetime-local"] {
+    width:100%; max-width:none !important;
+  }
+  #perms-guide-body > div:first-child {
+    min-width:620px; overflow-x:auto;
+  }
+  #perms-guide-body > div:nth-child(2) {
+    grid-template-columns:1fr !important;
+  }
 }
 
 /* ── Audit log ─────────────────────────────────────────────────── */
@@ -1047,6 +1125,24 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:14px;
 }
 @media(max-width:768px) { .user-stats-bar { grid-template-columns:repeat(2,1fr); } }
+@media (max-width: 480px) {
+  main { padding:8px; }
+  header { padding:8px; }
+  .logo { width:100%; }
+  .live-pill { margin-left:0; }
+  .hdr-actions { gap:6px; }
+  .hdr-actions .btn { min-width:92px; }
+  .stats-grid,
+  .recon-grid { grid-template-columns:1fr; }
+  .stat-card { padding:12px; }
+  .panel-body { padding:10px; }
+  .tab-btn { padding:10px 9px; }
+  .filter-row input,
+  .filter-row select,
+  .filter-row .btn { min-height:36px; }
+  .stage3-variable-chip { min-height:30px; }
+  .notif-panel { width:calc(100vw - 24px); right:12px; left:12px; }
+}
 .ust-card {
   background:#13131f; border:1px solid rgba(255,255,255,0.06);
   border-radius:8px; padding:10px 16px; cursor:pointer; transition:all .15s; position:relative;
@@ -1329,7 +1425,7 @@ kbd {
   <!-- System Status card -->
   <div class="panel-card" style="margin-top:16px">
     <div class="panel-hdr"><span class="ptitle">⚡ System Status</span></div>
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;padding:0">
+    <div class="system-status-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;padding:0">
       <div style="padding:12px 16px;border-right:1px solid var(--border)">
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px">GCP Server</div>
         <div style="display:flex;align-items:center;gap:6px">

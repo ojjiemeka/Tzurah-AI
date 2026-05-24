@@ -1944,6 +1944,32 @@ async function fetchAllUsersData() {
   return { merged, authUsers, profiles };
 }
 
+function buildProfileInsertRow({ userId, displayName, avatarUrl, credits = 6, createdAt = null }) {
+  return {
+    id:                      userId,
+    display_name:            displayName || "User",
+    avatar_url:              avatarUrl || null,
+    credits,
+    total_credits_purchased: 0,
+    created_at:              createdAt || new Date().toISOString(),
+  };
+}
+
+async function getAuthEmailByUserId(userId) {
+  if (!userId || !validateUUID(userId)) return null;
+  try {
+    const { data, error } = await supabaseAdmin.auth.admin.getUserById(userId);
+    if (error) {
+      console.warn("[AUTH] Email lookup failed:", error.message);
+      return null;
+    }
+    return data?.user?.email || null;
+  } catch (err) {
+    console.warn("[AUTH] Email lookup error:", err.message);
+    return null;
+  }
+}
+
 // ── Admin: stats overview ─────────────────────────────────────────
 app.get("/admin/api/stats", adminAuth, async (_req, res) => {
   const now   = Date.now();
@@ -3587,15 +3613,11 @@ app.post("/api/ensure-profile", async (req, res) => {
 
     const { data: newProfile, error: createErr } = await supabaseAdmin
       .from("profiles")
-      .insert({
-        id:                      userId,
-        email:                   email,
-        display_name:            full_name || email.split("@")[0],
-        avatar_url:              avatar_url || null,
-        credits:                 6,
-        total_credits_purchased: 0,
-        created_at:              new Date().toISOString(),
-      })
+      .insert(buildProfileInsertRow({
+        userId,
+        displayName: full_name || email.split("@")[0],
+        avatarUrl: avatar_url || null,
+      }))
       .select()
       .single();
 
@@ -3626,15 +3648,11 @@ app.post("/auth/webhook", async (req, res) => {
                          || record.raw_user_meta_data?.name
                          || email?.split("@")[0]
                          || "User";
-        const { error } = await supabaseAdmin.from("profiles").insert({
-          id:                      userId,
-          email:                   email,
-          display_name:            displayName,
-          avatar_url:              record.raw_user_meta_data?.avatar_url || null,
-          credits:                 6,
-          total_credits_purchased: 0,
-          created_at:              new Date().toISOString(),
-        });
+        const { error } = await supabaseAdmin.from("profiles").insert(buildProfileInsertRow({
+          userId,
+          displayName,
+          avatarUrl: record.raw_user_meta_data?.avatar_url || null,
+        }));
         if (error) console.error("[WEBHOOK] Profile create error:", error);
         else console.log("[WEBHOOK] Profile auto-created for:", email);
       }
@@ -3664,15 +3682,12 @@ app.post("/admin/api/repair-missing-profiles", adminAuth, async (req, res) => {
                        || user.user_metadata?.name
                        || user.email?.split("@")[0]
                        || "User";
-      const { error: createErr } = await supabaseAdmin.from("profiles").insert({
-        id:                      user.id,
-        email:                   user.email,
-        display_name:            displayName,
-        avatar_url:              user.user_metadata?.avatar_url || null,
-        credits:                 6,
-        total_credits_purchased: 0,
-        created_at:              user.created_at || new Date().toISOString(),
-      });
+      const { error: createErr } = await supabaseAdmin.from("profiles").insert(buildProfileInsertRow({
+        userId: user.id,
+        displayName,
+        avatarUrl: user.user_metadata?.avatar_url || null,
+        createdAt: user.created_at || new Date().toISOString(),
+      }));
       if (createErr) {
         errors.push({ email: user.email, error: createErr.message });
       } else {
@@ -3767,13 +3782,6 @@ async function doMockPurchase(userId, packId, email) {
     if (p3) profile = p3;
   }
 
-  // Strategy 4: email fallback
-  if (!profile && email) {
-    const { data: p4 } = await supabaseAdmin
-      .from("profiles").select("*").eq("email", email).maybeSingle();
-    if (p4) profile = p4;
-  }
-
   console.log("[MOCK] Profile found:", profile ? "yes" : "no",
               profile ? Object.keys(profile) : "none");
 
@@ -3795,15 +3803,11 @@ async function doMockPurchase(userId, packId, email) {
                        || "User";
       const { data: created, error: createErr } = await supabaseAdmin
         .from("profiles")
-        .insert({
-          id:                      userId,
-          email:                   authUser.email,
-          display_name:            displayName,
-          avatar_url:              authUser.user_metadata?.avatar_url || null,
-          credits:                 6,
-          total_credits_purchased: 0,
-          created_at:              new Date().toISOString(),
-        })
+        .insert(buildProfileInsertRow({
+          userId,
+          displayName,
+          avatarUrl: authUser.user_metadata?.avatar_url || null,
+        }))
         .select()
         .single();
       if (!createErr && created) {
@@ -3824,7 +3828,7 @@ async function doMockPurchase(userId, packId, email) {
   const profilePK      = profile[profilePKCol];
   const currentCredits = profile.credits || 0;
   const newBalance     = currentCredits + pack.credits;
-  const resolvedEmail  = email || profile.email || userId;
+  const resolvedEmail  = email || await getAuthEmailByUserId(userId) || userId;
 
   // Update credits using whichever PK column was found (FATAL — must succeed)
   const { error: updateErr } = await supabaseAdmin
