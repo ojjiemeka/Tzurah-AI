@@ -1008,8 +1008,34 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 
 @media (max-width: 1024px) {
   main { max-width:none; width:100%; padding:16px; }
-  .stats-grid { grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+  #dev-banner { flex-wrap:wrap; padding:6px 12px; }
+  #dev-banner .x { margin-left:0; }
+  header { height:auto; min-height:54px; flex-wrap:nowrap; padding:8px 12px; }
+  .hdr-actions { margin-left:auto; flex:0 0 auto; }
+  .desktop-header-control { display:none !important; }
+  .mobile-menu-btn { display:inline-flex; }
+  .tab-bar {
+    overflow-x:auto; overflow-y:hidden;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+    overscroll-behavior-x:contain;
+    padding:0 12px;
+    gap:0;
+  }
+  .tab-bar::-webkit-scrollbar { display:none; }
+  .tab-btn { flex:0 0 auto; scroll-margin-inline:12px; }
+  .stats-grid { grid-template-columns:repeat(2, minmax(0,1fr)); }
+  .two-col { grid-template-columns:1fr; }
+  .panel-card { max-width:100%; }
   .system-status-grid { grid-template-columns:repeat(2, minmax(0, 1fr)) !important; }
+  .slide-over {
+    width:100vw !important;
+    max-width:100vw !important;
+    right:-100vw !important;
+    border-left:none;
+  }
+  .slide-over.open { right:0 !important; }
+  .slide-over-body { padding:14px; }
   .settings-row { align-items:flex-start; flex-wrap:wrap; }
   .settings-row-label-wrap { min-width:160px; }
   .settings-row-value { flex-basis:260px; }
@@ -1033,8 +1059,6 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
     width: auto; margin-left: 0; flex:0 0 auto;
     display: flex; flex-wrap: nowrap; gap: 6px; align-items: center;
   }
-  .desktop-header-control { display:none !important; }
-  .mobile-menu-btn { display:inline-flex; }
   .refresh-countdown { display: none; }
   #admin-name { font-size: 10px; }
 
@@ -1045,15 +1069,15 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   /* Main padding */
   main { padding: 10px; overflow-x:hidden; }
 
-  /* Stats grid: 2 cols */
-  .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }
+  /* Content grids become single-column in the phone/tablet portrait band */
+  .stats-grid { grid-template-columns: 1fr; gap: 10px; margin-bottom: 14px; }
   .stat-card .sval { font-size: 20px; }
 
   /* Two-col → single col */
   .two-col { grid-template-columns: 1fr; gap: 12px; }
 
-  /* Rev cards: 2 cols */
-  .rev-cards { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  /* Revenue cards stack with the rest of the content */
+  .rev-cards { grid-template-columns: 1fr; gap: 10px; }
 
   /* Filter row: full-width stacked on mobile */
   .filter-row {
@@ -2915,7 +2939,13 @@ document.addEventListener("keydown", e => {
   }
 });
 function switchTab(tab) {
-  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  let activeTabBtn = null;
+  document.querySelectorAll(".tab-btn").forEach(b => {
+    const active = b.dataset.tab === tab;
+    b.classList.toggle("active", active);
+    if (active) activeTabBtn = b;
+  });
+  activeTabBtn?.scrollIntoView?.({ behavior: "smooth", block: "nearest", inline: "center" });
   syncMobileDrawerActive(tab);
   document.querySelectorAll(".tab-panel").forEach(p => {
     const show = p.id === `tab-${tab}`;
