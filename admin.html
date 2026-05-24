@@ -2424,28 +2424,56 @@ function _dismissToast(t) {
 }
 
 // ── Modal system ──────────────────────────────────────────────────
+function bindModalKeyboard(ov, { cancelable = true } = {}) {
+  const onKey = (e) => {
+    if (!document.body.contains(ov)) {
+      document.removeEventListener("keydown", onKey);
+      return;
+    }
+    if (e.key === "Escape" && cancelable) {
+      e.preventDefault();
+      ov.querySelector(".modal-btn-cancel")?.click();
+    } else if (e.key === "Enter" && !e.shiftKey) {
+      if (e.target?.tagName === "TEXTAREA") return;
+      e.preventDefault();
+      ov.querySelector(".modal-btn-confirm")?.click();
+    }
+  };
+  document.addEventListener("keydown", onKey);
+  ov.addEventListener("modal:closed", () => document.removeEventListener("keydown", onKey), { once: true });
+}
+
+function closeModalOverlay(ov) {
+  if (!ov) return;
+  ov.dispatchEvent(new CustomEvent("modal:closed"));
+  ov.remove();
+}
+
 function showModal(htmlOrOpts, opts = {}) {
   // Object API: showModal({ title, body, onConfirm, confirmLabel, confirmClass })
   if (typeof htmlOrOpts !== "string") {
-    const { title, body, onConfirm, confirmLabel = "Confirm", confirmClass = "" } = htmlOrOpts;
+    const { title, body, onConfirm, onCancel, confirmLabel = "Confirm", confirmClass = "", cancelLabel = "Cancel", cancelable = true } = htmlOrOpts;
     const ov = document.createElement("div");
     ov.className = "admin-modal-overlay";
+    ov.setAttribute("role", "dialog");
+    ov.setAttribute("aria-modal", "true");
     ov.innerHTML = `
       <div class="admin-modal-card" style="max-width:520px;width:100%">
         <div class="modal-header">${title || ""}</div>
         <div class="modal-body">${body || ""}</div>
         <div class="modal-footer">
-          <button class="modal-btn-cancel">Cancel</button>
+          ${cancelable ? `<button class="modal-btn-cancel">${esc(cancelLabel)}</button>` : ""}
           <button class="modal-btn-confirm ${confirmClass}">${confirmLabel}</button>
         </div>
       </div>`;
     document.body.appendChild(ov);
-    ov.querySelector(".modal-btn-cancel").addEventListener("click", () => ov.remove());
-    ov.addEventListener("click", e => { if (e.target === ov) ov.remove(); });
+    ov.querySelector(".modal-btn-cancel")?.addEventListener("click", () => { onCancel?.(); closeModalOverlay(ov); });
+    ov.addEventListener("click", e => { if (e.target === ov && cancelable) { onCancel?.(); closeModalOverlay(ov); } });
     ov.querySelector(".modal-btn-confirm").addEventListener("click", async () => {
       const result = await onConfirm?.();
-      if (result !== false) ov.remove();
+      if (result !== false) closeModalOverlay(ov);
     });
+    bindModalKeyboard(ov, { cancelable });
     setTimeout(() => ov.querySelector("input,textarea,select")?.focus(), 80);
     return ov;
   }
@@ -2453,11 +2481,13 @@ function showModal(htmlOrOpts, opts = {}) {
   // String API: showModal(htmlString, opts)
   const ov = document.createElement("div");
   ov.className = "admin-modal-overlay";
+  ov.setAttribute("role", "dialog");
+  ov.setAttribute("aria-modal", "true");
   ov.innerHTML = `<div class="admin-modal-card">${htmlOrOpts}</div>`;
   document.body.appendChild(ov);
 
-  ov.querySelector(".modal-btn-cancel")?.addEventListener("click", () => { ov.remove(); opts.onCancel?.(); });
-  ov.addEventListener("click", e => { if (e.target===ov) ov.remove(); });
+  ov.querySelector(".modal-btn-cancel")?.addEventListener("click", () => { opts.onCancel?.(); closeModalOverlay(ov); });
+  ov.addEventListener("click", e => { if (e.target===ov) { opts.onCancel?.(); closeModalOverlay(ov); } });
 
   const confirmBtn = ov.querySelector(".modal-btn-confirm");
   if (confirmBtn) {
@@ -2466,25 +2496,71 @@ function showModal(htmlOrOpts, opts = {}) {
         const amount = parseInt(ov.querySelector("#m-amount").value, 10);
         const reason = ov.querySelector("#m-reason")?.value || "";
         if (!amount||amount<1) { toast("Enter a valid amount","error"); return; }
-        ov.remove(); opts.onSuccess?.(amount, reason);
+        closeModalOverlay(ov); opts.onSuccess?.(amount, reason);
       } else if (opts.type === "deduct") {
         const amount = parseInt(ov.querySelector("#m-amount").value, 10);
         const reason = ov.querySelector("#m-reason")?.value || "";
         if (!amount||amount<1) { toast("Enter a valid amount","error"); return; }
-        ov.remove(); opts.onSuccess?.(amount, reason);
+        closeModalOverlay(ov); opts.onSuccess?.(amount, reason);
       } else if (opts.type === "input") {
         const val = ov.querySelector(".modal-input")?.value;
-        ov.remove(); opts.onSubmit?.(val);
+        closeModalOverlay(ov); opts.onSubmit?.(val);
       } else {
-        ov.remove(); opts.onConfirm?.();
+        closeModalOverlay(ov); opts.onConfirm?.();
       }
     });
   }
+  bindModalKeyboard(ov, { cancelable: opts.cancelable !== false });
   setTimeout(() => ov.querySelector("input")?.focus(), 80);
 }
 
+function showModalAlert(message, options = {}) {
+  return new Promise((resolve) => {
+    showModal({
+      title: options.title || "Notice",
+      body: `<p>${esc(message)}</p>`,
+      confirmLabel: options.confirmLabel || "OK",
+      confirmClass: options.variant === "danger" ? "btn-red" : options.confirmClass || "",
+      cancelable: options.cancelable !== false,
+      onConfirm: () => resolve(true),
+      onCancel: () => resolve(false),
+    });
+  });
+}
+
+function showModalConfirm(message, options = {}) {
+  return new Promise((resolve) => {
+    showModal({
+      title: options.title || "Confirm",
+      body: `<p>${options.html ? message : esc(message)}</p>`,
+      confirmLabel: options.confirmLabel || "Confirm",
+      confirmClass: options.variant === "danger" ? "btn-red" : options.confirmClass || "",
+      cancelLabel: options.cancelLabel || "Cancel",
+      onConfirm: () => resolve(true),
+      onCancel: () => resolve(false),
+    });
+  });
+}
+
+function showModalPrompt(message, options = {}) {
+  return new Promise((resolve) => {
+    const inputId = `modal-prompt-${Date.now()}`;
+    showModal({
+      title: options.title || "Input",
+      body: `
+        <p style="margin-bottom:10px">${esc(message)}</p>
+        <input id="${inputId}" class="modal-input" type="text" value="${esc(options.defaultValue || "")}">
+      `,
+      confirmLabel: options.confirmLabel || "Continue",
+      cancelLabel: options.cancelLabel || "Cancel",
+      onConfirm: () => resolve(document.getElementById(inputId)?.value || ""),
+      onCancel: () => resolve(null),
+    });
+  });
+}
+
 const Modal = {
-  confirm(title, msg, onConfirm, onCancel) {
+  confirmAction(title, msg, onConfirm, onCancel) {
     showModal(`
       <div class="modal-header">${title}</div>
       <div class="modal-body">${msg}</div>
@@ -2966,9 +3042,17 @@ function renderReconEvents(events) {
 
 async function resolveReconEvent(id) {
   if (!id) return;
-  const note = prompt("Resolution note (optional):", "manual_admin_resolution");
+  const note = await showModalPrompt("Resolution note (optional):", {
+    title: "Resolve Reconciliation Event",
+    defaultValue: "manual_admin_resolution",
+    confirmLabel: "Continue",
+  });
   if (note === null) return;
-  if (!confirm("Mark this reconciliation event as resolved?")) return;
+  const confirmed = await showModalConfirm("Mark this reconciliation event as resolved?", {
+    title: "Mark Resolved",
+    confirmLabel: "Mark Resolved",
+  });
+  if (!confirmed) return;
   try {
     const res = await adminFetch(`/admin/api/reconciliation/${encodeURIComponent(id)}/resolve`, {
       method: "POST",
@@ -3945,7 +4029,7 @@ function renderAlertHistory() {
     </div>`).join("");
 }
 function clearAlertHistory() {
-  Modal.confirm("Clear History","Clear all alert history?", ()=>{
+  Modal.confirmAction("Clear History","Clear all alert history?", ()=>{
     localStorage.removeItem("tzurah_alert_hist");
     renderAlertHistory();
     toast("Alert history cleared");
@@ -4546,7 +4630,7 @@ async function sendEmail() {
   if (!subject || !body) { toast("Subject and body required", "error"); return; }
   if (!recipients.length) { toast("No recipients in selected group", "error"); return; }
 
-  Modal.confirm(
+  Modal.confirmAction(
     "Send Email",
     `Send "${esc(subject)}" to <strong>${recipients.length}</strong> recipient(s)?`,
     async () => {
@@ -5250,8 +5334,8 @@ function setManualTest(id, state) {
   renderManualChecklist();
 }
 
-function resetManualTests() {
-  if (!confirm("Reset all manual test results?")) return;
+async function resetManualTests() {
+  if (!await showModalConfirm("Reset all manual test results?", { title: "Reset Tests", confirmLabel: "Reset", variant: "danger" })) return;
   localStorage.removeItem("manual-test-state");
   renderManualChecklist();
 }
@@ -5416,7 +5500,7 @@ async function loadDbStats() {
 }
 
 async function executeDbAction(action, label) {
-  Modal.confirm(
+  Modal.confirmAction(
     label,
     `Are you sure you want to <strong>${esc(label.toLowerCase())}</strong>?<br>This cannot be undone.`,
     async () => {
@@ -5575,7 +5659,7 @@ async function savePricingConfig() {
 }
 
 function confirmRestartServer() {
-  Modal.confirm(
+  Modal.confirmAction(
     "Restart Server",
     "Restart the server process? PM2 will bring it back online in ~5 seconds. You will be redirected automatically.",
     async () => {
@@ -6029,7 +6113,7 @@ function updateAnnPreview() {
 }
 
 async function deleteAnnouncement(id) {
-  if (!confirm('Delete this announcement?')) return;
+  if (!await showModalConfirm("Delete this announcement?", { title: "Delete Announcement", confirmLabel: "Delete", variant: "danger" })) return;
   const res = await adminFetch(`/admin/api/announcements/${id}`, { method: 'DELETE' });
   if (res?.ok) { toast('Announcement deleted ✓', 'success'); loadAnnouncements(); }
 }
