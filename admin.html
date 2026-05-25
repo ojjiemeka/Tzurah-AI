@@ -1750,6 +1750,17 @@ kbd {
           <div id="health-interpretation-message" style="font-size:12px;color:var(--text2);margin-top:6px">Loading health signal...</div>
           <div id="health-interpretation-guidance" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
         </div>
+        <div class="trend-card" id="billing-precision-card">
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Billing Precision Health</div>
+          <div id="billing-precision-state" class="health-title" style="font-size:18px">--</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
+            <div class="billing-state-item"><div class="billing-state-label">Version</div><div class="billing-state-value" id="billing-calc-version">--</div></div>
+            <div class="billing-state-item"><div class="billing-state-label">Avg Drift</div><div class="billing-state-value" id="billing-avg-drift">--</div></div>
+            <div class="billing-state-item"><div class="billing-state-label">Max Drift</div><div class="billing-state-value" id="billing-max-drift">--</div></div>
+            <div class="billing-state-item"><div class="billing-state-label">Strategy</div><div class="billing-state-value" id="billing-rounding-strategy">--</div></div>
+          </div>
+          <div class="top-anomaly-list" id="billing-drift-source-list"></div>
+        </div>
         <div class="billing-mode-card">
           <div style="display:flex;align-items:center;gap:8px">
             <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px">Protected Billing Framework</div>
@@ -3969,6 +3980,31 @@ function renderHealthInterpretation(health) {
   if (guidance) guidance.textContent = health?.guidance || "";
 }
 
+function renderBillingPrecision(analytics) {
+  const drift = analytics?.drift || {};
+  const state = String(drift.precision_health || "unknown").toLowerCase();
+  const stateEl = document.getElementById("billing-precision-state");
+  const versionEl = document.getElementById("billing-calc-version");
+  const avgEl = document.getElementById("billing-avg-drift");
+  const maxEl = document.getElementById("billing-max-drift");
+  const strategyEl = document.getElementById("billing-rounding-strategy");
+  const sourceEl = document.getElementById("billing-drift-source-list");
+  if (stateEl) {
+    stateEl.className = `health-title ${state === "healthy" ? "healthy" : state === "dangerous" ? "dangerous" : "degraded"}`;
+    stateEl.textContent = state === "healthy" ? "HEALTHY" : state === "dangerous" ? "DANGEROUS" : "INVESTIGATE";
+  }
+  if (versionEl) versionEl.textContent = drift.calculation_version || "--";
+  if (avgEl) avgEl.textContent = fmtN(drift.average_abs_drift || 0);
+  if (maxEl) maxEl.textContent = fmtN(drift.max_abs_drift || 0);
+  if (strategyEl) strategyEl.textContent = drift.rounding_strategy || "--";
+  const rows = drift.source_breakdown || [];
+  if (sourceEl) {
+    sourceEl.innerHTML = rows.length
+      ? rows.slice(0, 4).map(row => `<div class="top-anomaly-row"><span>${esc(row.source)}</span><strong>avg ${fmtN(row.average_abs_drift || 0)} / max ${fmtN(row.max_abs_drift || 0)}</strong></div>`).join("")
+      : `<div class="top-anomaly-row"><span>No drift sources in window</span><strong>0</strong></div>`;
+  }
+}
+
 function openIntegrityBreakdown() {
   const integrity = window._reconAnalytics?.integrity || {};
   const analytics = window._reconAnalytics?.analytics || {};
@@ -4476,6 +4512,7 @@ async function loadReconciliationAnalytics() {
     window._reconAnalytics = analytics;
     window._reconTrends = trends;
     renderIntegrityScore(analytics?.integrity);
+    renderBillingPrecision(analytics?.analytics);
     renderTrendBars(trends?.trends);
     renderTopAnomalies(trends?.trends);
     renderBillingCutoverStatus(cutover);
@@ -4495,6 +4532,13 @@ function analyticsExportRows() {
   for (const [category, count] of Object.entries(analytics.counts_by_category || {})) rows.push({ section: "category", metric: category, value: count });
   for (const group of analytics.grouped_anomalies || []) rows.push({ section: "grouped_anomaly", metric: group.type, value: JSON.stringify({ count: group.count, category: group.category, expectation: group.expectation, avg_drift: group.avg_drift, max_drift: group.max_drift }) });
   for (const [scenario, stat] of Object.entries(analytics.scenario_stats || {})) rows.push({ section: "soak_scenario", metric: scenario, value: JSON.stringify(stat) });
+  const drift = analytics.drift || {};
+  rows.push({ section: "billing_precision", metric: "calculation_version", value: drift.calculation_version || "" });
+  rows.push({ section: "billing_precision", metric: "rounding_strategy", value: drift.rounding_strategy || "" });
+  rows.push({ section: "billing_precision", metric: "average_abs_drift", value: drift.average_abs_drift ?? "" });
+  rows.push({ section: "billing_precision", metric: "max_abs_drift", value: drift.max_abs_drift ?? "" });
+  rows.push({ section: "billing_precision", metric: "drift_classifications", value: JSON.stringify(drift.classifications || {}) });
+  for (const source of drift.source_breakdown || []) rows.push({ section: "billing_precision_source", metric: source.source, value: JSON.stringify(source) });
   rows.push({ section: "integrity", metric: "score", value: window._reconAnalytics?.integrity?.score ?? "" });
   rows.push({ section: "integrity", metric: "label", value: window._reconAnalytics?.integrity?.label ?? "" });
   rows.push({ section: "health", metric: "interpretation", value: window._reconAnalytics?.integrity?.health?.message ?? "" });
@@ -4514,6 +4558,9 @@ function exportReconciliationAnalytics(format) {
       health_interpretation: window._reconAnalytics?.integrity?.health?.message || "",
       dangerous_anomaly_count: window._reconAnalytics?.analytics?.totals?.dangerous_events || 0,
       operational_anomaly_count: window._reconAnalytics?.analytics?.totals?.operational_events || 0,
+      canonical_calculation_version: window._reconAnalytics?.analytics?.drift?.calculation_version || "",
+      average_abs_drift: window._reconAnalytics?.analytics?.drift?.average_abs_drift ?? null,
+      max_abs_drift: window._reconAnalytics?.analytics?.drift?.max_abs_drift ?? null,
       billing_mode: window._billingCutoverStatus?.mode || "legacy_only",
       legacy_authoritative: window._billingCutoverStatus?.legacy_authoritative !== false,
     },

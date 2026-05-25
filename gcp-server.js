@@ -323,6 +323,9 @@ const BILLING_MAX_SYNC_CREDITS = BILLING_BURN_RATE * BILLING_MAX_SYNC_SECONDS;
 const BILLING_STALE_MS = 90 * 1000;
 const BILLING_ROUNDING_DRIFT_WARNING = 0.5;
 const BILLING_ROUNDING_DRIFT_SEVERE = 2.0;
+const BILLING_DRIFT_NEGLIGIBLE = 0.05;
+const BILLING_CALCULATION_VERSION = "canonical_v1";
+const BILLING_ROUNDING_STRATEGY = "duration-ms-to-seconds-3dp__credits-final-3dp";
 const BILLING_BALANCE_DRIFT_WARNING = 1.0;
 const BILLING_BALANCE_DRIFT_SEVERE = 5.0;
 const BILLING_MISSING_FINAL_MIN_SECONDS = 15;
@@ -340,6 +343,110 @@ function finiteNonNegativeNumber(value) {
 function clampBillingNumber(value, max) {
   if (!finiteNonNegativeNumber(value)) return null;
   return Math.min(value, max);
+}
+
+function normalizeBillingRounding(value, decimals = 3) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  const factor = 10 ** decimals;
+  return Math.round(n * factor) / factor;
+}
+
+function normalizeBillingDuration({ durationSecs = null, durationMs = null, sessionStart = null, sessionEnd = null } = {}) {
+  let rawDurationMs = durationMs === null || durationMs === undefined ? NaN : Number(durationMs);
+  if (!Number.isFinite(rawDurationMs)) {
+    const start = sessionStart ? new Date(sessionStart).getTime() : NaN;
+    const end = sessionEnd ? new Date(sessionEnd).getTime() : NaN;
+    if (Number.isFinite(start) && Number.isFinite(end)) {
+      rawDurationMs = end - start;
+    }
+  }
+  if (!Number.isFinite(rawDurationMs)) {
+    const secs = Number(durationSecs);
+    if (Number.isFinite(secs)) rawDurationMs = secs * 1000;
+  }
+  if (!Number.isFinite(rawDurationMs) || rawDurationMs < 0) return null;
+  const cappedMs = Math.min(rawDurationMs, BILLING_MAX_SYNC_SECONDS * 1000);
+  const normalizedDurationSecs = normalizeBillingRounding(cappedMs / 1000, 3);
+  return {
+    raw_duration_ms: normalizeBillingRounding(rawDurationMs, 0),
+    normalized_duration_secs: normalizedDurationSecs,
+    billable_seconds: normalizedDurationSecs,
+    duration_capped: rawDurationMs !== cappedMs,
+  };
+}
+
+function calculateRequestedCredits({ billableSeconds, billingRate = BILLING_BURN_RATE } = {}) {
+  const safeSeconds = clampBillingNumber(Number(billableSeconds), BILLING_MAX_SYNC_SECONDS);
+  const safeRate = Number(billingRate);
+  if (safeSeconds === null || !Number.isFinite(safeRate) || safeRate < 0) return null;
+  const exact = Math.min(safeSeconds * safeRate, BILLING_MAX_SYNC_CREDITS);
+  return {
+    exact_requested_credits: normalizeBillingRounding(exact, 6),
+    rounded_requested_credits: normalizeBillingRounding(exact, 3),
+  };
+}
+
+function classifyBillingDrift(absDrift) {
+  const drift = Math.abs(Number(absDrift) || 0);
+  if (drift < BILLING_DRIFT_NEGLIGIBLE) return "negligible_drift";
+  if (drift < BILLING_ROUNDING_DRIFT_WARNING) return "expected_rounding";
+  if (drift < BILLING_ROUNDING_DRIFT_SEVERE) return "investigate";
+  return "dangerous";
+}
+
+function calculateCanonicalBilling({
+  sessionStart = null,
+  sessionEnd = null,
+  durationSecs = null,
+  durationMs = null,
+  requestedCredits = null,
+  billingRate = BILLING_BURN_RATE,
+  source = "billing",
+} = {}) {
+  const duration = normalizeBillingDuration({ durationSecs, durationMs, sessionStart, sessionEnd });
+  if (!duration) return null;
+  const credits = calculateRequestedCredits({ billableSeconds: duration.billable_seconds, billingRate });
+  if (!credits) return null;
+  const requested = requestedCredits === null || requestedCredits === undefined
+    ? null
+    : safeBillingNumber(requestedCredits);
+  const comparableRequested = requested === null
+    ? credits.rounded_requested_credits
+    : Math.min(requested, BILLING_MAX_SYNC_CREDITS);
+  const drift = normalizeBillingRounding(comparableRequested - credits.rounded_requested_credits, 3);
+  const absDrift = Math.abs(drift || 0);
+  return {
+    calculation_version: BILLING_CALCULATION_VERSION,
+    rounding_strategy: BILLING_ROUNDING_STRATEGY,
+    source,
+    raw_duration_ms: duration.raw_duration_ms,
+    normalized_duration_secs: duration.normalized_duration_secs,
+    billable_seconds: duration.billable_seconds,
+    requested_input_credits: requested,
+    exact_requested_credits: credits.exact_requested_credits,
+    rounded_requested_credits: credits.rounded_requested_credits,
+    drift_amount: drift,
+    abs_drift: absDrift,
+    drift_classification: classifyBillingDrift(absDrift),
+    duration_capped: duration.duration_capped,
+    credits_capped: requested !== null && requested > BILLING_MAX_SYNC_CREDITS,
+  };
+}
+
+function buildBillingCalculationSnapshot(calc) {
+  if (!calc) return null;
+  return {
+    calculation_version: calc.calculation_version,
+    normalized_duration_secs: calc.normalized_duration_secs,
+    raw_duration_ms: calc.raw_duration_ms,
+    exact_requested_credits: calc.exact_requested_credits,
+    rounded_requested_credits: calc.rounded_requested_credits,
+    rounding_strategy: calc.rounding_strategy,
+    drift_amount: calc.drift_amount,
+    drift_classification: calc.drift_classification,
+    source: calc.source,
+  };
 }
 
 function makeLegacyBillingSyncId(source) {
@@ -434,9 +541,7 @@ function safeBillingNumber(value) {
 }
 
 function calculateExpectedCredits(durationSecs) {
-  const safeDuration = clampBillingNumber(Number(durationSecs), BILLING_MAX_SYNC_SECONDS);
-  if (safeDuration === null) return null;
-  return Math.round(Math.min(safeDuration * BILLING_BURN_RATE, BILLING_MAX_SYNC_CREDITS) * 1000) / 1000;
+  return calculateCanonicalBilling({ durationSecs, source: "expected_credits" })?.rounded_requested_credits ?? null;
 }
 
 async function wasRecentReconciliationLogged(type, sessionId, sinceMs = 30 * 60 * 1000) {
@@ -543,8 +648,9 @@ async function detectDuplicateSyncId({ userId, sessionId, syncId, source }) {
 
 async function detectBillingDrift({ userId, sessionId, syncId, source, durationSecs, creditsRequested, creditsExpected }) {
   const requested = safeBillingNumber(creditsRequested);
-  const expected = creditsExpected ?? calculateExpectedCredits(durationSecs);
-  if (requested === null || expected === null) {
+  const calc = calculateCanonicalBilling({ durationSecs, requestedCredits: creditsRequested, source: source || "billing_drift" });
+  const expected = creditsExpected ?? calc?.rounded_requested_credits ?? null;
+  if (requested === null || expected === null || !calc) {
     await logBillingReconciliationEvent({
       userId,
       sessionId,
@@ -556,24 +662,35 @@ async function detectBillingDrift({ userId, sessionId, syncId, source, durationS
   }
   const drift = Math.round((requested - expected) * 1000) / 1000;
   const absDrift = Math.abs(drift);
+  const driftClassification = classifyBillingDrift(absDrift);
+  const details = {
+    sync_id: syncId || null,
+    source,
+    requested,
+    expected,
+    drift,
+    duration_secs: calc.normalized_duration_secs,
+    drift_classification: driftClassification,
+    calculation: buildBillingCalculationSnapshot(calc),
+  };
   if (absDrift >= BILLING_ROUNDING_DRIFT_SEVERE) {
     await logBillingReconciliationEvent({
       userId,
       sessionId,
       type: "billing_rounding_drift_severe",
       severity: "high",
-      details: { sync_id: syncId || null, source, requested, expected, drift, duration_secs: durationSecs },
+      details,
     });
-  } else if (absDrift >= BILLING_ROUNDING_DRIFT_WARNING) {
+  } else if (driftClassification === "investigate") {
     await logBillingReconciliationEvent({
       userId,
       sessionId,
       type: "billing_rounding_drift_warning",
       severity: "warning",
-      details: { sync_id: syncId || null, source, requested, expected, drift, duration_secs: durationSecs },
+      details,
     });
   }
-  return { expected, drift, absDrift };
+  return { expected, drift, absDrift, driftClassification, calculation: calc };
 }
 
 async function detectDecartBillingMismatch({ userId, sessionId, source, durationSecs, creditsRequested }) {
@@ -1036,12 +1153,17 @@ async function recordBillingShadowSync({
   if (_billingShadowRpcAvailable === false) return null;
   if (!userId || !validateUUID(userId)) return null;
 
-  const safeDuration = clampBillingNumber(durationSecs, BILLING_MAX_SYNC_SECONDS);
-  const safeCredits = clampBillingNumber(creditsRequested, BILLING_MAX_SYNC_CREDITS);
-  if (safeDuration === null || safeCredits === null) {
+  const billingCalc = calculateCanonicalBilling({
+    durationSecs,
+    requestedCredits: creditsRequested,
+    source: source || "legacy",
+  });
+  if (!billingCalc || safeBillingNumber(creditsRequested) === null) {
     console.warn("[BILLING SHADOW] Invalid numeric input skipped:", { source, durationSecs, creditsRequested });
     return null;
   }
+  const safeDuration = billingCalc.normalized_duration_secs;
+  const safeCredits = billingCalc.rounded_requested_credits;
 
   const resolvedSessionId = sessionId || await resolveActiveBillingSessionId(userId);
   if (!resolvedSessionId) {
@@ -1081,6 +1203,7 @@ async function recordBillingShadowSync({
       duration_secs: safeDuration,
       credits_requested: safeCredits,
       credits_expected: data?.credits_expected,
+      calculation: buildBillingCalculationSnapshot(billingCalc),
       status: data?.status,
       duplicate: !!data?.duplicate,
     };
@@ -1246,7 +1369,18 @@ async function recordProtectedBillingLiveSync({
   mode,
 }) {
   const resolvedSyncId = syncId || makeLegacyBillingSyncId(source || "protected_live");
-  const legacyBalanceAfter = Math.max(0, Number(profileBefore?.credits || 0) - Number(creditsRequested || 0));
+  const billingCalc = calculateCanonicalBilling({
+    durationSecs,
+    requestedCredits: creditsRequested,
+    source: source || "protected_live",
+  });
+  if (!billingCalc || safeBillingNumber(creditsRequested) === null) {
+    await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: "invalid_canonical_billing_input" });
+    return { ok: false, fallback: true, reason: "invalid_canonical_billing_input", syncId: resolvedSyncId };
+  }
+  const canonicalDuration = billingCalc.normalized_duration_secs;
+  const canonicalCredits = billingCalc.rounded_requested_credits;
+  const legacyBalanceAfter = Math.max(0, Number(profileBefore?.credits || 0) - canonicalCredits);
 
   try {
     const { data, error } = await supabaseAdmin.rpc("protected_billing_sync", {
@@ -1254,8 +1388,8 @@ async function recordProtectedBillingLiveSync({
       p_session_id: sessionId,
       p_sync_id: resolvedSyncId,
       p_sync_sequence: Number.isInteger(Number(syncSequence)) ? Number(syncSequence) : null,
-      p_duration_secs: durationSecs,
-      p_credits_requested: creditsRequested,
+      p_duration_secs: canonicalDuration,
+      p_credits_requested: canonicalCredits,
       p_client_ts: clientTs || null,
       p_shadow_only: false,
       p_source: source || "protected_live",
@@ -1297,7 +1431,7 @@ async function recordProtectedBillingLiveSync({
       await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: "invalid_protected_balance_after" });
       return { ok: false, fallback: true, reason: "invalid_protected_balance_after", syncId: resolvedSyncId };
     }
-    if (Number(creditsRequested || 0) > 0 && protectedDeducted <= 0) {
+    if (canonicalCredits > 0 && protectedDeducted <= 0) {
       await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: "missing_protected_deduction" });
       return { ok: false, fallback: true, reason: "missing_protected_deduction", syncId: resolvedSyncId };
     }
@@ -1328,7 +1462,7 @@ async function recordProtectedBillingLiveSync({
       sessionId,
       syncId: resolvedSyncId,
       source,
-      legacyRequested: creditsRequested,
+      legacyRequested: canonicalCredits,
       protectedDeducted,
       balanceBefore: syncRow.balance_before ?? profileBefore?.credits ?? 0,
       legacyBalanceAfter,
@@ -1342,6 +1476,7 @@ async function recordProtectedBillingLiveSync({
       syncId: resolvedSyncId,
       creditsRemaining: protectedBalanceAfter,
       creditsDeducted: protectedDeducted,
+      calculation: buildBillingCalculationSnapshot(billingCalc),
       status: syncRow.status,
     };
   } catch (err) {
@@ -1594,9 +1729,15 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
     });
     return badBillingNumberResponse(res, "session_seconds", duration_secs ?? session_seconds);
   }
-  credits = Math.min(safeCredits, BILLING_MAX_SYNC_CREDITS);
-  session_seconds = Math.min(safeSeconds, BILLING_MAX_SYNC_SECONDS);
-  if (credits !== safeCredits || session_seconds !== safeSeconds) {
+  const billingCalc = calculateCanonicalBilling({
+    durationSecs: safeSeconds,
+    requestedCredits: safeCredits,
+    source: source || "credits_deduct",
+  });
+  if (!billingCalc) return badBillingNumberResponse(res, "session_seconds", duration_secs ?? session_seconds);
+  credits = billingCalc.rounded_requested_credits;
+  session_seconds = billingCalc.normalized_duration_secs;
+  if (billingCalc.credits_capped || billingCalc.duration_capped) {
     await logBillingReconciliationEvent({
       userId: req.userId,
       sessionId: session_id || null,
@@ -1609,6 +1750,7 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
         requested_seconds: safeSeconds,
         capped_credits: credits,
         capped_seconds: session_seconds,
+        calculation: buildBillingCalculationSnapshot(billingCalc),
       },
     });
   }
@@ -1700,11 +1842,11 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
         });
       }
       await recordUsageAndSessionSync({
-        userId: req.userId,
-        sessionId: session_id || null,
-        sessionSeconds: session_seconds,
-        credits,
-      });
+      userId: req.userId,
+      sessionId: session_id || null,
+      sessionSeconds: session_seconds,
+      credits,
+    });
       console.log("[DEDUCT] protected live success - new balance:", protectedResult.creditsRemaining);
       return res.json({
         ok: true,
@@ -1712,6 +1854,7 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
         protected_billing: true,
         credits_remaining: protectedResult.creditsRemaining,
         credits_deducted: protectedResult.creditsDeducted,
+        billing_calculation: buildBillingCalculationSnapshot(billingCalc),
       });
     }
     console.warn("[DEDUCT] Protected billing fallback to legacy:", protectedResult.reason);
@@ -1782,6 +1925,7 @@ app.post("/credits/deduct", requireAuth, async (req, res) => {
     billing_mode: protectedAttempted ? "protected_fallback_legacy" : billingMode.mode,
     protected_billing: false,
     credits_remaining: newBalance,
+    billing_calculation: buildBillingCalculationSnapshot(billingCalc),
   });
 });
 
@@ -1808,9 +1952,15 @@ app.post("/credits/sync", requireAuth, async (req, res) => {
       return res.status(400).json({ ok: false, error: "usage_logs contain invalid billing numbers" });
     }
 
-    const totalCredits = Math.min(safeCredits, BILLING_MAX_SYNC_CREDITS);
-    const totalSeconds = Math.min(safeSeconds, BILLING_MAX_SYNC_SECONDS);
-    if (totalCredits !== safeCredits || totalSeconds !== safeSeconds) {
+    const billingCalc = calculateCanonicalBilling({
+      durationSecs: safeSeconds,
+      requestedCredits: safeCredits,
+      source: source || "credits_sync",
+    });
+    if (!billingCalc) return res.status(400).json({ ok: false, error: "usage_logs contain invalid billing numbers" });
+    const totalCredits = billingCalc.rounded_requested_credits;
+    const totalSeconds = billingCalc.normalized_duration_secs;
+    if (billingCalc.credits_capped || billingCalc.duration_capped) {
       await logBillingReconciliationEvent({
         userId: req.userId,
         sessionId: session_id || null,
@@ -1823,6 +1973,7 @@ app.post("/credits/sync", requireAuth, async (req, res) => {
           requested_seconds: safeSeconds,
           capped_credits: totalCredits,
           capped_seconds: totalSeconds,
+          calculation: buildBillingCalculationSnapshot(billingCalc),
         },
       });
     }
@@ -1869,14 +2020,21 @@ app.post("/credits/sync", requireAuth, async (req, res) => {
       });
     }
 
-    const rows = usage_logs.map((log) => ({
-      user_id:         req.userId,
-      session_seconds: log.session_seconds,
-      credits_used:    log.credits_used,
-      started_at:      log.started_at ? new Date(log.started_at).toISOString() : null,
-      ended_at:        log.ended_at   ? new Date(log.ended_at).toISOString()   : null,
-      created_at:      new Date().toISOString(),
-    }));
+    const rows = usage_logs.map((log) => {
+      const rowCalc = calculateCanonicalBilling({
+        durationSecs: Number(log.session_seconds || 0),
+        requestedCredits: Number(log.credits_used || 0),
+        source: source || "credits_sync_log",
+      });
+      return {
+        user_id:         req.userId,
+        session_seconds: rowCalc?.normalized_duration_secs ?? 0,
+        credits_used:    rowCalc?.rounded_requested_credits ?? 0,
+        started_at:      log.started_at ? new Date(log.started_at).toISOString() : null,
+        ended_at:        log.ended_at   ? new Date(log.ended_at).toISOString()   : null,
+        created_at:      new Date().toISOString(),
+      };
+    });
 
     const { data: profile } = await supabaseAdmin
       .from("profiles").select("credits,total_credits_used").eq("id", req.userId).maybeSingle();
@@ -1918,6 +2076,7 @@ app.post("/credits/sync", requireAuth, async (req, res) => {
             protected_billing: true,
             credits_remaining: protectedResult.creditsRemaining,
             credits_deducted: protectedResult.creditsDeducted || 0,
+            billing_calculation: buildBillingCalculationSnapshot(billingCalc),
           });
         }
         console.warn("[SYNC] Protected billing fallback to legacy:", protectedResult.reason);
@@ -3522,8 +3681,41 @@ function buildReconciliationAnalytics({ events = [], syncs = [] }) {
   const categoryCounts = countBy(realEvents, reconciliationEventCategory);
   const expectationCounts = countBy(realEvents, reconciliationExpectation);
   const groupedAnomalies = groupReconciliationEvents(realEvents);
-  const driftSyncs = syncs.filter(s => Math.abs(Number(s.credits_requested || 0) - Number(s.credits_expected || 0)) >= 0.5);
-  const severeDriftSyncs = syncs.filter(s => Math.abs(Number(s.credits_requested || 0) - Number(s.credits_expected || 0)) >= 2);
+  const syncDriftRows = syncs.map(sync => {
+    const requested = Number(sync.credits_requested || 0);
+    const expected = Number(sync.credits_expected || 0);
+    const absDrift = Math.abs(requested - expected);
+    return {
+      ...sync,
+      abs_drift: Number(absDrift.toFixed(3)),
+      drift_classification: classifyBillingDrift(absDrift),
+    };
+  });
+  const driftClassCounts = countBy(syncDriftRows, s => s.drift_classification);
+  const driftSyncs = syncDriftRows.filter(s => s.drift_classification === "investigate");
+  const severeDriftSyncs = syncDriftRows.filter(s => s.drift_classification === "dangerous");
+  const sourceDriftMap = {};
+  for (const sync of syncDriftRows) {
+    const source = sync.source || "unknown";
+    if (!sourceDriftMap[source]) sourceDriftMap[source] = { source, count: 0, total_abs_drift: 0, max_abs_drift: 0 };
+    sourceDriftMap[source].count += 1;
+    sourceDriftMap[source].total_abs_drift += sync.abs_drift;
+    sourceDriftMap[source].max_abs_drift = Math.max(sourceDriftMap[source].max_abs_drift, sync.abs_drift);
+  }
+  const sourceBreakdown = Object.values(sourceDriftMap)
+    .map(row => ({
+      ...row,
+      average_abs_drift: row.count ? Number((row.total_abs_drift / row.count).toFixed(3)) : 0,
+      max_abs_drift: Number(row.max_abs_drift.toFixed(3)),
+    }))
+    .sort((a, b) => b.max_abs_drift - a.max_abs_drift)
+    .slice(0, 10);
+  const avgAbsDrift = syncDriftRows.length
+    ? Number((syncDriftRows.reduce((sum, s) => sum + s.abs_drift, 0) / syncDriftRows.length).toFixed(3))
+    : 0;
+  const maxAbsDrift = syncDriftRows.length
+    ? Number(Math.max(...syncDriftRows.map(s => s.abs_drift)).toFixed(3))
+    : 0;
   const scenarioStats = {};
   for (const event of testEvents) {
     const scenario = event.details?.scenario || "unknown";
@@ -3560,9 +3752,19 @@ function buildReconciliationAnalytics({ events = [], syncs = [] }) {
     grouped_anomalies: groupedAnomalies.slice(0, 25),
     scenario_stats: scenarioStats,
     drift: {
-      average_abs_drift: syncs.length ? Number((syncs.reduce((sum, s) => sum + Math.abs(Number(s.credits_requested || 0) - Number(s.credits_expected || 0)), 0) / syncs.length).toFixed(3)) : 0,
+      calculation_version: BILLING_CALCULATION_VERSION,
+      rounding_strategy: BILLING_ROUNDING_STRATEGY,
+      average_abs_drift: avgAbsDrift,
+      max_abs_drift: maxAbsDrift,
       warning_count: driftSyncs.length,
       severe_count: severeDriftSyncs.length,
+      classifications: driftClassCounts,
+      source_breakdown: sourceBreakdown,
+      precision_health: severeDriftSyncs.length
+        ? "dangerous"
+        : driftSyncs.length
+          ? "investigate"
+          : "healthy",
     },
   };
 }
@@ -3618,8 +3820,40 @@ function buildReconciliationTrends({ events = [], syncs = [] }) {
     duplicate_sync_trend: countBy(realEvents.filter(e => e.type === "duplicate_sync_id_detected"), e => isoBucket(e.created_at, "day")),
     missing_final_trend: countBy(realEvents.filter(e => e.type === "missing_final_sync"), e => isoBucket(e.created_at, "day")),
     stale_session_trend: countBy(realEvents.filter(e => e.type === "stale_session_detected"), e => isoBucket(e.created_at, "day")),
-    drift_trend: countBy(syncs.filter(s => Math.abs(Number(s.credits_requested || 0) - Number(s.credits_expected || 0)) >= 0.5), s => isoBucket(s.created_at, "day")),
+    drift_trend: countBy(syncs.filter(s => classifyBillingDrift(Math.abs(Number(s.credits_requested || 0) - Number(s.credits_expected || 0))) === "investigate"), s => isoBucket(s.created_at, "day")),
+    severe_drift_trend: countBy(syncs.filter(s => classifyBillingDrift(Math.abs(Number(s.credits_requested || 0) - Number(s.credits_expected || 0))) === "dangerous"), s => isoBucket(s.created_at, "day")),
     soak_scenarios: countBy(events.filter(isTestModeEvent), e => e.details?.scenario || "unknown"),
+  };
+}
+
+function runBillingCalculationHarness() {
+  const base = new Date("2026-01-01T00:00:00.000Z").getTime();
+  const cases = [
+    { name: "1 sec session", durationSecs: 1 },
+    { name: "2 sec session", durationSecs: 2 },
+    { name: "interval edge boundary", durationMs: 1999 },
+    { name: "manual stop odd milliseconds", sessionStart: new Date(base).toISOString(), sessionEnd: new Date(base + 37234).toISOString() },
+    { name: "stop start loop segment", durationSecs: 12.345 },
+    { name: "replay attempt", durationSecs: 10, requestedCredits: 21.8 },
+    { name: "stale recovery", durationSecs: 91.4 },
+    { name: "shutdown recovery", durationMs: 45678 },
+    { name: "protected compare", durationSecs: 7.25, requestedCredits: 15.805 },
+    { name: "legacy compare", durationSecs: 7.25, requestedCredits: 15.805 },
+  ];
+  const results = cases.map(testCase => {
+    const calc = calculateCanonicalBilling({ ...testCase, source: testCase.name });
+    const repeat = calculateCanonicalBilling({ ...testCase, source: testCase.name });
+    return {
+      name: testCase.name,
+      ok: !!calc && JSON.stringify(buildBillingCalculationSnapshot(calc)) === JSON.stringify(buildBillingCalculationSnapshot(repeat)),
+      calculation: buildBillingCalculationSnapshot(calc),
+    };
+  });
+  return {
+    ok: results.every(row => row.ok),
+    calculation_version: BILLING_CALCULATION_VERSION,
+    rounding_strategy: BILLING_ROUNDING_STRATEGY,
+    cases: results,
   };
 }
 
@@ -3841,6 +4075,15 @@ app.get("/admin/api/reconciliation/integrity-score", adminAuth, async (req, res)
   } catch (err) {
     console.warn("[INTEGRITY SCORE] Error:", err.message);
     return res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/admin/api/reconciliation/billing-calculation-test", adminAuth, async (_req, res) => {
+  try {
+    return res.json(runBillingCalculationHarness());
+  } catch (err) {
+    console.warn("[BILLING CALC TEST] Error:", err.message);
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -4069,10 +4312,15 @@ function buildSoakBillingRows({ userId, scenario, sessionCount, adminEmail, bala
     let sequence = 0;
     for (const step of plan) {
       sequence += 1;
-      const safeDuration = Math.min(Math.max(Number(step.duration) || 0, 0), BILLING_MAX_SYNC_SECONDS);
-      const expected = calculateExpectedCredits(safeDuration) || 0;
-      const requested = scenario === "invalid_numeric_input" ? 0 : Math.ceil(expected);
       const source = `soak_test_${step.source || scenario}`;
+      const billingCalc = calculateCanonicalBilling({
+        durationSecs: Number(step.duration) || 0,
+        requestedCredits: scenario === "invalid_numeric_input" ? 0 : null,
+        source,
+      });
+      const safeDuration = billingCalc?.normalized_duration_secs ?? 0;
+      const expected = billingCalc?.rounded_requested_credits ?? 0;
+      const requested = scenario === "invalid_numeric_input" ? 0 : expected;
       rows.push({
         user_id: userId,
         session_id: sessionId,
@@ -6211,6 +6459,12 @@ const STARTUP_FLAGS = [
 // ── Session watchdog — force-ends stale sessions every 30 s ──────
 // A session is stale if it hasn't pinged in 45 seconds.
 // Accounts for all unbilled Decart time before closing.
+if (process.env.BILLING_CALC_HARNESS_ONLY === "1") {
+  const harness = runBillingCalculationHarness();
+  console.log(JSON.stringify(harness, null, 2));
+  process.exit(harness.ok ? 0 : 1);
+}
+
 setInterval(async () => {
   try {
     const cutoff = new Date(Date.now() - 45 * 1000).toISOString();
