@@ -586,16 +586,16 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   padding:7px 10px; border-radius:6px; margin-top:8px;
 }
 .user-picker-results {
-  margin-top:8px; max-height:190px; overflow-y:auto;
+  margin-top:6px; max-height:132px; overflow-y:auto;
   border:1px solid var(--border); border-radius:8px; background:var(--bg);
 }
 .user-picker-option {
   width:100%; display:block; text-align:left; background:none; border:0;
-  border-bottom:1px solid var(--border); padding:9px 10px;
+  border-bottom:1px solid var(--border); padding:7px 9px;
   color:var(--text); cursor:pointer;
 }
 .user-picker-option:hover,
-.user-picker-option.selected { background:var(--surface2); }
+.user-picker-option.selected { background:rgba(99,102,241,.16); }
 .user-picker-option:last-child { border-bottom:0; }
 .user-picker-main { display:flex; align-items:center; gap:8px; min-width:0; }
 .user-picker-email { font-size:12px; font-weight:700; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -603,6 +603,32 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 .user-picker-status { margin-left:auto; flex:0 0 auto; text-transform:capitalize; }
 .user-picker-selected { font-size:11px; color:var(--muted); margin-top:6px; }
 .user-picker-actions { display:flex; justify-content:flex-end; margin-top:6px; }
+.pb-control-section {
+  border:1px solid var(--border); background:var(--bg); border-radius:8px; padding:12px; margin-top:10px;
+}
+.pb-section-title { font-size:12px; font-weight:800; color:var(--text); margin-bottom:4px; }
+.pb-section-help { font-size:11px; color:var(--muted); margin-bottom:10px; }
+.pb-flag-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.pb-flag-card {
+  border:1px solid var(--border); background:var(--surface); border-radius:8px; padding:9px;
+  display:flex; gap:8px; align-items:flex-start;
+}
+.pb-flag-card.danger { border-color:rgba(239,68,68,.35); background:rgba(239,68,68,.06); }
+.pb-flag-card strong { display:block; font-size:12px; color:var(--text); }
+.pb-flag-card span { display:block; font-size:10px; color:var(--muted); margin-top:1px; line-height:1.35; }
+.pb-user-card {
+  border:1px solid var(--border); background:var(--surface); border-radius:8px; padding:10px;
+  display:flex; align-items:center; justify-content:space-between; gap:10px; margin-top:8px;
+}
+.pb-user-main { min-width:0; }
+.pb-user-email { font-size:12px; font-weight:800; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pb-user-meta { font-size:11px; color:var(--muted); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pb-allowlist { display:grid; gap:7px; margin-top:8px; }
+@media(max-width:640px) {
+  .pb-flag-grid { grid-template-columns:1fr; }
+  .pb-user-card { align-items:stretch; flex-direction:column; }
+  .pb-user-card .btn { width:100%; justify-content:center; }
+}
 .modal-footer {
   flex:0 0 auto; display:flex; gap:8px; justify-content:flex-end; margin:0;
   padding:12px 18px; background:#1a1a2e; border-top:1px solid var(--border); flex-wrap:wrap;
@@ -4070,13 +4096,14 @@ const UserPicker = {
     hint = "",
     advanced = false,
     advancedPlaceholder = "Auth/profile UUID",
+    showSelected = true,
   } = {}) {
     return `
       <div class="modal-field user-picker" id="${esc(id)}">
         <label>${esc(label)}</label>
         <input id="${esc(id)}-search" class="modal-input" placeholder="${esc(placeholder)}" autocomplete="off" oninput="UserPicker.debounce('${esc(id)}', this.value)">
         <input id="${esc(id)}-id" type="hidden">
-        <div id="${esc(id)}-selected" class="user-picker-selected">Select a user to continue.</div>
+        <div id="${esc(id)}-selected" class="user-picker-selected" style="${showSelected ? "" : "display:none"}">Select a user to continue.</div>
         <div id="${esc(id)}-results" class="user-picker-results">
           <div style="padding:10px;color:var(--muted);font-size:12px">Search to load users.</div>
         </div>
@@ -4295,6 +4322,84 @@ const UserPicker = {
   },
 };
 
+function protectedBillingAllowlistIds() {
+  return window._billingCutoverStatus?.allowlist || [];
+}
+
+function findCachedAdminUser(userId) {
+  if (!userId) return null;
+  const fromCache = (cache.users || []).find(u => (u.id || u.user_id) === userId);
+  if (fromCache) return UserPicker.normalizeUser(fromCache);
+  for (const picker of Object.values(UserPicker.state || {})) {
+    const match = (picker.users || []).find(u => u.id === userId);
+    if (match) return UserPicker.normalizeUser(match);
+  }
+  return null;
+}
+
+function protectedBillingUserCard(user, { action = "" } = {}) {
+  const safeUser = UserPicker.normalizeUser(user) || {};
+  const email = safeUser.email || "unknown";
+  const name = safeUser.display_name || "Unknown User";
+  const status = safeUser.status || "unknown";
+  const credits = fmtN(safeUser.credits || 0);
+  return `
+    <div class="pb-user-card">
+      <div class="pb-user-main">
+        <div class="pb-user-email">${esc(email)}</div>
+        <div class="pb-user-meta">${esc(name)} &middot; ${credits} credits &middot; ${esc(status)}</div>
+        <div class="pb-user-meta" style="font-size:10px">${esc(shortSessionId(safeUser.id || ""))}</div>
+      </div>
+      ${action}
+    </div>`;
+}
+
+async function hydrateProtectedBillingAllowlist() {
+  const wrap = document.getElementById("protected-billing-allowlist");
+  if (!wrap) return;
+  const ids = protectedBillingAllowlistIds();
+  if (!ids.length) {
+    wrap.innerHTML = `<div style="font-size:12px;color:var(--muted);padding:8px 0">No allowlisted test users yet.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = `<div style="font-size:12px;color:var(--muted)">Loading allowlisted users...</div>`;
+  const users = [];
+  for (const id of ids) {
+    let user = findCachedAdminUser(id);
+    if (!user) {
+      try {
+        const data = await api(`/admin/api/users/search?q=${encodeURIComponent(id)}`);
+        user = UserPicker.normalizeUser((data?.users || []).find(u => u.id === id) || data?.users?.[0] || { id });
+      } catch (_) {
+        user = { id, email: "unknown", display_name: "Unknown User", credits: 0, status: "unknown" };
+      }
+    }
+    users.push(user || { id, email: "unknown", display_name: "Unknown User", credits: 0, status: "unknown" });
+  }
+
+  wrap.innerHTML = users.map(user => protectedBillingUserCard(user, {
+    action: `<button class="btn btn-ghost btn-xs" onclick="removeProtectedBillingTestUser('${esc(user.id)}')">Remove</button>`,
+  })).join("");
+}
+
+function renderProtectedBillingSelected(user) {
+  const card = document.getElementById("protected-billing-selected-card");
+  const addBtn = document.getElementById("protected-billing-add-btn");
+  const normalized = UserPicker.normalizeUser(user);
+  if (!card || !addBtn) return;
+  if (!normalized) {
+    card.innerHTML = `<div style="font-size:12px;color:var(--muted);padding:8px 0">No test user selected.</div>`;
+    addBtn.disabled = true;
+    addBtn.textContent = "Add to allowlist";
+    return;
+  }
+  const already = protectedBillingAllowlistIds().includes(normalized.id);
+  card.innerHTML = protectedBillingUserCard(normalized);
+  addBtn.disabled = false;
+  addBtn.textContent = already ? "Already added" : "Add to allowlist";
+}
+
 function openAdvancedBillingControls() {
   if (window._adminRole !== "super_admin") return toast("Super admin required", "error");
   const status = window._billingCutoverStatus || {};
@@ -4308,32 +4413,56 @@ function openAdvancedBillingControls() {
     cancelable: false,
     body: `
       <p style="color:var(--text2);margin-bottom:12px">Framework only. Legacy billing remains authoritative until a later approved cutover.</p>
-      <div class="billing-mode-controls" style="display:grid">
-        <label><input type="checkbox" id="flag-shadow-compare" ${flags.protected_billing_shadow_compare ? "checked" : ""} onchange="updateProtectedBillingFlags()"> Shadow compare</label>
-        <label><input type="checkbox" id="flag-test-users" ${flags.enable_protected_billing_test_users ? "checked" : ""} onchange="updateProtectedBillingFlags()"> Enable test-user framework</label>
-        <label><input type="checkbox" id="flag-global-live" ${flags.enable_protected_billing_global ? "checked" : ""} onchange="updateProtectedBillingFlags()"> Global protected live (do not enable yet)</label>
-        <label><input type="checkbox" id="flag-force-legacy" ${flags.protected_billing_force_legacy ? "checked" : ""} onchange="updateProtectedBillingFlags()"> Force legacy billing</label>
+      <div class="pb-control-section">
+        <div class="pb-section-title">Billing Mode Flags</div>
+        <div class="pb-section-help">Safe defaults should keep global live billing off and rollback available.</div>
+        <div class="pb-flag-grid">
+          <label class="pb-flag-card"><input type="checkbox" id="flag-shadow-compare" ${flags.protected_billing_shadow_compare ? "checked" : ""} onchange="updateProtectedBillingFlags()"><span><strong>Shadow compare</strong><span>Compare protected math while legacy remains authoritative.</span></span></label>
+          <label class="pb-flag-card"><input type="checkbox" id="flag-test-users" ${flags.enable_protected_billing_test_users ? "checked" : ""} onchange="updateProtectedBillingFlags()"><span><strong>Test-user framework</strong><span>Allow only selected test users into protected billing mode.</span></span></label>
+          <label class="pb-flag-card danger"><input type="checkbox" id="flag-global-live" ${flags.enable_protected_billing_global ? "checked" : ""} onchange="updateProtectedBillingFlags()"><span><strong>Global protected live</strong><span>Dangerous. Keep off until approved cutover.</span></span></label>
+          <label class="pb-flag-card danger"><input type="checkbox" id="flag-force-legacy" ${flags.protected_billing_force_legacy ? "checked" : ""} onchange="updateProtectedBillingFlags()"><span><strong>Force legacy billing</strong><span>Emergency rollback state: ${esc(flags.protected_billing_force_legacy ? "active" : "inactive")}.</span></span></label>
+        </div>
+      </div>
+      <div class="pb-control-section">
+        <div class="pb-section-title">Protected Billing Test Users</div>
+        <div class="pb-section-help">Search by email or display name. UUID stays internal.</div>
         ${UserPicker.markup("protected-billing-user-picker", {
-          label: "Protected billing test user",
-          hint: "Select a user by email or display name. UUID is sent internally only.",
+          label: "Search/select user",
+          hint: "",
           advanced: true,
+          showSelected: false,
         })}
-        <div id="protected-billing-user-search-diagnostics" class="recon-status" style="display:block;color:var(--text2);border-color:var(--border);background:var(--surface)">
+        <div id="protected-billing-selected-card">
+          <div style="font-size:12px;color:var(--muted);padding:8px 0">No test user selected.</div>
+        </div>
+        <button id="protected-billing-add-btn" class="btn btn-accent btn-sm" style="width:100%;justify-content:center;margin-top:8px" onclick="addProtectedBillingSelectedUser()" disabled>Add to allowlist</button>
+        <div class="pb-section-title" style="margin-top:14px">Allowlisted test users</div>
+        <div id="protected-billing-allowlist" class="pb-allowlist">
+          <div style="font-size:12px;color:var(--muted);padding:8px 0">Loading allowlist...</div>
+        </div>
+      </div>
+      <details style="margin-top:10px">
+        <summary style="font-size:11px;color:var(--muted);cursor:pointer">Advanced diagnostics</summary>
+        <div id="protected-billing-user-search-diagnostics" class="recon-status" style="display:block;color:var(--text2);border-color:var(--border);background:var(--surface);margin-top:8px">
           <strong>User Search Diagnostics</strong>
           <div style="color:var(--muted);font-size:11px;margin-top:6px">Waiting for first search...</div>
         </div>
-        <div class="mini-field-row">
-          <button class="btn btn-ghost btn-xs" onclick="setProtectedBillingTestUser(true)">Enable</button>
-          <button class="btn btn-ghost btn-xs" onclick="setProtectedBillingTestUser(false)">Disable</button>
-        </div>
-        <div class="recon-status" style="display:block;color:var(--text2);border-color:var(--border);background:var(--surface)">Current rollback state: ${esc(flags.protected_billing_force_legacy ? "Force legacy is active" : "Force legacy is not active")}</div>
-        <button class="btn btn-red btn-sm" onclick="forceLegacyBilling()">Force Legacy Billing</button>
+      </details>
+      <div class="pb-control-section" style="border-color:rgba(239,68,68,.35)">
+        <div class="pb-section-title" style="color:#f87171">Rollback Control</div>
+        <div class="pb-section-help">Use only when protected billing must immediately fall back to legacy.</div>
+        <button class="btn btn-red btn-sm" style="width:100%;justify-content:center" onclick="forceLegacyBilling()">Force Legacy Billing</button>
       </div>
     `,
   });
   if (ov) setTimeout(() => UserPicker.mount("protected-billing-user-picker", {
     diagnosticsId: "protected-billing-user-search-diagnostics",
+    onSelect: renderProtectedBillingSelected,
   }), 50);
+  setTimeout(() => {
+    renderProtectedBillingSelected(null);
+    hydrateProtectedBillingAllowlist();
+  }, 80);
 }
 
 async function loadReconciliationAnalytics() {
@@ -4410,14 +4539,39 @@ async function updateProtectedBillingFlags() {
   }
 }
 
-async function setProtectedBillingTestUser(enabled) {
-  if (window._adminRole !== "super_admin") return toast("Super admin required", "error");
+async function addProtectedBillingSelectedUser() {
   const userId = UserPicker.getSelectedId("protected-billing-user-picker");
+  if (!isValidUuid(userId)) return toast("Select a valid user first.", "error");
+  if (protectedBillingAllowlistIds().includes(userId)) {
+    toast("Already added", "info");
+    renderProtectedBillingSelected(findCachedAdminUser(userId) || UserPicker.state["protected-billing-user-picker"]?.selected);
+    return;
+  }
+  await setProtectedBillingTestUser(true, userId);
+}
+
+async function removeProtectedBillingTestUser(userId) {
+  if (!isValidUuid(userId)) return;
+  const user = findCachedAdminUser(userId) || { id: userId, email: shortSessionId(userId), display_name: "Selected user" };
+  const confirmed = await showModalConfirm(`Remove ${user.email || shortSessionId(userId)} from the protected billing test-user allowlist?`, {
+    title: "Remove Test User",
+    confirmLabel: "Remove",
+    variant: "danger",
+  });
+  if (!confirmed) return;
+  await setProtectedBillingTestUser(false, userId);
+}
+
+async function setProtectedBillingTestUser(enabled, explicitUserId = "") {
+  if (window._adminRole !== "super_admin") return toast("Super admin required", "error");
+  const userId = explicitUserId || UserPicker.getSelectedId("protected-billing-user-picker");
   if (!isValidUuid(userId)) return toast("Select a valid user first.", "error");
   try {
     const data = await apiPost("/admin/api/billing-cutover/test-users", { user_id: userId, enabled });
     renderBillingCutoverStatus(data.status);
-    toast(enabled ? "Test user enabled" : "Test user disabled", "success");
+    toast(enabled ? "Added to allowlist" : "Removed from allowlist", "success");
+    renderProtectedBillingSelected(UserPicker.state["protected-billing-user-picker"]?.selected || findCachedAdminUser(userId));
+    hydrateProtectedBillingAllowlist();
   } catch (e) {
     toast("Test user update failed: " + e.message, "error");
   }
