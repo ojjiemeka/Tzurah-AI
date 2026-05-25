@@ -332,6 +332,7 @@ const BILLING_MISSING_FINAL_MIN_SECONDS = 15;
 const BILLING_FINAL_COVERAGE_GRACE_SECONDS = 5;
 const BILLING_ORPHAN_ACTIVE_MS = 5 * 60 * 1000;
 const BILLING_TINY_SYNC_SECONDS = 1;
+const BILLING_ACTIVE_CRITICAL_WINDOW_MS = 60 * 60 * 1000;
 let _billingShadowRpcAvailable = null;
 const _activityWarningCache = new Map();
 const _protectedBillingFailureTimes = [];
@@ -1291,10 +1292,38 @@ async function getBillingSyncRecord({ userId, sessionId, syncId }) {
     .limit(1)
     .maybeSingle();
   if (error) {
-    if (!isMissingBillingMigrationError(error)) console.warn("[PROTECTED BILLING] Sync row lookup error:", error.message);
+    if (isMissingBillingMigrationError(error)) {
+      const fallback = await supabaseAdmin
+        .from("billing_syncs")
+        .select("sync_id,status,reason,credits_requested,credits_expected,credits_deducted,balance_before,balance_after,shadow_only,created_at")
+        .eq("user_id", userId)
+        .eq("session_id", sessionId)
+        .eq("sync_id", syncId)
+        .limit(1)
+        .maybeSingle();
+      if (!fallback.error) return fallback.data || null;
+    } else {
+      console.warn("[PROTECTED BILLING] Sync row lookup error:", error.message);
+    }
     return null;
   }
   return data || null;
+}
+
+function protectedVerificationDelay(attempt) {
+  const baseMs = 100 + Math.max(0, attempt - 1) * 75;
+  const jitterMs = Math.floor(Math.random() * 75);
+  return new Promise(resolve => setTimeout(resolve, baseMs + jitterMs));
+}
+
+async function getBillingSyncRecordWithRetry({ userId, sessionId, syncId, attempts = 3 }) {
+  let row = null;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    row = await getBillingSyncRecord({ userId, sessionId, syncId });
+    if (row) return { row, attempts: attempt, recovered: attempt > 1 };
+    if (attempt < attempts) await protectedVerificationDelay(attempt);
+  }
+  return { row: null, attempts, recovered: false };
 }
 
 async function maybeForceLegacyAfterProtectedFailure(reason) {
@@ -1427,8 +1456,18 @@ async function recordProtectedBillingLiveSync({
     });
 
     if (error) {
-      await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: "rpc_error", error: error.message });
-      return { ok: false, fallback: true, reason: "rpc_error", syncId: resolvedSyncId };
+      const isTimeout = /timeout|timed out|etimedout/i.test(String(error.message || ""));
+      if (isTimeout) {
+        await logBillingReconciliationEvent({
+          userId,
+          sessionId,
+          type: "protected_rpc_timeout",
+          severity: "high",
+          details: { sync_id: resolvedSyncId, source, error: error.message },
+        });
+      }
+      await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: isTimeout ? "protected_rpc_timeout" : "rpc_error", error: error.message });
+      return { ok: false, fallback: true, reason: isTimeout ? "protected_rpc_timeout" : "rpc_error", syncId: resolvedSyncId };
     }
 
     if (data?.duplicate) {
@@ -1445,23 +1484,68 @@ async function recordProtectedBillingLiveSync({
       };
     }
 
-    const syncRow = await getBillingSyncRecord({ userId, sessionId, syncId: resolvedSyncId });
+    const verification = await getBillingSyncRecordWithRetry({ userId, sessionId, syncId: resolvedSyncId, attempts: 3 });
+    const syncRow = verification.row;
     if (!syncRow) {
-      await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: "missing_billing_sync_insert" });
-      return { ok: false, fallback: true, reason: "missing_billing_sync_insert", syncId: resolvedSyncId };
+      await logBillingReconciliationEvent({
+        userId,
+        sessionId,
+        type: "protected_verification_failed",
+        severity: "high",
+        details: { sync_id: resolvedSyncId, source, reason: "missing_billing_sync_insert", attempts: verification.attempts },
+      });
+      await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: "protected_verification_failed" });
+      return { ok: false, fallback: true, reason: "protected_verification_failed", syncId: resolvedSyncId };
+    }
+    if (verification.recovered) {
+      await logBillingReconciliationEvent({
+        userId,
+        sessionId,
+        type: "protected_verification_delayed",
+        severity: "info",
+        details: { sync_id: resolvedSyncId, source, attempts: verification.attempts },
+      });
+      await logBillingReconciliationEvent({
+        userId,
+        sessionId,
+        type: "protected_verification_recovered",
+        severity: "info",
+        details: { sync_id: resolvedSyncId, source, attempts: verification.attempts },
+      });
     }
 
     const protectedDeducted = Number(syncRow.credits_deducted ?? data?.credits_deducted ?? 0);
     const protectedBalanceAfter = Number(syncRow.balance_after ?? data?.balance_after ?? data?.credits_remaining);
     if (syncRow.status !== "live_ok" || syncRow.shadow_only === true) {
+      await logBillingReconciliationEvent({
+        userId,
+        sessionId,
+        type: "protected_verification_failed",
+        severity: "high",
+        details: { sync_id: resolvedSyncId, source, reason: "unexpected_rpc_status", status: syncRow.status, shadow_only: syncRow.shadow_only },
+      });
       await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: `unexpected_rpc_status:${syncRow.status}` });
       return { ok: false, fallback: true, reason: "unexpected_rpc_status", syncId: resolvedSyncId };
     }
     if (!Number.isFinite(protectedBalanceAfter) || protectedBalanceAfter < 0 || protectedDeducted < 0) {
+      await logBillingReconciliationEvent({
+        userId,
+        sessionId,
+        type: "protected_verification_failed",
+        severity: "high",
+        details: { sync_id: resolvedSyncId, source, reason: "invalid_protected_balance_after", protected_balance_after: protectedBalanceAfter, protected_deducted: protectedDeducted },
+      });
       await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: "invalid_protected_balance_after" });
       return { ok: false, fallback: true, reason: "invalid_protected_balance_after", syncId: resolvedSyncId };
     }
     if (canonicalCredits > 0 && protectedDeducted <= 0) {
+      await logBillingReconciliationEvent({
+        userId,
+        sessionId,
+        type: "protected_verification_failed",
+        severity: "high",
+        details: { sync_id: resolvedSyncId, source, reason: "missing_protected_deduction", protected_deducted: protectedDeducted, expected_wallet: canonicalCredits },
+      });
       await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: "missing_protected_deduction" });
       return { ok: false, fallback: true, reason: "missing_protected_deduction", syncId: resolvedSyncId };
     }
@@ -1472,10 +1556,24 @@ async function recordProtectedBillingLiveSync({
       .eq("id", userId)
       .maybeSingle();
     if (postErr || !postProfile) {
+      await logBillingReconciliationEvent({
+        userId,
+        sessionId,
+        type: "protected_profile_mismatch",
+        severity: "high",
+        details: { sync_id: resolvedSyncId, source, reason: "profile_verify_failed", error: postErr?.message || "profile_not_found" },
+      });
       await logProtectedBillingFallback({ userId, sessionId, syncId: resolvedSyncId, source, reason: "profile_verify_failed", error: postErr?.message || "profile_not_found" });
       return { ok: false, fallback: true, reason: "profile_verify_failed", syncId: resolvedSyncId };
     }
     if (Math.abs(Number(postProfile.credits || 0) - protectedBalanceAfter) > 0.001) {
+      await logBillingReconciliationEvent({
+        userId,
+        sessionId,
+        type: "protected_profile_mismatch",
+        severity: "high",
+        details: { sync_id: resolvedSyncId, source, profile_credits: postProfile.credits, protected_balance_after: protectedBalanceAfter },
+      });
       await logProtectedBillingFallback({
         userId,
         sessionId,
@@ -1507,6 +1605,7 @@ async function recordProtectedBillingLiveSync({
       creditsRemaining: protectedBalanceAfter,
       creditsDeducted: protectedDeducted,
       calculation: buildBillingCalculationSnapshot(billingCalc),
+      verificationAttempts: verification.attempts,
       status: syncRow.status,
     };
   } catch (err) {
@@ -3704,15 +3803,38 @@ async function getRecentBillingSyncRows(days = 7) {
     .gte("created_at", new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString())
     .order("created_at", { ascending: false })
     .limit(5000);
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (!isMissingBillingMigrationError(error)) throw new Error(error.message);
+    const fallback = await supabaseAdmin
+      .from("billing_syncs")
+      .select("id,user_id,session_id,sync_id,sync_sequence,source,duration_secs,credits_requested,credits_expected,credits_deducted,status,shadow_only,created_at")
+      .gte("created_at", new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(5000);
+    if (fallback.error) throw new Error(fallback.error.message);
+    return (fallback.data || []).map(row => ({ ...row, analytics_degraded: true }));
+  }
   return data || [];
 }
 
 function buildReconciliationAnalytics({ events = [], syncs = [] }) {
-  const realEvents = events.filter(e => !isTestModeEvent(e));
+  const now = Date.now();
+  const realEvents = (events || []).filter(e => !isTestModeEvent(e));
+  const currentRealEvents = realEvents.filter(event => {
+    const created = new Date(event.created_at || 0).getTime();
+    const recent = Number.isFinite(created) && now - created <= BILLING_ACTIVE_CRITICAL_WINDOW_MS;
+    return (event.resolved !== true) && recent;
+  });
+  const historicalCriticalEvents = realEvents.filter(event => {
+    const created = new Date(event.created_at || 0).getTime();
+    const old = Number.isFinite(created) && now - created > BILLING_ACTIVE_CRITICAL_WINDOW_MS;
+    const severe = event.severity === "critical" || event.severity === "high" || reconciliationEventCategory(event) === "DANGEROUS";
+    return severe && (event.resolved === true || old);
+  });
   const testEvents = events.filter(isTestModeEvent);
-  const categoryCounts = countBy(realEvents, reconciliationEventCategory);
-  const expectationCounts = countBy(realEvents, reconciliationExpectation);
+  const categoryCounts = countBy(currentRealEvents, reconciliationEventCategory);
+  const allCategoryCounts = countBy(realEvents, reconciliationEventCategory);
+  const expectationCounts = countBy(currentRealEvents, reconciliationExpectation);
   const groupedAnomalies = groupReconciliationEvents(realEvents);
   const syncDriftRows = syncs.map(sync => {
     const requestedWallet = toWalletCredits(sync.credits_requested || 0) || 0;
@@ -3770,18 +3892,22 @@ function buildReconciliationAnalytics({ events = [], syncs = [] }) {
       operational_events: categoryCounts.SAFE_OPERATIONAL || 0,
       warning_events: categoryCounts.WARNING || 0,
       dangerous_events: categoryCounts.DANGEROUS || 0,
-      severe_events: realEvents.filter(e => e.severity === "high" || e.severity === "critical" || reconciliationEventCategory(e) === "DANGEROUS").length,
-      critical_events: realEvents.filter(e => e.severity === "critical").length,
-      duplicate_sync_events: realEvents.filter(e => e.type === "duplicate_sync_id_detected").length,
-      missing_final_sync: realEvents.filter(e => e.type === "missing_final_sync").length,
-      stale_sessions: realEvents.filter(e => e.type === "stale_session_detected").length,
-      invalid_session_attempts: realEvents.filter(e => /invalid|killed|replaced|inactive|stale/.test(String(e.type || ""))).length,
+      all_dangerous_events: allCategoryCounts.DANGEROUS || 0,
+      active_critical_count: currentRealEvents.filter(e => e.severity === "critical" || e.severity === "high" || reconciliationEventCategory(e) === "DANGEROUS").length,
+      historical_critical_count: historicalCriticalEvents.length,
+      severe_events: currentRealEvents.filter(e => e.severity === "high" || e.severity === "critical" || reconciliationEventCategory(e) === "DANGEROUS").length,
+      critical_events: currentRealEvents.filter(e => e.severity === "critical").length,
+      duplicate_sync_events: currentRealEvents.filter(e => e.type === "duplicate_sync_id_detected").length,
+      missing_final_sync: currentRealEvents.filter(e => e.type === "missing_final_sync").length,
+      stale_sessions: currentRealEvents.filter(e => e.type === "stale_session_detected").length,
+      invalid_session_attempts: currentRealEvents.filter(e => /invalid|killed|replaced|inactive|stale/.test(String(e.type || ""))).length,
       drift_warning_syncs: driftSyncs.length,
       drift_severe_syncs: severeDriftSyncs.length,
       soak_runs: testEvents.filter(e => e.type === "soak_test_completed").length,
+      degraded_mode: (events || []).some(e => e.analytics_degraded) || (syncs || []).some(s => s.analytics_degraded),
     },
-    counts_by_type: countBy(realEvents, e => e.type),
-    counts_by_severity: countBy(realEvents, e => e.severity || "info"),
+    counts_by_type: countBy(currentRealEvents, e => e.type),
+    counts_by_severity: countBy(currentRealEvents, e => e.severity || "info"),
     counts_by_category: categoryCounts,
     counts_by_expectation: expectationCounts,
     grouped_anomalies: groupedAnomalies.slice(0, 25),
@@ -4078,6 +4204,36 @@ app.get("/admin/api/reconciliation/summary", adminAuth, async (req, res) => {
   }
 });
 
+app.post("/admin/api/reconciliation/resolve-historical-criticals", adminAuth, async (req, res) => {
+  if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Super admin required" });
+  const thresholdHours = Math.min(Math.max(Number(req.body?.older_than_hours || 1) || 1, 1), 168);
+  const cutoff = new Date(Date.now() - thresholdHours * 60 * 60 * 1000).toISOString();
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("billing_reconciliation_events")
+      .update({
+        resolved: true,
+        resolved_at: new Date().toISOString(),
+        resolved_reason: `historical critical resolved after ${thresholdHours}h stabilization window`,
+        resolved_by: req.session.adminEmail || "admin",
+        auto_resolved: false,
+      })
+      .or("resolved.is.false,resolved.is.null")
+      .in("severity", ["high", "critical"])
+      .lt("created_at", cutoff)
+      .select("id,type,severity,created_at");
+    if (error) throw new Error(error.message);
+    await logAction("resolve_historical_billing_criticals", req.session.adminEmail, req.session.adminRole, null, {
+      older_than_hours: thresholdHours,
+      resolved_count: data?.length || 0,
+    }, req);
+    return res.json({ ok: true, resolved_count: data?.length || 0, older_than_hours: thresholdHours, rows: data || [] });
+  } catch (err) {
+    console.warn("[RECON HISTORICAL RESOLVE] Error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/admin/api/reconciliation/analytics", adminAuth, async (req, res) => {
   try {
     const days = Math.min(Math.max(parseInt(req.query.days || "7", 10) || 7, 1), 30);
@@ -4091,7 +4247,17 @@ app.get("/admin/api/reconciliation/analytics", adminAuth, async (req, res) => {
     return res.json({ ok: true, window_days: days, analytics, integrity });
   } catch (err) {
     console.warn("[RECON ANALYTICS] Error:", err.message);
-    return res.status(500).json({ error: err.message });
+    const analytics = buildReconciliationAnalytics({ events: [], syncs: [] });
+    analytics.totals.degraded_mode = true;
+    return res.json({
+      ok: true,
+      degraded: true,
+      error: "Reconciliation analytics unavailable; returning partial empty analytics.",
+      details: err.message,
+      window_days: Math.min(Math.max(parseInt(req.query.days || "7", 10) || 7, 1), 30),
+      analytics,
+      integrity: calculateBillingIntegrityScore(analytics),
+    });
   }
 });
 
@@ -4106,7 +4272,14 @@ app.get("/admin/api/reconciliation/trends", adminAuth, async (req, res) => {
     return res.json({ ok: true, window_days: days, trends: buildReconciliationTrends({ events, syncs }) });
   } catch (err) {
     console.warn("[RECON TRENDS] Error:", err.message);
-    return res.status(500).json({ error: err.message });
+    return res.json({
+      ok: true,
+      degraded: true,
+      error: "Reconciliation trends unavailable; returning empty trends.",
+      details: err.message,
+      window_days: Math.min(Math.max(parseInt(req.query.days || "7", 10) || 7, 1), 30),
+      trends: buildReconciliationTrends({ events: [], syncs: [] }),
+    });
   }
 });
 
@@ -4122,7 +4295,17 @@ app.get("/admin/api/reconciliation/integrity-score", adminAuth, async (req, res)
     return res.json({ ok: true, window_days: days, integrity: calculateBillingIntegrityScore(analytics), totals: analytics.totals });
   } catch (err) {
     console.warn("[INTEGRITY SCORE] Error:", err.message);
-    return res.status(500).json({ error: err.message });
+    const analytics = buildReconciliationAnalytics({ events: [], syncs: [] });
+    analytics.totals.degraded_mode = true;
+    return res.json({
+      ok: true,
+      degraded: true,
+      error: "Integrity score unavailable; returning degraded fallback.",
+      details: err.message,
+      window_days: Math.min(Math.max(parseInt(req.query.days || "7", 10) || 7, 1), 30),
+      integrity: calculateBillingIntegrityScore(analytics),
+      totals: analytics.totals,
+    });
   }
 });
 
@@ -4146,6 +4329,7 @@ app.get("/admin/api/billing-cutover/status", adminAuth, async (req, res) => {
     const analytics = buildReconciliationAnalytics({ events, syncs });
     const fallbackEvents = events.filter(e => /fallback|forced_legacy|protected_billing/.test(String(e.type || "")));
     const mismatchEvents = events.filter(e => /mismatch|drift|compare/.test(String(e.type || "")) && !isTestModeEvent(e));
+    const byType = countBy(events, e => e.type || "unknown");
     return res.json({
       ok: true,
       ...mode,
@@ -4153,6 +4337,14 @@ app.get("/admin/api/billing-cutover/status", adminAuth, async (req, res) => {
       test_users_enabled: mode.flags.enable_protected_billing_test_users === true,
       fallback_events: fallbackEvents.length,
       mismatch_events: mismatchEvents.length,
+      verification_stats: {
+        retries: (byType.protected_verification_delayed || 0) + (byType.protected_verification_recovered || 0),
+        recovered: byType.protected_verification_recovered || 0,
+        failed: byType.protected_verification_failed || 0,
+        profile_mismatch: byType.protected_profile_mismatch || 0,
+        rpc_timeout: byType.protected_rpc_timeout || 0,
+        rollback_activations: (byType.protected_billing_auto_force_legacy || 0) + (byType.protected_billing_fallback_to_legacy || 0),
+      },
       compare_mode_stats: {
         shadow_compare: mode.flags.protected_billing_shadow_compare === true,
         recent_syncs: syncs.length,
@@ -4163,7 +4355,29 @@ app.get("/admin/api/billing-cutover/status", adminAuth, async (req, res) => {
     });
   } catch (err) {
     console.warn("[BILLING CUTOVER STATUS] Error:", err.message);
-    return res.status(500).json({ error: err.message });
+    return res.json({
+      ok: true,
+      degraded: true,
+      error: "Billing cutover status unavailable; returning forced legacy fallback view.",
+      details: err.message,
+      mode: "forced_legacy_fallback",
+      flags: {
+        enable_protected_billing_global: false,
+        enable_protected_billing_test_users: false,
+        protected_billing_shadow_compare: true,
+        protected_billing_force_legacy: true,
+      },
+      global_live_enabled: false,
+      test_users_enabled: false,
+      legacy_authoritative: true,
+      protected_live_enabled: false,
+      allowlist: [],
+      fallback_events: 0,
+      mismatch_events: 0,
+      verification_stats: { retries: 0, recovered: 0, failed: 0, profile_mismatch: 0, rpc_timeout: 0, rollback_activations: 0 },
+      compare_mode_stats: { shadow_compare: true, recent_syncs: 0, drift_warning_syncs: 0, drift_severe_syncs: 0 },
+      note: "Degraded status response: legacy fallback is the safe assumed state.",
+    });
   }
 });
 

@@ -251,6 +251,10 @@ main { padding:20px; max-width:1400px; margin:0 auto; }
 }
 .badge-high { background:rgba(249,115,22,.16); color:#fb923c; }
 .badge-resolved { background:rgba(148,163,184,.12); color:#94a3b8; }
+.badge {
+  display:inline-flex; align-items:center; gap:4px; border-radius:999px;
+  padding:2px 7px; font-size:10px; font-weight:750; white-space:nowrap;
+}
 .recon-preview {
   max-width:420px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   color:var(--muted);
@@ -1685,6 +1689,7 @@ kbd {
     <div class="panel-hdr">
       <span class="ptitle">Billing Reconciliation</span>
       <span id="recon-updated" style="font-size:11px;color:var(--muted);margin-left:auto">--</span>
+      <span id="recon-analytics-state" class="badge badge-expected" style="display:none">Analytics OK</span>
       <select id="recon-filter" class="recon-filter" onchange="loadReconciliation()">
         <option value="active">Active</option>
         <option value="resolved">Resolved</option>
@@ -1717,6 +1722,7 @@ kbd {
       </select>
       <label class="recon-toolbar-option"><input id="recon-compact-mode" type="checkbox" checked onchange="loadReconciliation()"> Compact</label>
       <label class="recon-toolbar-option"><input id="recon-show-repeated" type="checkbox" onchange="loadReconciliation()"> Show repeated rows</label>
+      <button id="resolve-historical-criticals-btn" class="btn btn-ghost btn-sm" style="display:none;font-size:10px" onclick="resolveHistoricalCriticalRows()">Resolve historical criticals</button>
       <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="loadReconciliation()">Refresh</button>
     </div>
     <div class="panel-body">
@@ -1773,6 +1779,10 @@ kbd {
             <div class="billing-state-item"><div class="billing-state-label">Test Users</div><div class="billing-state-value" id="cutover-test-state">--</div></div>
             <div class="billing-state-item"><div class="billing-state-label">Global Live</div><div class="billing-state-value" id="cutover-global-state">OFF</div></div>
             <div class="billing-state-item"><div class="billing-state-label">Rollback State</div><div class="billing-state-value" id="cutover-rollback-state">--</div></div>
+            <div class="billing-state-item"><div class="billing-state-label">Verification Retries</div><div class="billing-state-value" id="cutover-verification-retries">--</div></div>
+            <div class="billing-state-item"><div class="billing-state-label">Recovered</div><div class="billing-state-value" id="cutover-verification-recovered">--</div></div>
+            <div class="billing-state-item"><div class="billing-state-label">Failed</div><div class="billing-state-value" id="cutover-verification-failed">--</div></div>
+            <div class="billing-state-item"><div class="billing-state-label">Rollbacks</div><div class="billing-state-value" id="cutover-rollback-count">--</div></div>
           </div>
           <button id="billing-mode-controls" class="btn btn-ghost btn-sm" style="margin-top:10px;width:100%;justify-content:center" onclick="openAdvancedBillingControls()">Advanced Billing Controls</button>
         </div>
@@ -4110,11 +4120,20 @@ function renderBillingCutoverStatus(status) {
   const testEl = document.getElementById("cutover-test-state");
   const globalEl = document.getElementById("cutover-global-state");
   const rollbackEl = document.getElementById("cutover-rollback-state");
+  const verifyRetriesEl = document.getElementById("cutover-verification-retries");
+  const verifyRecoveredEl = document.getElementById("cutover-verification-recovered");
+  const verifyFailedEl = document.getElementById("cutover-verification-failed");
+  const rollbackCountEl = document.getElementById("cutover-rollback-count");
   if (modeEl) modeEl.textContent = status?.mode || "legacy_only";
   if (shadowEl) shadowEl.textContent = flags.protected_billing_shadow_compare ? "On" : "Off";
   if (testEl) testEl.textContent = flags.enable_protected_billing_test_users ? `${fmtN(status?.allowlist?.length || 0)} enabled` : "Disabled";
   if (globalEl) globalEl.textContent = flags.enable_protected_billing_global ? "ON" : "OFF";
   if (rollbackEl) rollbackEl.textContent = flags.protected_billing_force_legacy ? "Forced legacy" : "Not forced";
+  const verification = status?.verification_stats || {};
+  if (verifyRetriesEl) verifyRetriesEl.textContent = fmtN(verification.retries || 0);
+  if (verifyRecoveredEl) verifyRecoveredEl.textContent = fmtN(verification.recovered || 0);
+  if (verifyFailedEl) verifyFailedEl.textContent = fmtN(verification.failed || 0);
+  if (rollbackCountEl) rollbackCountEl.textContent = fmtN(verification.rollback_activations || 0);
   const set = (id, value) => { const el = document.getElementById(id); if (el) el.checked = value === true; };
   set("flag-shadow-compare", flags.protected_billing_shadow_compare);
   set("flag-test-users", flags.enable_protected_billing_test_users);
@@ -4511,6 +4530,16 @@ async function loadReconciliationAnalytics() {
     ]);
     window._reconAnalytics = analytics;
     window._reconTrends = trends;
+    const stateEl = document.getElementById("recon-analytics-state");
+    if (stateEl) {
+      const degraded = analytics?.degraded || trends?.degraded || cutover?.degraded || analytics?.analytics?.totals?.degraded_mode;
+      stateEl.style.display = "inline-flex";
+      stateEl.className = `badge ${degraded ? "badge-investigate" : "badge-expected"}`;
+      stateEl.textContent = degraded ? "Analytics degraded" : "Analytics OK";
+      stateEl.title = degraded ? (analytics?.details || trends?.details || cutover?.details || "Partial analytics returned") : `Last successful analytics: ${new Date().toLocaleTimeString()}`;
+    }
+    const resolveBtn = document.getElementById("resolve-historical-criticals-btn");
+    if (resolveBtn) resolveBtn.style.display = window._adminRole === "super_admin" ? "inline-flex" : "none";
     renderIntegrityScore(analytics?.integrity);
     renderBillingPrecision(analytics?.analytics);
     renderTrendBars(trends?.trends);
@@ -4520,7 +4549,32 @@ async function loadReconciliationAnalytics() {
     if (lbl) lbl.textContent = days === "1" ? "24 hours" : `${analytics?.window_days || 7} days`;
   } catch (e) {
     console.warn("loadReconciliationAnalytics:", e.message);
+    const stateEl = document.getElementById("recon-analytics-state");
+    if (stateEl) {
+      stateEl.style.display = "inline-flex";
+      stateEl.className = "badge badge-dangerous";
+      stateEl.textContent = "Analytics unavailable";
+      stateEl.title = e.message;
+    }
     renderIntegrityScore({ score: "--", label: "unavailable", color: "", explanation: e.message });
+  }
+}
+
+async function resolveHistoricalCriticalRows() {
+  if (window._adminRole !== "super_admin") return toast("Super admin required", "error");
+  const confirmed = await showModalConfirm("Resolve high/critical billing reconciliation rows older than 1 hour? Audit history is preserved and rows are only marked resolved.", {
+    title: "Resolve Historical Criticals",
+    confirmLabel: "Resolve",
+    variant: "warning",
+  });
+  if (!confirmed) return;
+  try {
+    const data = await apiPost("/admin/api/reconciliation/resolve-historical-criticals", { older_than_hours: 1 });
+    toast(`Resolved ${data.resolved_count || 0} historical critical rows`, "success");
+    loadReconciliation();
+    loadReconciliationAnalytics();
+  } catch (e) {
+    toast("Historical resolve failed: " + e.message, "error");
   }
 }
 
