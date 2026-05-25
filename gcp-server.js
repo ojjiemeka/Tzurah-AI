@@ -51,7 +51,6 @@ const supabaseAdmin = createClient(
 
 // ── Config ─────────────────────────────────────────────────────────
 const PORT                  = parseInt(process.env.PORT || "4000", 10);
-const DECART_KEY            = process.env.DECART_API_KEY;
 const BOOTSTRAP_SECRET      = process.env.BOOTSTRAP_SECRET || "tzurah-app-v1-secret";
 const DECART_COST_PER_SECOND = 1.36; // Decart credits burned per second of streaming
 
@@ -191,6 +190,47 @@ async function getCachedDecartBalance() {
 
 // Called by deductDecartCredits to invalidate the SSE cache immediately
 function invalidateDecartCache() { _decartBalanceCachedAt = 0; }
+
+function decartKeyForEnv(envName = "prod") {
+  const env = envName === "dev" ? "dev" : "prod";
+  if (env === "dev") return process.env.DECART_API_KEY_DEV || "";
+  return process.env.DECART_API_KEY_PROD || process.env.DECART_API_KEY || "";
+}
+
+function decartAdminTestEnv() {
+  return String(process.env.DECART_ACTIVE_ENV_FOR_ADMIN_TESTS || "prod").toLowerCase() === "dev" ? "dev" : "prod";
+}
+
+async function resolveDecartEnvironmentForUser(userId, requestedEnv = null) {
+  const allowlist = await getProtectedBillingAllowlist().catch(() => []);
+  const explicitDev = String(requestedEnv || "").toLowerCase() === "dev";
+  const adminTestDev = decartAdminTestEnv() === "dev";
+  const testUser = !!(userId && allowlist.includes(userId));
+  const wantsDev = testUser && (explicitDev || adminTestDev);
+  const allowDevFallback = String(process.env.DECART_ALLOW_DEV_FALLBACK_TO_PROD || "false").toLowerCase() === "true";
+  const env = wantsDev && decartKeyForEnv("dev")
+    ? "dev"
+    : wantsDev && !allowDevFallback
+      ? "dev"
+      : "prod";
+  const key = decartKeyForEnv(env);
+  return {
+    env,
+    key,
+    test_user: testUser,
+    requested_dev: wantsDev,
+    fallback_to_prod: env === "prod" && wantsDev && !decartKeyForEnv("dev"),
+    missing_dev_key: env === "dev" && !key,
+  };
+}
+
+function decartEnvironmentDiagnostics() {
+  return {
+    production_configured: !!decartKeyForEnv("prod"),
+    dev_configured: !!decartKeyForEnv("dev"),
+    admin_test_env: decartAdminTestEnv(),
+  };
+}
 
 // ── Central audit logger ──────────────────────────────────────────
 async function logAction(action, adminEmail, adminRole, targetUser, details, req) {
@@ -1729,8 +1769,16 @@ app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now(), service: 
  * Returns a short-lived Decart client token.
  */
 app.get("/decart/token", requireAuth, async (req, res) => {
-  if (!DECART_KEY) {
-    return res.status(503).json({ error: "DECART_API_KEY not configured on server" });
+  const decart = await resolveDecartEnvironmentForUser(
+    req.userId,
+    req.query?.decart_env || req.headers["x-decart-env"]
+  );
+  if (!decart.key) {
+    return res.status(503).json({
+      error: decart.missing_dev_key ? "Decart dev/test API key not configured" : "Decart production API key not configured on server",
+      decart_environment_used: decart.env,
+      decart_test_user: decart.test_user,
+    });
   }
 
   const { data: profile, error } = await supabaseAdmin
@@ -1745,14 +1793,31 @@ app.get("/decart/token", requireAuth, async (req, res) => {
   }
 
   if (process.env.NODE_ENV === "development") {
-    return res.json({ apiKey: DECART_KEY });
+    return res.json({
+      apiKey: decart.key,
+      decart_environment_used: decart.env,
+      decart_test_user: decart.test_user,
+      decart_fallback_to_prod: decart.fallback_to_prod,
+    });
   }
 
   try {
     const { createDecartClient } = await import("@decartai/sdk");
-    const client = createDecartClient({ apiKey: DECART_KEY });
+    const client = createDecartClient({ apiKey: decart.key });
     const token  = await client.tokens.create();
-    res.json(token);
+    const payload = token && typeof token === "object" ? { ...token } : { token };
+    payload.decart_environment_used = decart.env;
+    payload.decart_test_user = decart.test_user;
+    payload.decart_fallback_to_prod = decart.fallback_to_prod;
+    if (decart.env === "dev") {
+      await logBillingReconciliationEvent({
+        userId: req.userId,
+        type: "decart_dev_environment_token_issued",
+        severity: "info",
+        details: { source: "decart_token", decart_environment_used: "dev", test_user: decart.test_user },
+      }).catch(() => {});
+    }
+    res.json(payload);
   } catch (err) {
     console.error("[Tzurah] /decart/token failed:", err.message);
     res.status(503).json({ error: "Token generation failed — try again shortly" });
@@ -1769,10 +1834,12 @@ app.get("/internal/decart-key", (req, res) => {
     console.warn("[INTERNAL TOKEN] Unauthorized request from:", req.ip);
     return res.status(403).json({ error: "Forbidden" });
   }
-  const token = process.env.DECART_API_KEY;
+  const requestedEnv = String(req.query?.env || req.headers["x-decart-env"] || "").toLowerCase();
+  const env = requestedEnv === "dev" && decartAdminTestEnv() === "dev" ? "dev" : "prod";
+  const token = decartKeyForEnv(env);
   if (!token) return res.status(500).json({ error: "API key not configured" });
-  console.log("[INTERNAL TOKEN] Serving Decart key to:", req.ip);
-  return res.json({ token });
+  console.log("[INTERNAL TOKEN] Serving Decart key to:", req.ip, "env=", env);
+  return res.json({ token, decart_environment_used: env });
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4206,28 +4273,42 @@ app.get("/admin/api/reconciliation/summary", adminAuth, async (req, res) => {
 
 app.post("/admin/api/reconciliation/resolve-historical-criticals", adminAuth, async (req, res) => {
   if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Super admin required" });
-  const thresholdHours = Math.min(Math.max(Number(req.body?.older_than_hours || 1) || 1, 1), 168);
-  const cutoff = new Date(Date.now() - thresholdHours * 60 * 60 * 1000).toISOString();
+  const requestedMinutes = req.body?.older_than_minutes != null
+    ? Number(req.body.older_than_minutes)
+    : Number(req.body?.older_than_hours || 1) * 60;
+  const thresholdMinutes = Math.min(Math.max(requestedMinutes || 60, 15), 10080);
+  const cutoff = new Date(Date.now() - thresholdMinutes * 60 * 1000).toISOString();
   try {
+    const precisionWindowMs = 30 * 60 * 1000;
+    const currentSyncs = (await getRecentBillingSyncRows(1).catch(() => []))
+      .filter(sync => Date.now() - new Date(sync.created_at || 0).getTime() <= precisionWindowMs);
+    const currentAnalytics = buildReconciliationAnalytics({ events: [], syncs: currentSyncs });
+    if (currentAnalytics?.drift?.precision_health !== "healthy") {
+      return res.status(409).json({
+        error: "Billing precision is not healthy yet; historical failures were not resolved",
+        precision_health: currentAnalytics?.drift?.precision_health || "unknown",
+      });
+    }
     const { data, error } = await supabaseAdmin
       .from("billing_reconciliation_events")
       .update({
         resolved: true,
         resolved_at: new Date().toISOString(),
-        resolved_reason: `historical critical resolved after ${thresholdHours}h stabilization window`,
+        resolved_reason: "resolved_after_integer_wallet_fix",
         resolved_by: req.session.adminEmail || "admin",
         auto_resolved: false,
       })
       .or("resolved.is.false,resolved.is.null")
       .in("severity", ["high", "critical"])
+      .eq("type", "failed_billing_write")
       .lt("created_at", cutoff)
       .select("id,type,severity,created_at");
     if (error) throw new Error(error.message);
-    await logAction("resolve_historical_billing_criticals", req.session.adminEmail, req.session.adminRole, null, {
-      older_than_hours: thresholdHours,
+    await logAction("resolve_historical_failed_billing_write", req.session.adminEmail, req.session.adminRole, null, {
+      older_than_minutes: thresholdMinutes,
       resolved_count: data?.length || 0,
     }, req);
-    return res.json({ ok: true, resolved_count: data?.length || 0, older_than_hours: thresholdHours, rows: data || [] });
+    return res.json({ ok: true, resolved_count: data?.length || 0, older_than_minutes: thresholdMinutes, precision_window_minutes: 30, rows: data || [] });
   } catch (err) {
     console.warn("[RECON HISTORICAL RESOLVE] Error:", err.message);
     return res.status(500).json({ error: err.message });
@@ -5324,7 +5405,8 @@ app.post("/admin/api/email/send", adminAuth, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════
 
 const SETTINGS_ALLOWED_KEYS = [
-  "DECART_API_KEY", "SUPABASE_SERVICE_ROLE_KEY",
+  "DECART_API_KEY", "DECART_API_KEY_PROD", "DECART_API_KEY_DEV", "DECART_ACTIVE_ENV_FOR_ADMIN_TESTS",
+  "SUPABASE_SERVICE_ROLE_KEY",
   "ADMIN_EMAIL", "ADMIN_PASSWORD",
   "CREDITS_PER_SECOND", "COST_PER_CREDIT",
   "BOOTSTRAP_SECRET",
@@ -5336,7 +5418,11 @@ app.get("/admin/api/settings", adminAuth, (req, res) => {
   if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Insufficient permissions", required: "super_admin" });
   const mask = (val) => val ? maskKey(val) : "not set";
   res.json({
-    decart_key:       mask(process.env.DECART_API_KEY),
+    decart_key:       mask(decartKeyForEnv("prod")),
+    decart_key_prod:  mask(decartKeyForEnv("prod")),
+    decart_key_dev:   mask(decartKeyForEnv("dev")),
+    decart_active_env_for_admin_tests: decartAdminTestEnv(),
+    decart_environment: decartEnvironmentDiagnostics(),
     supabase_url:     process.env.SUPABASE_URL || "not set",
     supabase_key:     mask(process.env.SUPABASE_SERVICE_ROLE_KEY),
     admin_email:      process.env.ADMIN_EMAIL  || "not set",
@@ -5357,22 +5443,33 @@ app.get("/admin/api/settings", adminAuth, (req, res) => {
 app.post("/admin/api/settings/reveal-key", adminAuth, (req, res) => {
   if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Insufficient permissions", required: "super_admin" });
   const { key_name } = req.body || {};
-  const revealable = ["DECART_API_KEY", "SUPABASE_SERVICE_ROLE_KEY", "ADMIN_EMAIL"];
+  const revealable = ["DECART_API_KEY", "DECART_API_KEY_PROD", "DECART_API_KEY_DEV", "SUPABASE_SERVICE_ROLE_KEY", "ADMIN_EMAIL"];
   if (!revealable.includes(key_name)) {
     return res.status(400).json({ error: "Key not revealable" });
   }
-  res.json({ value: process.env[key_name] || "not set" });
+  const value = key_name === "DECART_API_KEY_PROD"
+    ? decartKeyForEnv("prod")
+    : key_name === "DECART_API_KEY_DEV"
+      ? decartKeyForEnv("dev")
+      : process.env[key_name];
+  res.json({ value: value || "not set" });
 });
 
 // Updates a single env key in .env + live process.env
 app.post("/admin/api/settings/update-key", adminAuth, async (req, res) => {
   if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Insufficient permissions", required: "super_admin" });
-  const { key_name, value } = req.body || {};
+  const { key_name, value, confirm } = req.body || {};
   if (!SETTINGS_ALLOWED_KEYS.includes(key_name)) {
     return res.status(400).json({ error: "Key not allowed" });
   }
   if (!value || !value.trim()) {
     return res.status(400).json({ error: "Value cannot be empty" });
+  }
+  if (key_name === "DECART_ACTIVE_ENV_FOR_ADMIN_TESTS" && !["prod", "dev"].includes(value.trim())) {
+    return res.status(400).json({ error: "Admin test environment must be prod or dev" });
+  }
+  if (["DECART_API_KEY", "DECART_API_KEY_PROD"].includes(key_name) && confirm !== "UPDATE_PRODUCTION_DECART_KEY") {
+    return res.status(400).json({ error: "Production Decart key update requires confirmation phrase" });
   }
   try {
     const envPath = path.join(__dirname, ".env");
@@ -5386,6 +5483,10 @@ app.post("/admin/api/settings/update-key", adminAuth, async (req, res) => {
     }
     fs.writeFileSync(envPath, envContent);
     process.env[key_name] = value.trim();
+    if (["DECART_API_KEY_PROD", "DECART_API_KEY_DEV", "DECART_ACTIVE_ENV_FOR_ADMIN_TESTS"].includes(key_name)) {
+      process.env.TOKEN_CACHE_BUSTED = Date.now().toString();
+      console.log(`[SETTINGS] ${key_name} updated - token cache bust signalled`);
+    }
     if (key_name === "DECART_API_KEY") {
       process.env.TOKEN_CACHE_BUSTED = Date.now().toString();
       console.log("[SETTINGS] DECART_API_KEY updated — token cache bust signalled");
@@ -6135,7 +6236,7 @@ app.get("/admin/api/search", adminAuth, async (req, res) => {
 app.get("/admin/api/checklist", adminAuth, (req, res) => {
   const env = process.env;
   res.json({
-    decart_key:              !!env.DECART_API_KEY && env.DECART_API_KEY !== "your_decart_key_here",
+    decart_key:              !!decartKeyForEnv("prod") && decartKeyForEnv("prod") !== "your_decart_key_here",
     supabase:                !!env.SUPABASE_URL && !!env.SUPABASE_SERVICE_ROLE_KEY,
     admin_password_changed:  !!env.ADMIN_PASSWORD && env.ADMIN_PASSWORD !== "TzurahAdmin2025!",
     stripe_configured:       !!env.STRIPE_SECRET_KEY && env.STRIPE_SECRET_KEY !== "your_stripe_key",
@@ -6175,8 +6276,8 @@ app.post("/admin/api/tests/run", adminAuth, async (req, res) => {
         if (error) throw new Error(error.message);
       });
       await runTest("Decart key configured", async () => {
-        const key = process.env.DECART_API_KEY;
-        if (!key || key === "your_decart_key_here") throw new Error("DECART_API_KEY not set");
+        const key = decartKeyForEnv("prod");
+        if (!key || key === "your_decart_key_here") throw new Error("Production Decart key not set");
       });
       await runTest("Sessions table accessible", async () => {
         const { error } = await supabaseAdmin.from("sessions").select("id").limit(1);
@@ -6393,8 +6494,8 @@ app.post("/admin/api/tests/run", adminAuth, async (req, res) => {
         if (process.env.ADMIN_PASSWORD === "TzurahAdmin2025!") throw new Error("Still using default password!");
       });
       await runTest("Decart API key configured", async () => {
-        const key = process.env.DECART_API_KEY;
-        if (!key || key.includes("YOUR") || key === "your_decart_key_here") throw new Error("DECART_API_KEY not set or placeholder");
+        const key = decartKeyForEnv("prod");
+        if (!key || key.includes("YOUR") || key === "your_decart_key_here") throw new Error("Production Decart key not set or placeholder");
       });
       await runTest("Supabase service role set", async () => {
         if (!process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("SUPABASE_SERVICE_ROLE_KEY not set");

@@ -1722,7 +1722,7 @@ kbd {
       </select>
       <label class="recon-toolbar-option"><input id="recon-compact-mode" type="checkbox" checked onchange="loadReconciliation()"> Compact</label>
       <label class="recon-toolbar-option"><input id="recon-show-repeated" type="checkbox" onchange="loadReconciliation()"> Show repeated rows</label>
-      <button id="resolve-historical-criticals-btn" class="btn btn-ghost btn-sm" style="display:none;font-size:10px" onclick="resolveHistoricalCriticalRows()">Resolve historical criticals</button>
+      <button id="resolve-historical-criticals-btn" class="btn btn-ghost btn-sm" style="display:none;font-size:10px" onclick="resolveHistoricalCriticalRows()">Resolve historical failures</button>
       <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="loadReconciliation()">Refresh</button>
     </div>
     <div class="panel-body">
@@ -2251,13 +2251,40 @@ kbd {
     <div class="panel-card">
       <div class="settings-row">
         <div class="settings-row-label-wrap">
-          <div class="settings-row-label">Decart API Key</div>
-          <div class="settings-row-meta">Controls face-swap model access</div>
+          <div class="settings-row-label">Decart Production API Key</div>
+          <div class="settings-row-meta">Master key for real users. Updates require confirmation.</div>
         </div>
         <code class="settings-row-value" id="decart-key-display">loading…</code>
         <div class="settings-row-actions">
-          <button class="btn btn-ghost btn-sm" onclick="toggleSettingsMask('decart-key-display','DECART_API_KEY')">Show</button>
-          <button class="btn btn-accent btn-sm" onclick="openUpdateKeyModal('DECART_API_KEY','Decart API Key')">Update</button>
+          <button class="btn btn-ghost btn-sm" onclick="toggleSettingsMask('decart-key-display','DECART_API_KEY_PROD')">Show</button>
+          <button class="btn btn-accent btn-sm" onclick="openUpdateKeyModal('DECART_API_KEY_PROD','Decart Production API Key')">Update</button>
+        </div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-label-wrap">
+          <div class="settings-row-label">Decart Dev/Test API Key</div>
+          <div class="settings-row-meta">Admin/test-user key. Changing this does not affect real users.</div>
+        </div>
+        <code class="settings-row-value" id="decart-dev-key-display">loading...</code>
+        <div class="settings-row-actions">
+          <button class="btn btn-ghost btn-sm" onclick="toggleSettingsMask('decart-dev-key-display','DECART_API_KEY_DEV')">Show</button>
+          <button class="btn btn-accent btn-sm" onclick="openUpdateKeyModal('DECART_API_KEY_DEV','Decart Dev/Test API Key')">Update</button>
+        </div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-label-wrap">
+          <div class="settings-row-label">Admin Test Decart Environment</div>
+          <div class="settings-row-meta">Only allowlisted test users/admin test flows may use dev.</div>
+        </div>
+        <div class="settings-row-value" style="display:flex;flex-direction:column;gap:4px">
+          <select id="decart-admin-test-env" class="recon-filter" style="max-width:180px">
+            <option value="prod">Production</option>
+            <option value="dev">Development/Test</option>
+          </select>
+          <span id="decart-env-diagnostics" style="font-size:10px;color:var(--muted)">loading...</span>
+        </div>
+        <div class="settings-row-actions">
+          <button class="btn btn-accent btn-sm" onclick="saveDecartAdminTestEnv()">Save</button>
         </div>
       </div>
       <div class="settings-row">
@@ -2966,7 +2993,45 @@ const AdminExport = {
     a.remove();
     URL.revokeObjectURL(url);
   },
-  exportRows(rows, options = {}) {
+  async copy(content, label = "Export") {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
+      await navigator.clipboard.writeText(content);
+      toast(`${label} copied`, "success");
+      return true;
+    } catch (err) {
+      this.showCopyFallback(content, label);
+      return false;
+    }
+  },
+  showCopyFallback(content, label = "Export") {
+    showModal({
+      title: `Copy ${esc(label)}`,
+      size: "lg",
+      persistent: true,
+      showClose: true,
+      body: `
+        <p style="font-size:12px;color:var(--muted);margin:0 0 10px">Clipboard access was blocked. Select the text below and copy it.</p>
+        <textarea id="admin-export-copy-textarea" class="modal-input" style="min-height:260px;font-family:var(--mono);font-size:11px;line-height:1.45;white-space:pre;overflow:auto">${esc(content)}</textarea>
+      `,
+      confirmLabel: "Copy",
+      confirmClass: "btn-green",
+      onConfirm: async () => {
+        const textarea = document.getElementById("admin-export-copy-textarea");
+        if (!textarea) return;
+        textarea.focus();
+        textarea.select();
+        try {
+          if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(textarea.value);
+          else document.execCommand("copy");
+          toast(`${label} copied`, "success");
+        } catch (_) {
+          toast("Select the text and press Ctrl+C", "info");
+        }
+      },
+    });
+  },
+  async exportRows(rows, options = {}) {
     const dataRows = rows || [];
     if (!dataRows.length) {
       toast("No rows to export", "error");
@@ -2990,8 +3055,12 @@ const AdminExport = {
       content = this.toText(dataRows, options);
       mime = "text/plain";
     }
-    this.download(content, `${base}.${ext}`, mime);
-    toast(`Exported ${dataRows.length} rows`, "success");
+    const label = format === "md" || format === "markdown" ? "Markdown" : format.toUpperCase();
+    await this.copy(content, label);
+    if (options.download === true || (options.download !== false && format !== "md" && format !== "markdown")) {
+      this.download(content, `${base}.${ext}`, mime);
+      toast(`Downloaded ${dataRows.length} rows`, "success");
+    }
     return true;
   },
 };
@@ -4562,15 +4631,15 @@ async function loadReconciliationAnalytics() {
 
 async function resolveHistoricalCriticalRows() {
   if (window._adminRole !== "super_admin") return toast("Super admin required", "error");
-  const confirmed = await showModalConfirm("Resolve high/critical billing reconciliation rows older than 1 hour? Audit history is preserved and rows are only marked resolved.", {
-    title: "Resolve Historical Criticals",
+  const confirmed = await showModalConfirm("Resolve historical failed_billing_write rows older than 1 hour after the integer wallet fix? Audit history is preserved and rows are only marked resolved.", {
+    title: "Resolve Historical Billing Failures",
     confirmLabel: "Resolve",
     variant: "warning",
   });
   if (!confirmed) return;
   try {
-    const data = await apiPost("/admin/api/reconciliation/resolve-historical-criticals", { older_than_hours: 1 });
-    toast(`Resolved ${data.resolved_count || 0} historical critical rows`, "success");
+    const data = await apiPost("/admin/api/reconciliation/resolve-historical-criticals", { older_than_minutes: 60 });
+    toast(`Resolved ${data.resolved_count || 0} historical billing failures`, "success");
     loadReconciliation();
     loadReconciliationAnalytics();
   } catch (e) {
@@ -7472,11 +7541,21 @@ async function loadSettings() {
     const d = await api("/admin/api/settings");
     if (!d) return;
 
-    settingsMasked["decart-key-display"]        = d.decart_key;
+    settingsMasked["decart-key-display"]        = d.decart_key_prod || d.decart_key;
+    settingsMasked["decart-dev-key-display"]    = d.decart_key_dev || "not set";
     settingsMasked["supabase-key-display"]      = d.supabase_key;
     settingsMasked["bootstrap-secret-display"]  = d.bootstrap_secret;
 
-    document.getElementById("decart-key-display").textContent        = d.decart_key;
+    document.getElementById("decart-key-display").textContent        = d.decart_key_prod || d.decart_key;
+    const decartDevEl = document.getElementById("decart-dev-key-display");
+    if (decartDevEl) decartDevEl.textContent = d.decart_key_dev || "not set";
+    const decartEnvSelect = document.getElementById("decart-admin-test-env");
+    if (decartEnvSelect) decartEnvSelect.value = d.decart_active_env_for_admin_tests || "prod";
+    const decartEnvDiag = document.getElementById("decart-env-diagnostics");
+    if (decartEnvDiag) {
+      const env = d.decart_environment || {};
+      decartEnvDiag.textContent = `admin tests: ${d.decart_active_env_for_admin_tests || "prod"} | prod ${env.production_configured ? "set" : "missing"} | dev ${env.dev_configured ? "set" : "missing"}`;
+    }
     document.getElementById("supabase-key-display").textContent      = d.supabase_key;
     document.getElementById("supabase-url-display").textContent      = d.supabase_url;
     document.getElementById("admin-email-display").textContent       = d.admin_email;
@@ -7624,6 +7703,62 @@ function openUpdateKeyModal(keyName, label) {
       } catch(e) { toast("Error: " + e.message, "error"); }
     },
   });
+}
+
+// Override legacy key updater with the reusable scroll-safe modal and Decart production confirmation.
+function openUpdateKeyModal(keyName, label) {
+  const productionDecart = keyName === "DECART_API_KEY_PROD" || keyName === "DECART_API_KEY";
+  showModal({
+    title: `Update ${esc(label)}`,
+    size: productionDecart ? "lg" : "md",
+    persistent: true,
+    showClose: true,
+    confirmLabel: "Save & Apply",
+    confirmClass: "btn-green",
+    body: `
+      ${productionDecart ? `<div class="status-card danger" style="margin-bottom:12px">
+        <strong>Production Decart key change</strong>
+        <span>Real users always use the production key. Type UPDATE_PRODUCTION_DECART_KEY to confirm this change.</span>
+      </div>` : ""}
+      <div class="modal-field">
+        <label>New value</label>
+        <input class="modal-input" id="settings-key-new-value" type="text" placeholder="Paste new value..." autocomplete="off" spellcheck="false">
+      </div>
+      ${productionDecart ? `<div class="modal-field">
+        <label>Confirmation phrase</label>
+        <input class="modal-input" id="settings-key-confirm-phrase" type="text" placeholder="UPDATE_PRODUCTION_DECART_KEY" autocomplete="off" spellcheck="false">
+      </div>` : ""}
+      <p style="font-size:11px;color:var(--muted);margin-top:6px">Applied immediately in memory and persisted to .env on disk.</p>
+    `,
+    onConfirm: async () => {
+      const val = document.getElementById("settings-key-new-value")?.value?.trim();
+      const confirm = document.getElementById("settings-key-confirm-phrase")?.value?.trim();
+      if (!val) { toast("Value cannot be empty", "error"); return false; }
+      try {
+        await apiPost("/admin/api/settings/update-key", { key_name: keyName, value: val, confirm });
+        delete settingsRevealCache[keyName];
+        toast(`${label} updated`, "success");
+        loadSettings();
+      } catch(e) {
+        toast("Error: " + e.message, "error");
+        return false;
+      }
+    },
+  });
+}
+
+async function saveDecartAdminTestEnv() {
+  const value = document.getElementById("decart-admin-test-env")?.value || "prod";
+  try {
+    await apiPost("/admin/api/settings/update-key", {
+      key_name: "DECART_ACTIVE_ENV_FOR_ADMIN_TESTS",
+      value,
+    });
+    toast(`Admin test Decart environment set to ${value}`, "success");
+    loadSettings();
+  } catch(e) {
+    toast("Error: " + e.message, "error");
+  }
 }
 
 // Change admin password with confirm flow (all in a single custom modal)
