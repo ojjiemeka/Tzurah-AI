@@ -53,6 +53,7 @@ const supabaseAdmin = createClient(
 const PORT                  = parseInt(process.env.PORT || "4000", 10);
 const BOOTSTRAP_SECRET      = process.env.BOOTSTRAP_SECRET || "tzurah-app-v1-secret";
 const DECART_COST_PER_SECOND = 1.36; // Decart credits burned per second of streaming
+const DEV_TEST_ACCOUNTS_SETTING = "dev_test_accounts";
 
 // Credit packs (1 credit = 10 seconds)
 const PACKS = {
@@ -202,11 +203,11 @@ function decartAdminTestEnv() {
 }
 
 async function resolveDecartEnvironmentForUser(userId, requestedEnv = null) {
-  const allowlist = await getProtectedBillingAllowlist().catch(() => []);
+  const devAccounts = await getDevTestAccountEntries().catch(() => []);
   const explicitDev = String(requestedEnv || "").toLowerCase() === "dev";
   const adminTestDev = decartAdminTestEnv() === "dev";
-  const testUser = !!(userId && allowlist.includes(userId));
-  const wantsDev = testUser && (explicitDev || adminTestDev);
+  const devAccount = !!(userId && devAccounts.some(account => account.id === userId));
+  const wantsDev = devAccount && (explicitDev || adminTestDev);
   const allowDevFallback = String(process.env.DECART_ALLOW_DEV_FALLBACK_TO_PROD || "false").toLowerCase() === "true";
   const env = wantsDev && decartKeyForEnv("dev")
     ? "dev"
@@ -217,10 +218,16 @@ async function resolveDecartEnvironmentForUser(userId, requestedEnv = null) {
   return {
     env,
     key,
-    test_user: testUser,
+    test_user: devAccount,
+    dev_account: devAccount,
     requested_dev: wantsDev,
     fallback_to_prod: env === "prod" && wantsDev && !decartKeyForEnv("dev"),
     missing_dev_key: env === "dev" && !key,
+    reason: wantsDev && !decartKeyForEnv("dev")
+      ? "missing_dev_key_blocked"
+      : env === "dev"
+        ? "dev_account_admin_test_env"
+        : "normal_user_prod",
   };
 }
 
@@ -1774,10 +1781,19 @@ app.get("/decart/token", requireAuth, async (req, res) => {
     req.query?.decart_env || req.headers["x-decart-env"]
   );
   if (!decart.key) {
+    const email = await getAuthEmailByUserId(req.userId).catch(() => null);
+    console.warn("[DECART TOKEN ENV]", { user_id: req.userId, email, env: decart.env, reason: decart.reason });
+    await logBillingReconciliationEvent({
+      userId: req.userId,
+      type: "decart_environment_blocked",
+      severity: "warning",
+      details: { decart_environment_used: decart.env, reason: decart.reason, email },
+    }).catch(() => {});
     return res.status(503).json({
       error: decart.missing_dev_key ? "Decart dev/test API key not configured" : "Decart production API key not configured on server",
       decart_environment_used: decart.env,
       decart_test_user: decart.test_user,
+      decart_reason: decart.reason,
     });
   }
 
@@ -1791,6 +1807,8 @@ app.get("/decart/token", requireAuth, async (req, res) => {
   if (profile.credits <= 0) {
     return res.status(402).json({ error: "Insufficient credits", credits: 0 });
   }
+  const decartEmail = await getAuthEmailByUserId(req.userId).catch(() => null);
+  console.log("[DECART TOKEN ENV]", { user_id: req.userId, email: decartEmail, env: decart.env, reason: decart.reason });
 
   if (process.env.NODE_ENV === "development") {
     return res.json({
@@ -1798,6 +1816,7 @@ app.get("/decart/token", requireAuth, async (req, res) => {
       decart_environment_used: decart.env,
       decart_test_user: decart.test_user,
       decart_fallback_to_prod: decart.fallback_to_prod,
+      decart_reason: decart.reason,
     });
   }
 
@@ -1809,12 +1828,13 @@ app.get("/decart/token", requireAuth, async (req, res) => {
     payload.decart_environment_used = decart.env;
     payload.decart_test_user = decart.test_user;
     payload.decart_fallback_to_prod = decart.fallback_to_prod;
+    payload.decart_reason = decart.reason;
     if (decart.env === "dev") {
       await logBillingReconciliationEvent({
         userId: req.userId,
         type: "decart_dev_environment_token_issued",
         severity: "info",
-        details: { source: "decart_token", decart_environment_used: "dev", test_user: decart.test_user },
+        details: { source: "decart_token", decart_environment_used: "dev", reason: decart.reason, email: decartEmail, test_user: decart.test_user },
       }).catch(() => {});
     }
     res.json(payload);
@@ -2832,6 +2852,59 @@ app.get("/admin/api/users/search", adminAuth, async (req, res) => {
         degraded: true,
       },
     });
+  }
+});
+
+app.get("/admin/api/dev-accounts", adminAuth, async (_req, res) => {
+  try {
+    const entries = await getDevTestAccountEntries();
+    const accounts = await hydrateDevTestAccounts(entries);
+    return res.json({
+      ok: true,
+      accounts,
+      count: accounts.length,
+      decart_environment: {
+        ...decartEnvironmentDiagnostics(),
+        dev_test_accounts: accounts.length,
+      },
+    });
+  } catch (err) {
+    console.warn("[DEV ACCOUNTS] list error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/admin/api/dev-accounts", adminAuth, async (req, res) => {
+  if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Super admin required" });
+  const userId = String(req.body?.user_id || "").trim();
+  if (!validateUUID(userId)) return res.status(400).json({ error: "Valid user_id required" });
+  try {
+    const current = await getDevTestAccountEntries();
+    const exists = current.some(entry => entry.id === userId);
+    const next = exists
+      ? current
+      : [...current, { id: userId, added_at: new Date().toISOString(), added_by: req.session.adminEmail || "admin" }];
+    const entries = await setDevTestAccountEntries(next);
+    await logAction("dev_test_account_add", req.session.adminEmail, req.session.adminRole, userId, { already_exists: exists }, req);
+    return res.json({ ok: true, already_exists: exists, accounts: await hydrateDevTestAccounts(entries) });
+  } catch (err) {
+    console.warn("[DEV ACCOUNTS] add error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/admin/api/dev-accounts/:user_id", adminAuth, async (req, res) => {
+  if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Super admin required" });
+  const userId = String(req.params.user_id || "").trim();
+  if (!validateUUID(userId)) return res.status(400).json({ error: "Valid user_id required" });
+  try {
+    const current = await getDevTestAccountEntries();
+    const entries = await setDevTestAccountEntries(current.filter(entry => entry.id !== userId));
+    await logAction("dev_test_account_remove", req.session.adminEmail, req.session.adminRole, userId, {}, req);
+    return res.json({ ok: true, accounts: await hydrateDevTestAccounts(entries) });
+  } catch (err) {
+    console.warn("[DEV ACCOUNTS] remove error:", err.message);
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -4130,6 +4203,60 @@ async function setProtectedBillingAllowlist(list) {
   return normalized;
 }
 
+async function getDevTestAccountEntries() {
+  const raw = await getSettingValue(DEV_TEST_ACCOUNTS_SETTING, "[]");
+  try {
+    const parsed = JSON.parse(raw || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map(item => typeof item === "string" ? { id: item, added_at: null, added_by: null } : item)
+      .filter(item => item?.id && validateUUID(String(item.id)))
+      .map(item => ({
+        id: String(item.id),
+        added_at: item.added_at || null,
+        added_by: item.added_by || null,
+      }));
+  } catch (_) {
+    return [];
+  }
+}
+
+async function setDevTestAccountEntries(entries) {
+  const seen = new Set();
+  const normalized = [];
+  for (const entry of entries || []) {
+    const id = String(entry?.id || "").trim();
+    if (!validateUUID(id) || seen.has(id)) continue;
+    seen.add(id);
+    normalized.push({
+      id,
+      added_at: entry.added_at || new Date().toISOString(),
+      added_by: entry.added_by || null,
+    });
+  }
+  await setSettingValue(DEV_TEST_ACCOUNTS_SETTING, JSON.stringify(normalized));
+  return normalized;
+}
+
+async function hydrateDevTestAccounts(entries = []) {
+  const { merged } = await fetchAllUsersData();
+  const userMap = new Map((merged || []).map(user => [user.id, user]));
+  return entries.map(entry => {
+    const user = userMap.get(entry.id) || {};
+    return {
+      id: entry.id,
+      email: user.email || "unknown",
+      display_name: user.name && user.name !== "—" ? user.name : null,
+      credits: Number(user.credits_balance || 0),
+      status: user.is_banned ? "banned" : (user.last_seen_at ? "active" : "unknown"),
+      last_seen: user.last_seen_at || null,
+      created_at: user.created_at || null,
+      added_at: entry.added_at || null,
+      added_by: entry.added_by || null,
+    };
+  });
+}
+
 async function resolveBillingModeForUser(userId = null) {
   const flags = await getBillingFeatureFlags();
   const allowlist = await getProtectedBillingAllowlist();
@@ -5414,15 +5541,16 @@ const SETTINGS_ALLOWED_KEYS = [
 ];
 
 // Returns masked current values + server info
-app.get("/admin/api/settings", adminAuth, (req, res) => {
+app.get("/admin/api/settings", adminAuth, async (req, res) => {
   if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Insufficient permissions", required: "super_admin" });
   const mask = (val) => val ? maskKey(val) : "not set";
+  const devAccountCount = (await getDevTestAccountEntries().catch(() => [])).length;
   res.json({
     decart_key:       mask(decartKeyForEnv("prod")),
     decart_key_prod:  mask(decartKeyForEnv("prod")),
     decart_key_dev:   mask(decartKeyForEnv("dev")),
     decart_active_env_for_admin_tests: decartAdminTestEnv(),
-    decart_environment: decartEnvironmentDiagnostics(),
+    decart_environment: { ...decartEnvironmentDiagnostics(), dev_test_accounts: devAccountCount },
     supabase_url:     process.env.SUPABASE_URL || "not set",
     supabase_key:     mask(process.env.SUPABASE_SERVICE_ROLE_KEY),
     admin_email:      process.env.ADMIN_EMAIL  || "not set",

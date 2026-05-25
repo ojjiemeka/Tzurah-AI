@@ -1538,7 +1538,9 @@ kbd {
 <!-- Tab bar -->
 <div class="tab-bar">
   <button class="tab-btn active" data-tab="overview">Overview</button>
+  <button class="tab-btn" data-tab="billing">Billing</button>
   <button class="tab-btn" data-tab="users">Users</button>
+  <button class="tab-btn" data-tab="devaccounts">Dev/Test Accounts</button>
   <button class="tab-btn" data-tab="revenue">Revenue</button>
   <button class="tab-btn" data-tab="purchases">Purchases</button>
   <button class="tab-btn" data-tab="sessions">🖥️ Sessions</button>
@@ -1684,8 +1686,24 @@ kbd {
     </div>
   </div>
 
+  <div class="panel-card" id="overview-billing-summary-card" style="margin-top:16px">
+    <div class="panel-hdr">
+      <span class="ptitle">Billing Safety</span>
+      <button class="btn btn-accent btn-sm" style="margin-left:auto;font-size:10px" onclick="switchTab('billing')">Open Billing</button>
+    </div>
+    <div class="panel-body">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Billing safety summary from reconciliation analytics.</div>
+      <div class="billing-state-grid">
+        <div class="billing-state-item"><div class="billing-state-label">Integrity Score</div><div class="billing-state-value" id="overview-integrity-score">--</div></div>
+        <div class="billing-state-item"><div class="billing-state-label">Dangerous Anomalies</div><div class="billing-state-value" id="overview-dangerous-anomalies">--</div></div>
+        <div class="billing-state-item"><div class="billing-state-label">Billing Mode</div><div class="billing-state-value" id="overview-billing-mode">--</div></div>
+        <div class="billing-state-item"><div class="billing-state-label">Decart Env Rule</div><div class="billing-state-value" id="overview-decart-env-rule">prod for real users</div></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Billing Reconciliation -->
-  <div class="panel-card" style="margin-top:16px">
+  <div class="panel-card" id="billing-reconciliation-card" style="margin-top:16px">
     <div class="panel-hdr">
       <span class="ptitle">Billing Reconciliation</span>
       <span id="recon-updated" style="font-size:11px;color:var(--muted);margin-left:auto">--</span>
@@ -1860,6 +1878,68 @@ kbd {
 </div>
 
 <!-- ══ USERS ═════════════════════════════════════════════════════ -->
+<!-- BILLING -->
+<div class="tab-panel" id="tab-billing">
+  <div class="panel-card" style="margin-bottom:16px">
+    <div class="panel-hdr"><span class="ptitle">Billing</span></div>
+    <div class="panel-body">
+      <div style="font-size:13px;color:var(--text2);max-width:980px">
+        This page monitors billing safety. It detects failed writes, duplicate syncs, stale sessions,
+        rounding drift, protected-vs-legacy mismatches, and rollback events.
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px">
+        Protected billing is the new safer billing writer. It can be enabled for selected test users first.
+        Global live billing remains off until approved.
+      </div>
+    </div>
+  </div>
+  <div id="billing-reconciliation-mount"></div>
+</div>
+
+<!-- DEV/TEST ACCOUNTS -->
+<div class="tab-panel" id="tab-devaccounts">
+  <div class="panel-card">
+    <div class="panel-hdr">
+      <span class="ptitle">Dev/Test Accounts</span>
+      <button class="btn btn-ghost btn-sm" style="margin-left:auto;font-size:10px" onclick="loadDevAccounts()">Refresh</button>
+    </div>
+    <div class="panel-body">
+      <div style="font-size:13px;color:var(--text2);max-width:980px;margin-bottom:12px">
+        Dev accounts are internal accounts allowed to use dev/test Decart routing. They do not affect real users
+        and do not automatically enable protected billing.
+      </div>
+      <div class="two-col" style="margin-bottom:16px">
+        <div class="panel-card" style="border-radius:8px">
+          <div class="panel-body">
+            <div class="pb-section-title">Add Dev/Test Account</div>
+            <div id="dev-account-picker-wrap"></div>
+            <button id="dev-account-add-btn" class="btn btn-accent btn-sm" style="width:100%;justify-content:center;margin-top:8px" onclick="addSelectedDevAccount()" disabled>Add dev/test account</button>
+            <div id="dev-account-selected" style="font-size:11px;color:var(--muted);margin-top:8px">Select an internal account to continue.</div>
+          </div>
+        </div>
+        <div class="panel-card" style="border-radius:8px">
+          <div class="panel-body">
+            <div class="pb-section-title">Decart Environment Proof</div>
+            <div class="billing-state-grid">
+              <div class="billing-state-item"><div class="billing-state-label">Prod Key</div><div class="billing-state-value" id="devacct-prod-key">--</div></div>
+              <div class="billing-state-item"><div class="billing-state-label">Dev Key</div><div class="billing-state-value" id="devacct-dev-key">--</div></div>
+              <div class="billing-state-item"><div class="billing-state-label">Admin Test Env</div><div class="billing-state-value" id="devacct-active-env">--</div></div>
+              <div class="billing-state-item"><div class="billing-state-label">Dev Accounts</div><div class="billing-state-value" id="devacct-count">--</div></div>
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:10px">
+              Production users always use the production key. Only dev/test accounts can use the dev key when admin test environment is set to dev.
+              Protected billing test users are separate from dev accounts.
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="pb-allowlist" id="dev-account-list">
+        <div class="loading-cell"><div class="spinner"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="tab-panel" id="tab-users">
   <!-- Quick stats bar -->
   <div class="user-stats-bar" id="user-stats-bar">
@@ -2282,6 +2362,7 @@ kbd {
             <option value="dev">Development/Test</option>
           </select>
           <span id="decart-env-diagnostics" style="font-size:10px;color:var(--muted)">loading...</span>
+          <span style="font-size:10px;color:var(--muted)">Production users always use production. Only dev/test accounts can use dev. Protected billing test users are separate.</span>
         </div>
         <div class="settings-row-actions">
           <button class="btn btn-accent btn-sm" onclick="saveDecartAdminTestEnv()">Save</button>
@@ -3517,9 +3598,12 @@ function switchTab(tab) {
     p.classList.toggle("active", show);
     if (show) { p.classList.remove("tab-entering"); void p.offsetWidth; p.classList.add("tab-entering"); }
   });
+  if (tab === "billing") mountBillingPage();
   switch(tab) {
-    case 'overview':      if (!cache.stats) loadStats(); loadReconciliation(); break;
+    case 'overview':      if (!cache.stats) loadStats(); break;
+    case 'billing':       loadReconciliation(); break;
     case 'users':         if (!cache.users.length) loadUsersData(); break;
+    case 'devaccounts':   initDevAccountsTab(); break;
     case 'revenue':       if (!cache.allPurchases.length) loadRevenuePurchases(); break;
     case 'purchases':     if (!allPurchases.length) loadPurchasesData(); break;
     case 'sessions':      loadSessionsTab(); break;
@@ -3538,6 +3622,26 @@ function switchTab(tab) {
 }
 
 // ── Logout ────────────────────────────────────────────────────────
+function mountBillingPage() {
+  const card = document.getElementById("billing-reconciliation-card");
+  const mount = document.getElementById("billing-reconciliation-mount");
+  if (card && mount && card.parentElement !== mount) mount.appendChild(card);
+}
+
+function updateOverviewBillingSummary() {
+  const analytics = window._reconAnalytics || {};
+  const cutover = window._billingCutoverStatus || {};
+  const score = analytics?.integrity?.score ?? "--";
+  const dangerous = analytics?.analytics?.totals?.active_critical_count ?? analytics?.analytics?.totals?.dangerous_events ?? "--";
+  const mode = cutover?.mode || "--";
+  const scoreEl = document.getElementById("overview-integrity-score");
+  const dangerEl = document.getElementById("overview-dangerous-anomalies");
+  const modeEl = document.getElementById("overview-billing-mode");
+  if (scoreEl) scoreEl.textContent = String(score);
+  if (dangerEl) dangerEl.textContent = dangerous === "--" ? "--" : fmtN(dangerous);
+  if (modeEl) modeEl.textContent = mode;
+}
+
 function logout() {
   fetch("/admin/logout", { method: "POST", credentials: "include" })
     .finally(() => { window.location.href = "/admin/login"; });
@@ -4450,6 +4554,10 @@ function protectedBillingAllowlistIds() {
   return window._billingCutoverStatus?.allowlist || [];
 }
 
+function devAccountIds() {
+  return (window._devAccounts || []).map(account => account.id);
+}
+
 function findCachedAdminUser(userId) {
   if (!userId) return null;
   const fromCache = (cache.users || []).find(u => (u.id || u.user_id) === userId);
@@ -4459,6 +4567,105 @@ function findCachedAdminUser(userId) {
     if (match) return UserPicker.normalizeUser(match);
   }
   return null;
+}
+
+function initDevAccountsTab() {
+  const wrap = document.getElementById("dev-account-picker-wrap");
+  if (wrap && !wrap.dataset.mounted) {
+    wrap.innerHTML = UserPicker.markup("dev-account-picker", {
+      label: "Search/select user",
+      placeholder: "Search email, display name, or user ID",
+      hint: "UUID is stored internally only.",
+      advanced: false,
+    });
+    wrap.dataset.mounted = "true";
+    UserPicker.mount("dev-account-picker", {
+      onSelect: renderDevAccountSelection,
+    });
+  }
+  loadDevAccounts();
+}
+
+function renderDevAccountSelection(user) {
+  const btn = document.getElementById("dev-account-add-btn");
+  const selected = document.getElementById("dev-account-selected");
+  const normalized = UserPicker.normalizeUser(user);
+  const alreadyAdded = normalized?.id && devAccountIds().includes(normalized.id);
+  if (btn) {
+    btn.disabled = !normalized || alreadyAdded;
+    btn.textContent = alreadyAdded ? "Already added" : "Add dev/test account";
+  }
+  if (selected) {
+    selected.innerHTML = normalized
+      ? `<strong style="color:var(--text)">${esc(normalized.email)}</strong><br>${esc(normalized.display_name)} &middot; ${fmtN(normalized.credits)} credits &middot; ${esc(normalized.status)}`
+      : "Select an internal account to continue.";
+  }
+}
+
+function renderDevAccounts(data = {}) {
+  window._devAccounts = data.accounts || [];
+  const list = document.getElementById("dev-account-list");
+  const env = data.decart_environment || {};
+  const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+  set("devacct-prod-key", env.production_configured ? "configured" : "missing");
+  set("devacct-dev-key", env.dev_configured ? "configured" : "missing");
+  set("devacct-active-env", env.admin_test_env || "prod");
+  set("devacct-count", fmtN(data.count || window._devAccounts.length || 0));
+  if (!list) return;
+  if (!window._devAccounts.length) {
+    list.innerHTML = `<div class="td-empty">No dev/test accounts configured.</div>`;
+  } else {
+    list.innerHTML = window._devAccounts.map(account => protectedBillingUserCard(account, {
+      action: `<button class="btn btn-ghost btn-xs" onclick="removeDevAccount('${esc(account.id)}')">Remove</button>
+        <div class="pb-user-meta" style="font-size:10px;margin-top:4px">Added ${esc(account.added_at ? new Date(account.added_at).toLocaleString() : "unknown")}</div>`,
+    })).join("");
+  }
+  renderDevAccountSelection(UserPicker.state["dev-account-picker"]?.selected || null);
+}
+
+async function loadDevAccounts() {
+  try {
+    const data = await api("/admin/api/dev-accounts");
+    renderDevAccounts(data || {});
+  } catch (e) {
+    const list = document.getElementById("dev-account-list");
+    if (list) list.innerHTML = `<div class="td-empty" style="color:var(--danger)">Failed to load dev accounts: ${esc(e.message)}</div>`;
+  }
+}
+
+async function addSelectedDevAccount() {
+  const userId = UserPicker.getSelectedId("dev-account-picker");
+  if (!userId) return toast("Select a valid user first.", "error");
+  try {
+    const data = await apiPost("/admin/api/dev-accounts", { user_id: userId });
+    toast(data.already_exists ? "Already added" : "Dev/test account added", data.already_exists ? "info" : "success");
+    renderDevAccounts(data || {});
+  } catch (e) {
+    toast("Dev account add failed: " + e.message, "error");
+  }
+}
+
+async function removeDevAccount(userId) {
+  const user = (window._devAccounts || []).find(account => account.id === userId) || findCachedAdminUser(userId) || { email: shortSessionId(userId) };
+  const confirmed = await showModalConfirm(`Remove ${esc(user.email || shortSessionId(userId))} from dev/test accounts?`, {
+    title: "Remove Dev/Test Account",
+    confirmLabel: "Remove",
+    variant: "warning",
+  });
+  if (!confirmed) return;
+  try {
+    const r = await fetch(`/admin/api/dev-accounts/${encodeURIComponent(userId)}`, { method: "DELETE", credentials: "include" });
+    if (!r.ok) {
+      let err = {};
+      try { err = await r.json(); } catch (_) {}
+      throw new Error(err.error || "HTTP " + r.status);
+    }
+    const data = await r.json();
+    renderDevAccounts(data || {});
+    toast("Dev/test account removed", "success");
+  } catch (e) {
+    toast("Remove failed: " + e.message, "error");
+  }
 }
 
 function protectedBillingUserCard(user, { action = "" } = {}) {
@@ -4614,6 +4821,7 @@ async function loadReconciliationAnalytics() {
     renderTrendBars(trends?.trends);
     renderTopAnomalies(trends?.trends);
     renderBillingCutoverStatus(cutover);
+    updateOverviewBillingSummary();
     const lbl = document.getElementById("analytics-window-label");
     if (lbl) lbl.textContent = days === "1" ? "24 hours" : `${analytics?.window_days || 7} days`;
   } catch (e) {
@@ -7554,7 +7762,7 @@ async function loadSettings() {
     const decartEnvDiag = document.getElementById("decart-env-diagnostics");
     if (decartEnvDiag) {
       const env = d.decart_environment || {};
-      decartEnvDiag.textContent = `admin tests: ${d.decart_active_env_for_admin_tests || "prod"} | prod ${env.production_configured ? "set" : "missing"} | dev ${env.dev_configured ? "set" : "missing"}`;
+      decartEnvDiag.textContent = `admin tests: ${d.decart_active_env_for_admin_tests || "prod"} | prod ${env.production_configured ? "set" : "missing"} | dev ${env.dev_configured ? "set" : "missing"} | dev accounts ${fmtN(env.dev_test_accounts || 0)}`;
     }
     document.getElementById("supabase-key-display").textContent      = d.supabase_key;
     document.getElementById("supabase-url-display").textContent      = d.supabase_url;
@@ -7980,7 +8188,9 @@ function clearSessionsFilter() {
 // ══════════════════════════════════════════════════════════════════
 const TAB_PERMISSIONS = {
   overview:      ['super_admin', 'admin', 'support', 'analyst'],
+  billing:       ['super_admin', 'admin', 'support', 'analyst'],
   users:         ['super_admin', 'admin', 'support'],
+  devaccounts:   ['super_admin'],
   revenue:       ['super_admin', 'admin', 'analyst'],
   purchases:     ['super_admin', 'admin', 'support', 'analyst'],
   sessions:      ['super_admin', 'admin', 'support'],
@@ -9055,7 +9265,7 @@ document.addEventListener("keydown", (e) => {
   if (_gKeyPressed) {
     clearTimeout(_gKeyTimer);
     _gKeyPressed = false;
-    const tabMap = { u: "users", r: "revenue", o: "overview", a: "audit", f: "flags", s: "settings" };
+    const tabMap = { u: "users", b: "billing", d: "devaccounts", r: "revenue", o: "overview", a: "audit", f: "flags", s: "settings" };
     const tab = tabMap[k];
     if (tab) { e.preventDefault(); switchTab(tab); }
   }
@@ -9118,6 +9328,7 @@ async function init() {
     }
   } catch (_) {}
   buildMobileDrawerNav();
+  mountBillingPage();
 
   initDecartBalance();
   updateSystemStatus();
