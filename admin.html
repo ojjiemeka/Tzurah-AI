@@ -4102,6 +4102,60 @@ const UserPicker = {
     };
     this.search(id, "");
   },
+  normalizeUser(user) {
+    if (!user) return null;
+    const id = user.id || user.user_id || "";
+    if (!id) return null;
+    const lastSeen = user.last_seen || user.last_seen_at || null;
+    return {
+      id,
+      email: user.email || user.user_email || "unknown",
+      display_name: user.display_name || user.name || "Unknown User",
+      credits: Number(user.credits ?? user.credits_balance ?? user.balance ?? 0),
+      status: user.status || (user.is_banned ? "banned" : (lastSeen ? "active" : "unknown")),
+      last_seen: lastSeen,
+      created_at: user.created_at || null,
+    };
+  },
+  filterUsers(users, query = "") {
+    const q = String(query || "").toLowerCase().trim();
+    return (users || [])
+      .map(user => this.normalizeUser(user))
+      .filter(Boolean)
+      .filter(user => {
+        if (!q) return true;
+        return String(user.email || "").toLowerCase().includes(q) ||
+          String(user.display_name || "").toLowerCase().includes(q) ||
+          String(user.id || "").toLowerCase().includes(q);
+      })
+      .sort((a, b) => new Date(b.last_seen || b.created_at || 0) - new Date(a.last_seen || a.created_at || 0))
+      .slice(0, 25);
+  },
+  async loadFromUsersTableEndpoint(query = "") {
+    const q = String(query || "").trim();
+    const url = q
+      ? `/admin/api/users?limit=100&search=${encodeURIComponent(q)}`
+      : "/admin/api/users?limit=100";
+    const data = await api(url);
+    return data?.users || [];
+  },
+  async loadFromSearchEndpoint(state, query = "") {
+    const endpoint = state.endpoint || "/admin/api/users/search";
+    const joiner = endpoint.includes("?") ? "&" : "?";
+    const data = await api(`${endpoint}${joiner}q=${encodeURIComponent(query || "")}`);
+    return data?.users || [];
+  },
+  setDiagnostics(id, { source = "fallback", totalLoaded = 0, duration = 0, degraded = false } = {}) {
+    const state = this.state[id];
+    if (!state) return;
+    state.diagnostics = {
+      source,
+      total_loaded_users: totalLoaded,
+      duration_ms: duration,
+      degraded,
+    };
+    this.renderDiagnostics(id);
+  },
   label(user) {
     const email = user?.email || "unknown";
     const name = user?.display_name || "—";
@@ -4118,23 +4172,47 @@ const UserPicker = {
     const state = this.state[id];
     const results = document.getElementById(`${id}-results`);
     if (!state || !results) return;
+    const started = performance.now();
     results.innerHTML = `<div style="padding:10px;color:var(--muted);font-size:12px">Searching...</div>`;
     try {
-      const data = await api(`${state.endpoint}?q=${encodeURIComponent(query || "")}`);
-      state.users = data?.users || [];
-      state.diagnostics = data?.diagnostics || null;
-      this.renderDiagnostics(id);
+      const cached = cache?.users || [];
+      let source = "cached_users";
+      let loadedUsers = cached;
+      let users = this.filterUsers(cached, query);
+
+      if (!loadedUsers.length || (String(query || "").trim() && !users.length)) {
+        source = "users_table_endpoint";
+        loadedUsers = await this.loadFromUsersTableEndpoint(query);
+        users = this.filterUsers(loadedUsers, query);
+      }
+
+      if (!users.length && state.endpoint) {
+        try {
+          source = "users_search_endpoint";
+          loadedUsers = await this.loadFromSearchEndpoint(state, query);
+          users = this.filterUsers(loadedUsers, query);
+        } catch (fallbackErr) {
+          if (!loadedUsers.length) throw fallbackErr;
+          source = "fallback";
+        }
+      }
+
+      state.users = users;
+      this.setDiagnostics(id, {
+        source,
+        totalLoaded: loadedUsers.length || users.length,
+        duration: Math.round(performance.now() - started),
+        degraded: source === "fallback",
+      });
       this.render(id);
     } catch (e) {
       results.innerHTML = `<div style="padding:10px;color:var(--danger);font-size:12px">Could not load users. Try again or use Advanced UUID fallback.</div>`;
-      state.diagnostics = {
-        endpoint_healthy: false,
-        profiles_loaded_count: 0,
-        auth_loaded_count: 0,
+      this.setDiagnostics(id, {
+        source: "fallback",
+        totalLoaded: 0,
+        duration: Math.round(performance.now() - started),
         degraded: true,
-        duration_ms: 0,
-      };
-      this.renderDiagnostics(id);
+      });
     }
   },
   renderDiagnostics(id) {
@@ -4142,17 +4220,16 @@ const UserPicker = {
     const el = state?.diagnosticsId ? document.getElementById(state.diagnosticsId) : null;
     if (!state || !el) return;
     const d = state.diagnostics || {};
-    const healthy = d.endpoint_healthy !== false;
     const degraded = d.degraded === true;
     el.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
         <strong>User Search Diagnostics</strong>
-        <span class="badge ${healthy && !degraded ? "badge-green" : "badge-amber"}">${healthy && !degraded ? "Healthy" : "Degraded"}</span>
+        <span class="badge ${!degraded ? "badge-green" : "badge-amber"}">${!degraded ? "Healthy" : "Degraded"}</span>
       </div>
       <div class="billing-state-grid">
-        <div class="billing-state-item"><div class="billing-state-label">Endpoint</div><div class="billing-state-value">${healthy ? "healthy" : "fallback"}</div></div>
-        <div class="billing-state-item"><div class="billing-state-label">Profiles</div><div class="billing-state-value">${fmtN(d.profiles_loaded_count || 0)}</div></div>
-        <div class="billing-state-item"><div class="billing-state-label">Auth Users</div><div class="billing-state-value">${fmtN(d.auth_loaded_count || 0)}</div></div>
+        <div class="billing-state-item"><div class="billing-state-label">Source</div><div class="billing-state-value">${esc(d.source || "pending")}</div></div>
+        <div class="billing-state-item"><div class="billing-state-label">Loaded Users</div><div class="billing-state-value">${fmtN(d.total_loaded_users || 0)}</div></div>
+        <div class="billing-state-item"><div class="billing-state-label">Degraded</div><div class="billing-state-value">${degraded ? "true" : "false"}</div></div>
         <div class="billing-state-item"><div class="billing-state-label">Last Query</div><div class="billing-state-value">${fmtN(d.duration_ms || 0)} ms</div></div>
       </div>
       ${degraded ? `<div style="color:var(--warning);font-size:11px;margin-top:8px">Degraded mode active. Results may be partial.</div>` : ""}

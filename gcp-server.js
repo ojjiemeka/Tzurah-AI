@@ -2421,6 +2421,62 @@ app.get("/admin/api/users", adminAuth, async (req, res) => {
 });
 
 // ── Admin: users active today (with session stats) ────────────────
+// GET /admin/api/users/search - compatibility route for reusable pickers.
+// Keep this before /admin/api/users/:id so Express never treats "search" as a user id.
+app.get("/admin/api/users/search", adminAuth, async (req, res) => {
+  const started = Date.now();
+  const query = String(req.query.q || "").toLowerCase().trim();
+  console.log("[ADMIN USER SEARCH] query=", query);
+  try {
+    const { merged } = await fetchAllUsersData();
+    const users = (merged || [])
+      .filter(user => {
+        if (!query) return true;
+        return String(user.email || "").toLowerCase().includes(query) ||
+          String(user.name || "").toLowerCase().includes(query) ||
+          String(user.id || "").toLowerCase().includes(query);
+      })
+      .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+      .slice(0, 25)
+      .map(user => ({
+        id: user.id,
+        email: user.email || "unknown",
+        display_name: user.name || null,
+        credits: Number(user.credits_balance || 0),
+        status: user.is_banned ? "banned" : (user.last_seen_at ? "active" : "unknown"),
+        last_seen: user.last_seen_at || null,
+      }))
+      .filter(Boolean);
+
+    return res.json({
+      success: true,
+      ok: true,
+      users,
+      degraded: false,
+      diagnostics: {
+        source: "users_table_endpoint",
+        total_loaded_users: merged?.length || 0,
+        duration_ms: Date.now() - started,
+        degraded: false,
+      },
+    });
+  } catch (err) {
+    console.error("[ADMIN USER SEARCH ERROR]", err);
+    return res.json({
+      success: true,
+      ok: true,
+      users: [],
+      degraded: true,
+      diagnostics: {
+        source: "fallback",
+        total_loaded_users: 0,
+        duration_ms: Date.now() - started,
+        degraded: true,
+      },
+    });
+  }
+});
+
 app.get("/admin/api/users/active-today", adminAuth, async (_req, res) => {
   res.set("Cache-Control", "no-store");
   const oneDayAgo = new Date(Date.now() - 86400000).toISOString();
@@ -4201,35 +4257,6 @@ async function safeAdminUserSearch(q = "", options = {}) {
     diagnostics,
   };
 }
-
-// GET /admin/api/users/search - reusable safe admin user picker
-app.get("/admin/api/users/search", (req, res, next) => {
-  const query = String(req.query.q || "");
-  console.log("[ADMIN USER SEARCH] query=", query);
-  next();
-}, adminAuth, async (req, res) => {
-  const query = String(req.query.q || "");
-  try {
-    return res.json(await safeAdminUserSearch(query));
-  } catch (err) {
-    console.error("[ADMIN USER SEARCH ERROR]", err);
-    return res.json({
-      success: true,
-      ok: true,
-      users: [],
-      degraded: true,
-      diagnostics: {
-        endpoint_healthy: false,
-        profiles_loaded_count: 0,
-        auth_loaded_count: 0,
-        degraded: true,
-        timeout: false,
-        duration_ms: 0,
-        errors: [err?.message || "User search failed"],
-      },
-    });
-  }
-});
 
 // GET /admin/api/soak-test/users - super-admin-only user picker for dry-run soak tests
 app.get("/admin/api/soak-test/users", (req, res, next) => {
