@@ -30,6 +30,26 @@ Debug checklist:
 - Test modal helper alone with `window.showModalAlert("test")`.
 - Check console for Decart token or WebRTC lifecycle errors.
 
+### Scene And Background Presets
+
+Location: `index.html`
+
+Responsibility:
+- Local built-in scene preset model.
+- Scene picker UI state and local persistence.
+- Prompt routing that preserves the selected identity while changing only the environment/background.
+
+Key functions:
+- `buildDecartScenePrompt(identityPrompt, selectedScenePreset)`
+- `applyDecartScenePreset(session, preset)`
+- `resetDecartScene(session)`
+
+Debug checklist:
+- Select a scene before start and confirm it queues for the next session.
+- Start a session and confirm the first `set()` includes the selected scene prompt.
+- Apply/reset a scene during an active session without interrupting billing/session timers.
+- Confirm `window._lastSceneApplication` includes only non-secret environment metadata.
+
 ## Admin Dashboard
 
 Location: `admin.html`
@@ -174,6 +194,29 @@ Debug checklist:
 - Check route permission with `can(role, permission)`.
 - Use Supabase v2 `{ data, error }` style.
 - Log admin actions for mutations.
+
+## Local Decart Token Proxy
+
+Location: `server.mjs`
+
+Responsibility:
+- Proxy user-authenticated Decart token requests from Electron to the GCP server.
+- Preserve non-secret Decart routing metadata for diagnostics.
+- Never store or expose Decart API keys beyond the token response needed by the SDK.
+
+Debug checklist:
+- Normal users must continue to receive production Decart routing from GCP.
+- Dev/test routing decisions remain owned by `gcp-server.js`.
+- Renderer may read `decart_environment_used` and `decart_reason`, but never receives raw production/dev keys separately.
+
+## Update And Release Plumbing
+
+Location: `RELEASE_PLAN.md`
+
+Responsibility:
+- Define dev, beta, and stable release channels before shipping an installer.
+- Keep packaging, code signing, GitHub Releases/update feed, and rollback work explicit.
+- Prevent product-facing app updates from being mixed into the deploy-only server sync path.
 
 ## File Boundary
 
