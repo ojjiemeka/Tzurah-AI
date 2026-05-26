@@ -1,4 +1,120 @@
-# Tzurah Live - Agent Instructions
+# Tzurah-AI Server/Admin Agent Instructions
+
+Codex must read `AGENT.md`, `BRAIN.md`, and `COMPONENTS.md` before non-trivial edits in this repo. For billing or reconciliation work, also read `PHASE7A_SOAK_TEST.md`.
+
+## Loqii/Tzurah Coding Engine
+
+Future prompts should begin with this instruction for server/admin work:
+`Read AGENT.md, BRAIN.md, COMPONENTS.md, and relevant PHASE docs before editing. Declare repo scope, risk class, topology, tests, rollback path, and sync path.`
+
+### Repo Boundary Gate
+
+Declare one scope before editing:
+- `Tzurah-AI only`: backend, admin panel, billing, protected billing, reconciliation, Decart token routing, feature flags, database/API contracts.
+- `Loqii only`: Electron app UI, local renderer/main-process UX, OAuth desktop shell, Decart client/session UX, scenes, styles, prompts, and local app components.
+- `Both repos required`: allowed only for explicit app/server contract changes. Explain why before editing.
+
+Server/admin changes stay in Tzurah-AI. App changes stay in Loqii.
+
+If both repos are required, explain the contract bridge before editing either side.
+
+### Topology First
+
+Before code, map:
+- affected files
+- state owner
+- request/data flow
+- async/timing risks
+- admin/UI surfaces affected
+- API/database boundaries
+- billing/reconciliation impact
+- blast radius
+
+State this topology briefly to the user before editing unless the change is trivial.
+
+### Four Invariants
+
+For every non-trivial change, answer:
+- Where does state live?
+- Where does feedback or observability live?
+- What breaks if this changes?
+- When does timing or order matter?
+
+### Risk Classification
+
+Classify work as `trivial`, `low risk`, `medium risk`, `high risk`, or `dangerous`.
+
+Billing, protected billing, reconciliation, Decart token routing, Supabase auth, database migrations, admin RBAC, and session lifecycle start at high risk unless the change is purely documentation.
+
+High-risk and dangerous work requires extra mapping, rollback notes, explicit tests, and no broad refactors.
+
+### Server Red Lines
+
+Never expose secrets, service-role keys, bootstrap/internal tokens, OAuth secrets, admin passwords, production credentials, or Decart keys in docs, logs, UI, commits, or final reports.
+Never alter billing, protected billing, reconciliation, Decart routing, Supabase auth, Google OAuth, or database schema unless the task explicitly requires it.
+
+Billing/protected billing/reconciliation changes are high-risk or dangerous. If touched:
+- explain the exact flow
+- preserve rollback and legacy fallback
+- prevent duplicate deductions
+- run reconciliation checks
+- document residual risk
+
+### Admin UI Rules
+
+Do not use native `alert`, `confirm`, or `prompt`.
+Do not create one-off modal systems when a shared admin modal exists.
+Do not leak debug/admin scaffolding into product-facing app code.
+Feature flags must default closed for experimental or diagnostic behavior.
+
+### Dependency Safety
+
+Do not add dependencies unless necessary. Before adding one, document why native code is insufficient, check package age/version, pin the exact version, and update the lockfile intentionally.
+
+Do not install packages published less than 7 days ago unless the user explicitly overrides that risk.
+
+### Test Gate
+
+Run relevant checks before final response:
+- `node --check` touched JS
+- parse changed inline scripts in admin HTML
+- native dialog scan
+- mojibake scan
+- RBAC/permission route scan when admin changes
+- reconciliation checks when billing/reconciliation changes
+- `git-update.sh --dry-run` before server/admin sync
+
+### Sync
+
+Never use `git add -A`.
+Use `git-update.sh` for server/admin deploy sync.
+Do not push Electron app source through this repo.
+
+### Memory And Checkpoints
+
+Update `BRAIN.md` only with durable high-signal lessons. Do not add session logs.
+
+After major successful phases, update `COMPONENTS.md` and relevant PHASE docs. Update app release docs only from the Loqii repo.
+
+### Stop Conditions
+
+Stop and ask before coding if state ownership, API contract, repo boundary, database migration, billing impact, auth/session flow, admin permission model, or user intent is unclear.
+
+### Final Report
+
+Every final report includes:
+- files changed
+- repo touched
+- topology mapped
+- risks found
+- tests run
+- manual QA needed
+- sync result
+- deferred risks
+
+### Stop Conditions
+
+Stop and ask before coding if state ownership, API contract, repo boundary, database migration, billing impact, auth/session flow, or user intent is unclear.
 
 ## What This Project Is
 Tzurah Live is a commercial real-time AI face swap desktop
@@ -105,9 +221,8 @@ decart_deductions - id, session_id, user_id, duration_secs,
 ```
 
 ## Admin Panel
-Access: http://34.39.83.195:4000/admin
-Default login: admin@tzurah.ai / TzurahAdmin2025!
-WARNING: CHANGE THIS BEFORE LAUNCH
+Access: admin route on the deployed server.
+Admin credentials and bootstrap/internal secrets must stay out of repo docs and commits.
 
 Tabs: Overview, Users, Revenue, Purchases, Sessions,
       Alerts, Announcements, Email, Packs, IP Blocks,
@@ -116,23 +231,7 @@ Tabs: Overview, Users, Revenue, Purchases, Sessions,
 Sub-admin roles: super_admin, admin, support, analyst
 
 ## Key Variables & Constants
-```javascript
-// Burn rates
-TZURAH_BURN_RATE = 2.18  // cr/sec (user credits)
-DECART_BURN_RATE = 2.0   // cr/sec (Decart platform credits)
-CREDITS_PER_MINUTE = 130.8
-
-// GCP
-GCP_IP = '34.39.83.195'
-GCP_PORT = 4000
-
-// Local
-LOCAL_PORT = 3000
-
-// Bootstrap
-BOOTSTRAP_SECRET = 'tzurah-bootstrap-2025-prod'
-INTERNAL_SECRET = 'tzurah-internal-2025-prod'
-```
+Document variable names and expected shapes, not secret values. Secrets live in environment/config, never in docs or UI.
 
 ## What Is Working (Stable)
 - Face swap via Decart Lucy-2 SDK

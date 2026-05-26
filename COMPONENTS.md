@@ -2,6 +2,85 @@
 
 Permanent debugging rule: treat every change as a small Lego module. Find the component boundary first, change the smallest isolated surface, then test that surface before moving outward.
 
+## Loqii/Tzurah Coding Engine
+
+Codex must read `AGENT.md`, `BRAIN.md`, and `COMPONENTS.md` before non-trivial server/admin edits. For billing or reconciliation work, also read `PHASE7A_SOAK_TEST.md`.
+
+Before code, declare:
+- Repo scope: `Loqii only`, `Tzurah-AI only`, or `both repos required`.
+- Risk class: `trivial`, `low risk`, `medium risk`, `high risk`, or `dangerous`.
+- Topology: affected files, state ownership, request/data flow, async/timing risks, admin/UI surfaces, API/database boundaries, billing impact, and blast radius.
+
+Four invariants:
+- Where does state live?
+- Where does feedback or observability live?
+- What breaks if this changes?
+- When does timing or order matter?
+
+Stop before coding if repo boundary, state ownership, API contract, database migration, billing impact, auth/session flow, admin permission model, or user intent is unclear.
+
+Server/admin red lines:
+- Never expose secrets or production credentials.
+- Never touch billing/protected billing/reconciliation unless explicitly requested.
+- Preserve legacy billing fallback and rollback paths.
+- Prevent duplicate deductions.
+- Keep Decart token routing backend-owned.
+- Keep feature/debug/admin scaffolding out of normal user app surfaces.
+- Never use native `alert`, `confirm`, or `prompt` in admin UI.
+- Never use `git add -A`; sync through `git-update.sh`.
+
+Permanent agent entry rule: before non-trivial edits, read `AGENT.md`, `BRAIN.md`, and `COMPONENTS.md`.
+
+## Loqii/Tzurah Coding Engine
+
+Topology-first checklist:
+- Identify affected files.
+- Identify state ownership.
+- Identify request/data flow.
+- Identify async/timing risks.
+- Identify admin/UI surfaces affected.
+- Identify API/database boundaries.
+- Identify billing/reconciliation impact.
+- Identify blast radius.
+
+Four invariants:
+- Where does state live?
+- Where does feedback or observability live?
+- What breaks if this changes?
+- When does timing or order matter?
+
+Repo boundary gate:
+- `Tzurah-AI only`: backend/admin, billing, protected billing, reconciliation, Decart token routing, feature flags, database/API contracts.
+- `Loqii only`: app UI/UX, Electron, OAuth shell, Decart client/session UX, scenes/styles/prompts, local components.
+- `Both repos required`: explain the contract reason before editing either side.
+
+Risk classes:
+- `trivial`: typo/copy-only, no behavior.
+- `low risk`: isolated docs/admin copy/helper with clear owner.
+- `medium risk`: shared admin UI, route handlers, feature flags, auth-adjacent behavior.
+- `high risk`: Decart token routing, session ownership, admin RBAC, billing-adjacent changes, deploy/sync scripts.
+- `dangerous`: billing/protected billing/reconciliation/database migration/secrets.
+
+High-risk and dangerous work requires topology notes, rollback plan, explicit tests, and no broad refactor.
+
+Billing/protected billing/reconciliation rules:
+- Do not touch unless explicitly requested.
+- Preserve legacy fallback and rollback.
+- Prevent duplicate deductions.
+- Keep reconciliation observability intact.
+- Run reconciliation checks after changes.
+
+Dependency rules:
+- Do not add dependencies unless necessary.
+- Explain why native code is insufficient.
+- Check package age/version.
+- Pin exact version and update lockfile intentionally.
+
+Sync rules:
+- Never use `git add -A`.
+- Use `git-update.sh`.
+- Do not deploy Electron app source through this repo.
+
 ## Electron App UI
 
 Location: `index.html`

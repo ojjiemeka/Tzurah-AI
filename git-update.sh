@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ================================================================
-#  git-update.sh - Push only deploy-safe Tzurah server files
+#  git-update.sh - Push only deploy-safe Tzurah server files/docs
 #
 #  Windows PowerShell:
 #    & "C:\Program Files\Git\bin\bash.exe" .\git-update.sh "commit message"
@@ -15,6 +15,10 @@ set -euo pipefail
 #      - gcp-server.js
 #      - admin.html
 #      - admin-login.html
+#      - AGENT.md
+#      - BRAIN.md
+#      - COMPONENTS.md
+#      - PHASE7A_SOAK_TEST.md
 # ================================================================
 
 DEPLOY_DIR="../tzurah-server-deploy"
@@ -22,6 +26,11 @@ DEPLOY_SAFE_FILES=(
   "gcp-server.js"
   "admin.html"
   "admin-login.html"
+  "git-update.sh"
+  "AGENT.md"
+  "BRAIN.md"
+  "COMPONENTS.md"
+  "PHASE7A_SOAK_TEST.md"
 )
 
 DRY_RUN=0
@@ -49,6 +58,15 @@ if [[ ! -d "$DEPLOY_DIR/.git" ]]; then
   exit 1
 fi
 
+SOURCE_ROOT=$(pwd -P)
+TARGET_ROOT=$(cd "$DEPLOY_DIR" && pwd -P)
+IN_PLACE=0
+if [[ "$SOURCE_ROOT" == "$TARGET_ROOT" ]]; then
+  IN_PLACE=1
+  echo "In-place deploy repo detected; using the current checkout as source and target."
+  echo
+fi
+
 echo "Whitelisted files:"
 for file in "${DEPLOY_SAFE_FILES[@]}"; do
   echo "  - $file"
@@ -64,6 +82,10 @@ fi
 
 echo "Copying deploy-safe files:"
 for file in "${DEPLOY_SAFE_FILES[@]}"; do
+  if [[ "$IN_PLACE" == "1" ]]; then
+    echo "  in-place $file -> $file"
+    continue
+  fi
   echo "  copy $file -> $DEPLOY_DIR/$file"
   cp "$file" "$DEPLOY_DIR/$file"
 done
@@ -92,7 +114,7 @@ echo "Staged files:"
 echo "$STAGED_FILES" | sed 's/^/  - /'
 echo
 
-WHITELIST_PATTERN="^(gcp-server\.js|admin\.html|admin-login\.html)$"
+WHITELIST_PATTERN="^(gcp-server\.js|admin\.html|admin-login\.html|git-update\.sh|AGENT\.md|BRAIN\.md|COMPONENTS\.md|PHASE7A_SOAK_TEST\.md)$"
 BAD_FILES=$(echo "$STAGED_FILES" | grep -Ev "$WHITELIST_PATTERN" || true)
 if [[ -n "$BAD_FILES" ]]; then
   echo "ERROR: Refusing to commit files outside the deploy-safe whitelist:"

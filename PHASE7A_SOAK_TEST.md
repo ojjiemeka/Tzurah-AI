@@ -8,6 +8,17 @@ Live billing remains legacy-authoritative during this phase. The protected RPC m
 
 This soak test is designed to catch financial and session-lifecycle defects before switching real credit deduction to the protected RPC.
 
+## Coding Engine Gate
+
+Before changing Phase 7A billing, sessions, reconciliation, admin kill, or protected RPC behavior, Codex must read `AGENT.md`, `BRAIN.md`, `COMPONENTS.md`, and this file.
+
+Required before edits:
+- Declare repo scope and whether Loqii app changes are required.
+- Map state owner, request flow, database writes, duplicate-deduction guard, reconciliation feedback, and rollback path.
+- Classify the task as high risk or dangerous unless it is documentation-only.
+- Preserve legacy-authoritative billing until an explicit cutover task says otherwise.
+- Run reconciliation checks after any billing/session code change.
+
 ## Success Criteria
 
 - 50-100 completed sessions are captured in the soak window.
@@ -432,3 +443,8 @@ No-go if any are true:
 - [ ] Shadow vs legacy totals reviewed.
 - [ ] Balance drift reviewed.
 - [ ] Go/no-go decision recorded.
+# Coding Engine Checkpoint
+
+Before running or changing soak-test logic, Codex must read `AGENT.md`, `BRAIN.md`, and `COMPONENTS.md`.
+
+Soak-test changes are at least medium risk. If they touch billing, protected billing, reconciliation, session ownership, or database writes, classify them high-risk/dangerous and document rollback plus reconciliation checks before editing.
