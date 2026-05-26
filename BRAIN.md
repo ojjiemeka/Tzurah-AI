@@ -15,3 +15,4 @@ Short, high-signal lessons only. Add durable rules, not session notes.
 - Sync scripts are the release boundary.
 - Feature flags are release gates.
 - Settings is stable config; Dev is experiment control.
+- Production config fails closed before serving traffic.

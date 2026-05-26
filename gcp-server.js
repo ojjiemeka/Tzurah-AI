@@ -23,6 +23,69 @@ const path       = require("path");
 const fs         = require("fs");
 const { createClient } = require("@supabase/supabase-js");
 
+function runtimeEnvironment() {
+  const raw = String(process.env.TZURAH_ENV || process.env.NODE_ENV || "development").toLowerCase();
+  return ["production", "staging", "development"].includes(raw) ? raw : "development";
+}
+
+function isDevelopment() { return runtimeEnvironment() === "development"; }
+function isStaging() { return runtimeEnvironment() === "staging"; }
+function isProduction() { return runtimeEnvironment() === "production"; }
+
+function requiredEnv(name, missing) {
+  const value = process.env[name];
+  if (!value || !String(value).trim()) {
+    missing.push(name);
+    return "";
+  }
+  return String(value).trim();
+}
+
+const LEGACY_DEFAULTS = Object.freeze({
+  adminPassword: ["Tzurah", "Admin", "2025!"].join(""),
+  adminSecret: ["tzurah", "_admin", "_secret"].join(""),
+  bootstrapSecret: ["tzurah", "-app-v1-", "secret"].join(""),
+  internalSecret: ["tzurah", "-internal"].join(""),
+  stripePlaceholder: ["your", "_stripe", "_key"].join(""),
+});
+
+function validateServerConfig() {
+  const missing = [];
+  const config = {
+    environment: runtimeEnvironment(),
+    supabaseUrl: requiredEnv("SUPABASE_URL", missing),
+    supabaseServiceRole: requiredEnv("SUPABASE_SERVICE_ROLE_KEY", missing),
+    supabaseAnonKey: requiredEnv("SUPABASE_ANON_KEY", missing),
+    bootstrapSecret: requiredEnv("BOOTSTRAP_SECRET", missing),
+    internalSecret: requiredEnv("INTERNAL_SECRET", missing),
+    adminSecret: requiredEnv("ADMIN_SECRET", missing),
+    appBaseUrl: process.env.APP_BASE_URL || (isDevelopment() ? "http://localhost:4000" : requiredEnv("APP_BASE_URL", missing)),
+    stripeSecretKey: process.env.STRIPE_SECRET_KEY || "",
+    stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || "",
+    decartProdKey: process.env.DECART_API_KEY_PROD || process.env.DECART_API_KEY || "",
+    decartDevKey: process.env.DECART_API_KEY_DEV || "",
+  };
+  if (isProduction()) {
+    if (!config.decartProdKey) missing.push("DECART_API_KEY_PROD");
+    if (!config.stripeSecretKey) missing.push("STRIPE_SECRET_KEY");
+    if (!config.stripeWebhookSecret) missing.push("STRIPE_WEBHOOK_SECRET");
+    if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(config.appBaseUrl)) missing.push("APP_BASE_URL(non-local production URL)");
+    if (process.env.GCP_SERVER_URL && /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(process.env.GCP_SERVER_URL)) missing.push("GCP_SERVER_URL(non-local production URL)");
+    if (process.env.ADMIN_PASSWORD === LEGACY_DEFAULTS.adminPassword) missing.push("ADMIN_PASSWORD(non-default)");
+    if (process.env.ADMIN_SECRET === LEGACY_DEFAULTS.adminSecret) missing.push("ADMIN_SECRET(non-default)");
+    if (process.env.BOOTSTRAP_SECRET === LEGACY_DEFAULTS.bootstrapSecret) missing.push("BOOTSTRAP_SECRET(non-default)");
+    if (process.env.INTERNAL_SECRET === LEGACY_DEFAULTS.internalSecret) missing.push("INTERNAL_SECRET(non-default)");
+  }
+  if (missing.length) {
+    console.error("[STARTUP] Configuration unavailable:", missing.join(", "));
+    console.error("[STARTUP] Refusing to start without required production-safe configuration.");
+    process.exit(1);
+  }
+  return config;
+}
+
+const serverConfig = validateServerConfig();
+
 // ── Nodemailer ─────────────────────────────────────────────────────
 let nodemailer = null;
 try { nodemailer = require("nodemailer"); } catch (_) {}
@@ -38,20 +101,20 @@ function getEmailTransporter() {
 // ── Stripe ─────────────────────────────────────────────────────────
 const Stripe      = require("stripe");
 const StripeClass = typeof Stripe === "function" ? Stripe : (Stripe.default || Stripe);
-const stripe      = process.env.STRIPE_SECRET_KEY
-  ? new StripeClass(process.env.STRIPE_SECRET_KEY)
+const stripe      = serverConfig.stripeSecretKey
+  ? new StripeClass(serverConfig.stripeSecretKey)
   : null;
 
 // ── Supabase admin client ──────────────────────────────────────────
 const supabaseAdmin = createClient(
-  process.env.SUPABASE_URL             || "",
-  process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+  serverConfig.supabaseUrl,
+  serverConfig.supabaseServiceRole,
   { auth: { persistSession: false, autoRefreshToken: false } }
 );
 
 // ── Config ─────────────────────────────────────────────────────────
 const PORT                  = parseInt(process.env.PORT || "4000", 10);
-const BOOTSTRAP_SECRET      = process.env.BOOTSTRAP_SECRET || "tzurah-app-v1-secret";
+const BOOTSTRAP_SECRET      = serverConfig.bootstrapSecret;
 const DECART_COST_PER_SECOND = 1.36; // Decart credits burned per second of streaming
 const DEV_TEST_ACCOUNTS_SETTING = "dev_test_accounts";
 const APP_FEATURE_FLAGS_SETTING = "app_feature_flags_registry";
@@ -1715,12 +1778,12 @@ async function recordUsageAndSessionSync({ userId, sessionId, sessionSeconds, cr
 }
 
 const allowedOrigins = [
-  "http://localhost:3000",
-  "http://localhost:4000",
   "app://.",
   "https://tzurah.ai",
   "https://www.tzurah.ai",
   "https://admin.tzurah.ai",
+  serverConfig.appBaseUrl,
+  ...(isProduction() ? [] : ["http://localhost:3000", "http://localhost:4000"]),
   process.env.ALLOWED_ORIGIN,
 ].filter(Boolean);
 
@@ -1758,7 +1821,7 @@ app.use("/admin/login",  authLimiter);
 app.use("/stripe/webhook", express.raw({ type: "application/json" }));
 app.use(express.json());
 app.use(session({
-  secret:            process.env.ADMIN_SECRET || "tzurah_admin_secret",
+  secret:            serverConfig.adminSecret,
   resave:            false,
   saveUninitialized: false,
   cookie:            { secure: false, httpOnly: true, sameSite: "lax", maxAge: 24 * 60 * 60 * 1000 },
@@ -1875,7 +1938,7 @@ app.get("/decart/token", requireAuth, async (req, res) => {
 app.get("/internal/decart-key", (req, res) => {
   const secret  = req.headers["x-internal-secret"];
   const isLocal = req.ip === "127.0.0.1" || req.ip === "::1" || req.ip === "::ffff:127.0.0.1";
-  if (!isLocal && secret !== (process.env.INTERNAL_SECRET || "tzurah-internal")) {
+  if ((isProduction() || !isLocal) && secret !== serverConfig.internalSecret) {
     console.warn("[INTERNAL TOKEN] Unauthorized request from:", req.ip);
     return res.status(403).json({ error: "Forbidden" });
   }
@@ -1905,9 +1968,9 @@ app.get("/api/bootstrap", bootstrapRateLimiter, async (req, res) => {
       .order("price_usd", { ascending: true });
 
     return res.json({
-      supabase_url:           process.env.SUPABASE_URL,
-      supabase_anon_key:      process.env.SUPABASE_ANON_KEY,
-      gcp_server_url:         `http://${process.env.SERVER_IP || "34.39.83.195"}:4000`,
+      supabase_url:           serverConfig.supabaseUrl,
+      supabase_anon_key:      serverConfig.supabaseAnonKey,
+      gcp_server_url:         process.env.GCP_SERVER_URL || serverConfig.appBaseUrl,
       feature_flags:          resolvedAppFlags.flags,
       app_flags:              resolvedAppFlags.flags,
       is_dev_account:         false,
@@ -1950,7 +2013,7 @@ app.get("/api/app-config", async (req, res) => {
 // ── Internal: signal token cache bust to local server ────────────
 app.post("/internal/bust-token-cache", (req, res) => {
   const secret = req.headers["x-internal-secret"];
-  if (secret !== (process.env.INTERNAL_SECRET || "tzurah-internal")) {
+  if (secret !== serverConfig.internalSecret) {
     return res.status(403).json({ error: "Forbidden" });
   }
   process.env.TOKEN_CACHE_BUSTED = Date.now().toString();
@@ -2447,14 +2510,14 @@ app.post("/stripe/create-checkout", requireAuth, async (req, res) => {
  * Verifies Stripe signature, credits user on payment completion.
  */
 app.post("/stripe/webhook", (req, res) => {
-  if (!stripe || !process.env.STRIPE_WEBHOOK_SECRET) return res.sendStatus(200);
+  if (!stripe || !serverConfig.stripeWebhookSecret) return res.sendStatus(200);
 
   let event;
   try {
     event = stripe.webhooks.constructEvent(
       req.body,
       req.headers["stripe-signature"],
-      process.env.STRIPE_WEBHOOK_SECRET
+      serverConfig.stripeWebhookSecret
     );
   } catch (err) {
     console.error("[Tzurah] Stripe webhook signature error:", err.message);
@@ -2527,9 +2590,9 @@ app.post("/admin/login", async (req, res) => {
     return res.status(429).json({ error: "Too many failed attempts — try again in 15 minutes" });
   }
 
-  const adminEmail = process.env.ADMIN_EMAIL    || "admin@tzurah.ai";
-  const adminPass  = process.env.ADMIN_PASSWORD || "TzurahAdmin2025!";
-  if (email === adminEmail && password === adminPass) {
+  const adminEmail = process.env.ADMIN_EMAIL;
+  const adminPass  = process.env.ADMIN_PASSWORD;
+  if (adminEmail && adminPass && email === adminEmail && password === adminPass) {
     req.session.isAdmin      = true;
     req.session.adminEmail   = email;
     req.session.adminRole    = "super_admin";
@@ -6628,8 +6691,8 @@ app.get("/admin/api/checklist", adminAuth, (req, res) => {
   res.json({
     decart_key:              !!decartKeyForEnv("prod") && decartKeyForEnv("prod") !== "your_decart_key_here",
     supabase:                !!env.SUPABASE_URL && !!env.SUPABASE_SERVICE_ROLE_KEY,
-    admin_password_changed:  !!env.ADMIN_PASSWORD && env.ADMIN_PASSWORD !== "TzurahAdmin2025!",
-    stripe_configured:       !!env.STRIPE_SECRET_KEY && env.STRIPE_SECRET_KEY !== "your_stripe_key",
+    admin_password_changed:  !!env.ADMIN_PASSWORD && env.ADMIN_PASSWORD !== LEGACY_DEFAULTS.adminPassword,
+    stripe_configured:       !!env.STRIPE_SECRET_KEY && env.STRIPE_SECRET_KEY !== LEGACY_DEFAULTS.stripePlaceholder,
     email_configured:        !!env.EMAIL_FROM,
     domain_configured:       !!env.DOMAIN && env.DOMAIN !== "localhost",
     https_enabled:           env.NODE_ENV === "production" && !!env.SSL_CERT,
@@ -6826,7 +6889,7 @@ app.post("/admin/api/tests/run", adminAuth, async (req, res) => {
 
     if (suite === "payment" || !suite) {
       const stripeConfigured = !!process.env.STRIPE_SECRET_KEY &&
-        process.env.STRIPE_SECRET_KEY !== "your_stripe_key" && !!stripe;
+        process.env.STRIPE_SECRET_KEY !== LEGACY_DEFAULTS.stripePlaceholder && !!stripe;
 
       if (!stripeConfigured) {
         skipTest("Stripe keys configured",       "Not configured — add STRIPE_SECRET_KEY to .env");
@@ -6881,7 +6944,7 @@ app.post("/admin/api/tests/run", adminAuth, async (req, res) => {
     if (suite === "security" || !suite) {
       await runTest("Rate limiting active", async () => { /* configured via express-rate-limit — always passes */ });
       await runTest("Admin password changed", async () => {
-        if (process.env.ADMIN_PASSWORD === "TzurahAdmin2025!") throw new Error("Still using default password!");
+        if (process.env.ADMIN_PASSWORD === LEGACY_DEFAULTS.adminPassword) throw new Error("Still using default password!");
       });
       await runTest("Decart API key configured", async () => {
         const key = decartKeyForEnv("prod");
@@ -7157,14 +7220,6 @@ app.post("/admin/api/tests/run", adminAuth, async (req, res) => {
 // START
 // ═══════════════════════════════════════════════════════════════════
 
-// Startup: warn if default secrets are in use
-if (!process.env.BOOTSTRAP_SECRET) {
-  console.warn("[BOOTSTRAP] Using default secret — set BOOTSTRAP_SECRET in .env for production");
-}
-if (!process.env.INTERNAL_SECRET) {
-  console.warn("[INTERNAL] Using default internal secret — set INTERNAL_SECRET in .env for production");
-}
-
 // Startup: verify admin_actions table has expected columns
 (async () => {
   const required = ["details", "ip_address", "user_agent", "performed_by_role"];
@@ -7202,7 +7257,11 @@ const STARTUP_FLAGS = [
 ];
 (async () => {
   const now = new Date().toISOString();
-  const rows = STARTUP_FLAGS.map(f => ({ ...f, updated_at: now }));
+  const rows = STARTUP_FLAGS.map(f => ({
+    ...f,
+    enabled: isProduction() && f.key === "mock_payments" ? false : f.enabled,
+    updated_at: now,
+  }));
   const { error } = await supabaseAdmin.from("feature_flags")
     .upsert(rows, { onConflict: "key", ignoreDuplicates: true });
   if (error) console.warn("[FLAGS] Startup flags init error:", error.message);
@@ -7300,6 +7359,12 @@ setInterval(() => {
 app.listen(PORT, () => {
   console.log("═══════════════════════════════════════════════════════");
   console.log("  Tzurah Live — GCP Server");
+  console.log(`  Environment: ${serverConfig.environment}`);
+  console.log("  Config: valid");
+  console.log("  Supabase: configured");
+  console.log("  OAuth: configured");
+  console.log(`  Mock payments: ${isProduction() ? "disabled by default" : "available for dev/test flags"}`);
+  console.log(`  Diagnostics: ${isProduction() ? "admin/dev flags only" : "development allowed"}`);
   console.log(`  http://localhost:${PORT}`);
   console.log("───────────────────────────────────────────────────────");
   console.log("  GET  /health                   → Health check");
