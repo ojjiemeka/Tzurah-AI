@@ -274,6 +274,21 @@ Debug checklist:
 - Use Supabase v2 `{ data, error }` style.
 - Log admin actions for mutations.
 
+### App Feature Flag Control Plane
+
+Owner:
+- Backend/API: `gcp-server.js`
+- Admin UI: `admin.html` Dev tab
+- Storage: `app_settings.app_feature_flags_registry` JSON, with legacy `feature_flags` booleans kept for compatibility.
+
+Rules:
+- Settings owns stable admin/app configuration only.
+- Dev owns app feature flags, dev/test accounts, diagnostics toggles, rollout controls, and test-mode controls.
+- Flag resolution is scope-based: `off` is false, `global` is true, `dev_accounts` is true only for users in `dev_test_accounts`, and `allowlist` is true only for selected user IDs.
+- Dangerous flags require `super_admin`; non-dangerous app flags may be managed by `admin` or `super_admin`.
+- Public app config endpoints return resolved booleans and safe metadata only. They never return secrets.
+- Allowlist and dev-account flows must use `UserPicker`; raw UUID entry is only a collapsed advanced fallback.
+
 ## Local Decart Token Proxy
 
 Location: `server.mjs`

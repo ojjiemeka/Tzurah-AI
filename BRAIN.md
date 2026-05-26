@@ -13,3 +13,5 @@ Short, high-signal lessons only. Add durable rules, not session notes.
 - Repo boundaries are product boundaries.
 - Debug belongs behind flags.
 - Sync scripts are the release boundary.
+- Feature flags are release gates.
+- Settings is stable config; Dev is experiment control.

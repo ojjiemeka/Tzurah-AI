@@ -54,6 +54,31 @@ const PORT                  = parseInt(process.env.PORT || "4000", 10);
 const BOOTSTRAP_SECRET      = process.env.BOOTSTRAP_SECRET || "tzurah-app-v1-secret";
 const DECART_COST_PER_SECOND = 1.36; // Decart credits burned per second of streaming
 const DEV_TEST_ACCOUNTS_SETTING = "dev_test_accounts";
+const APP_FEATURE_FLAGS_SETTING = "app_feature_flags_registry";
+
+const APP_FEATURE_FLAG_REGISTRY = [
+  { key: "show_onboarding", label: "Show onboarding", description: "Show the first-run onboarding flow.", category: "User Experience", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
+  { key: "onboarding_required", label: "Require onboarding", description: "Show onboarding even if the user previously completed it.", category: "User Experience", default_value: false, default_scope: "off", scope: "off", danger_level: "moderate" },
+  { key: "enable_help_center", label: "Help Center", description: "Show the in-app Help Center entry point.", category: "User Experience", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
+  { key: "enable_light_mode", label: "Light mode", description: "Allow users to switch to light mode.", category: "User Experience", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
+  { key: "enable_google_oauth", label: "Google OAuth", description: "Allow Google sign-in in Loqii auth screens.", category: "Auth", default_value: true, default_scope: "global", scope: "global", danger_level: "moderate" },
+  { key: "enable_scene_engine", label: "Scene engine", description: "Enable the scene preset panel and scene prompt layer.", category: "AI Features", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
+  { key: "enable_style_engine", label: "Style engine", description: "Enable style presets and style prompt behavior.", category: "AI Features", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
+  { key: "enable_background_mode", label: "Background mode", description: "Enable background-only prompt controls.", category: "AI Features", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
+  { key: "enable_dev_tools", label: "Developer tools", description: "Show internal developer controls in the Loqii app.", category: "Developer", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate" },
+  { key: "enable_advanced_diagnostics", label: "Advanced diagnostics", description: "Show internal diagnostics sections.", category: "Diagnostics", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate" },
+  { key: "enable_prompt_debug", label: "Prompt debug", description: "Show prompt layer debug snapshots.", category: "Diagnostics", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate" },
+  { key: "enable_session_debug", label: "Session debug", description: "Show raw session diagnostic values.", category: "Diagnostics", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate" },
+  { key: "enable_performance_metrics", label: "Performance metrics", description: "Show RTT, reconnect, FPS, and performance diagnostics.", category: "Diagnostics", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate" },
+  { key: "enable_oauth_debug", label: "OAuth debug", description: "Show OAuth debug diagnostics for QA.", category: "Diagnostics", default_value: false, default_scope: "off", scope: "off", danger_level: "moderate" },
+  { key: "enable_reconnect_debug", label: "Reconnect debug", description: "Show reconnect timers and retry diagnostics.", category: "Diagnostics", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate" },
+  { key: "enable_real_payments", label: "Real payments", description: "Enable live payment provider flow when configured.", category: "Payments", default_value: false, default_scope: "off", scope: "off", danger_level: "dangerous" },
+  { key: "enable_mock_payments", label: "Mock payments", description: "Enable mock top-up purchases for internal testing.", category: "Payments", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate" },
+  { key: "enable_topup_flow", label: "Top-up flow", description: "Allow users to open Add Credits/top-up surfaces.", category: "Payments", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
+];
+
+const APP_FLAG_SCOPES = new Set(["off", "global", "dev_accounts", "allowlist"]);
+const APP_DANGEROUS_LEVELS = new Set(["dangerous", "high"]);
 
 // Credit packs (1 credit = 10 seconds)
 const PACKS = {
@@ -1873,10 +1898,7 @@ app.get("/api/bootstrap", bootstrapRateLimiter, async (req, res) => {
     return res.status(403).json({ error: "Forbidden" });
   }
   try {
-    const { data: flagRows } = await supabaseAdmin
-      .from("feature_flags").select("key, enabled");
-    const featureFlags = {};
-    (flagRows || []).forEach(f => { featureFlags[f.key] = f.enabled; });
+    const resolvedAppFlags = await resolveAppFeatureFlagsForUser(null);
 
     const { data: packs } = await supabaseAdmin
       .from("credit_packs").select("*").eq("is_active", true)
@@ -1886,7 +1908,9 @@ app.get("/api/bootstrap", bootstrapRateLimiter, async (req, res) => {
       supabase_url:           process.env.SUPABASE_URL,
       supabase_anon_key:      process.env.SUPABASE_ANON_KEY,
       gcp_server_url:         `http://${process.env.SERVER_IP || "34.39.83.195"}:4000`,
-      feature_flags:          featureFlags,
+      feature_flags:          resolvedAppFlags.flags,
+      app_flags:              resolvedAppFlags.flags,
+      is_dev_account:         false,
       credit_packs:           packs || [],
       burn_rate:              2.18,
       free_credits_on_signup: 6,
@@ -1896,6 +1920,30 @@ app.get("/api/bootstrap", bootstrapRateLimiter, async (req, res) => {
   } catch (err) {
     console.error("[BOOTSTRAP] Error:", err.message);
     return res.status(500).json({ error: "Bootstrap failed" });
+  }
+});
+
+app.get("/api/app-config", async (req, res) => {
+  try {
+    const user = await resolveOptionalUserFromAuthHeader(req);
+    const resolved = await resolveAppFeatureFlagsForUser(user?.id || null);
+    return res.json({
+      ok: true,
+      feature_flags: resolved.flags,
+      app_flags: resolved.flags,
+      is_dev_account: resolved.is_dev_account,
+      environment: resolved.environment,
+      app_version: process.env.APP_VERSION || "1.0.0",
+    });
+  } catch (err) {
+    console.warn("[APP CONFIG] failed closed:", err.message);
+    return res.json({
+      ok: false,
+      feature_flags: {},
+      app_flags: {},
+      is_dev_account: false,
+      environment: "safe_default",
+    });
   }
 });
 
@@ -4238,6 +4286,126 @@ async function setDevTestAccountEntries(entries) {
   return normalized;
 }
 
+function normalizeAppFlagScope(scope, fallback = "off") {
+  const value = String(scope || fallback || "off").trim();
+  return APP_FLAG_SCOPES.has(value) ? value : "off";
+}
+
+function appFlagRegistryMap() {
+  return new Map(APP_FEATURE_FLAG_REGISTRY.map(flag => [flag.key, flag]));
+}
+
+async function getStoredAppFeatureFlagOverrides() {
+  const raw = await getSettingValue(APP_FEATURE_FLAGS_SETTING, "{}");
+  try {
+    const parsed = JSON.parse(raw || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+async function setStoredAppFeatureFlagOverrides(overrides) {
+  await setSettingValue(APP_FEATURE_FLAGS_SETTING, JSON.stringify(overrides || {}));
+  return overrides || {};
+}
+
+async function getLegacyFeatureFlagBooleans() {
+  const flags = {};
+  try {
+    const { data, error } = await supabaseAdmin.from("feature_flags").select("key, enabled");
+    if (error) throw error;
+    (data || []).forEach(row => { flags[row.key] = row.enabled === true; });
+  } catch (err) {
+    console.warn("[APP FLAGS] legacy feature flag lookup failed:", err.message);
+  }
+  return flags;
+}
+
+async function getAppFeatureFlagDefinitions() {
+  const overrides = await getStoredAppFeatureFlagOverrides();
+  const legacy = await getLegacyFeatureFlagBooleans();
+  const definitions = APP_FEATURE_FLAG_REGISTRY.map(base => {
+    const override = overrides[base.key] || {};
+    const legacyValue = legacy[base.key] ?? (base.key === "enable_mock_payments" ? legacy.mock_payments : undefined);
+    const hasOverride = Object.prototype.hasOwnProperty.call(overrides, base.key);
+    const scope = normalizeAppFlagScope(override.scope, hasOverride ? base.scope : (legacyValue === true ? "global" : base.scope || base.default_scope));
+    const allowlist = Array.isArray(override.allowlist) ? override.allowlist.filter(id => validateUUID(String(id))) : [];
+    return {
+      ...base,
+      default_value: base.default_value === true,
+      scope,
+      enabled: scope !== "off",
+      allowlist,
+      metadata: override.metadata && typeof override.metadata === "object" ? override.metadata : {},
+      updated_at: override.updated_at || null,
+      updated_by: override.updated_by || null,
+    };
+  });
+  return definitions;
+}
+
+function resolveAppFlagValue(flag, { userId = null, isDevAccount = false } = {}) {
+  const scope = normalizeAppFlagScope(flag.scope, flag.default_scope || "off");
+  if (scope === "off") return false;
+  if (scope === "global") return true;
+  if (scope === "dev_accounts") return isDevAccount === true;
+  if (scope === "allowlist") return !!(userId && (flag.allowlist || []).includes(userId));
+  return flag.default_value === true;
+}
+
+async function resolveAppFeatureFlagsForUser(userId = null) {
+  const definitions = await getAppFeatureFlagDefinitions();
+  const devEntries = await getDevTestAccountEntries().catch(() => []);
+  const isDevAccount = !!(userId && devEntries.some(entry => entry.id === userId));
+  const flags = {};
+  definitions.forEach(flag => {
+    flags[flag.key] = resolveAppFlagValue(flag, { userId, isDevAccount });
+  });
+  flags.mock_payments = flags.enable_mock_payments === true;
+  flags.enable_background = flags.enable_background_mode === true;
+  flags.enable_style_mode = flags.enable_style_engine === true;
+  return {
+    flags,
+    definitions,
+    is_dev_account: isDevAccount,
+    environment: isDevAccount ? "dev_account" : "user",
+  };
+}
+
+async function resolveOptionalUserFromAuthHeader(req) {
+  const auth = (req.headers.authorization || "").trim();
+  if (!auth.startsWith("Bearer ")) return null;
+  try {
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(auth.slice(7).trim());
+    if (error || !user) return null;
+    return user;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function saveAppFeatureFlag(key, patch = {}, adminEmail = "admin") {
+  const registry = appFlagRegistryMap();
+  const base = registry.get(key);
+  if (!base) throw new Error("Unknown app feature flag");
+  const overrides = await getStoredAppFeatureFlagOverrides();
+  const current = overrides[key] || {};
+  const next = {
+    ...current,
+    scope: normalizeAppFlagScope(patch.scope ?? current.scope ?? base.scope ?? base.default_scope),
+    allowlist: Array.isArray(patch.allowlist)
+      ? Array.from(new Set(patch.allowlist.filter(id => validateUUID(String(id)))))
+      : Array.isArray(current.allowlist) ? current.allowlist.filter(id => validateUUID(String(id))) : [],
+    metadata: patch.metadata && typeof patch.metadata === "object" ? patch.metadata : (current.metadata || {}),
+    updated_at: new Date().toISOString(),
+    updated_by: adminEmail || "admin",
+  };
+  overrides[key] = next;
+  await setStoredAppFeatureFlagOverrides(overrides);
+  return next;
+}
+
 async function hydrateDevTestAccounts(entries = []) {
   const { merged } = await fetchAllUsersData();
   const userMap = new Map((merged || []).map(user => [user.id, user]));
@@ -5839,15 +6007,109 @@ app.post("/admin/api/repair-missing-profiles", adminAuth, async (req, res) => {
 
 // ── Feature flags ─────────────────────────────────────────────────
 app.get("/api/feature-flags", async (_req, res) => {
-  const { data } = await supabaseAdmin.from("feature_flags").select("key, enabled");
-  const flags = {};
-  (data || []).forEach(f => { flags[f.key] = f.enabled; });
-  res.json(flags);
+  const resolved = await resolveAppFeatureFlagsForUser(null);
+  res.json(resolved.flags);
 });
 
 app.get("/admin/api/feature-flags", adminAuth, async (_req, res) => {
   const { data } = await supabaseAdmin.from("feature_flags").select("*").order("key");
   res.json({ flags: data || [] });
+});
+
+app.get("/admin/api/app-flags", adminAuth, async (req, res) => {
+  if (!["super_admin", "admin"].includes(req.session.adminRole)) return res.status(403).json({ error: "Insufficient permissions" });
+  try {
+    const flags = await getAppFeatureFlagDefinitions();
+    res.json({ ok: true, flags, scopes: [...APP_FLAG_SCOPES] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/admin/api/app-flags/resolve", adminAuth, async (req, res) => {
+  if (!["super_admin", "admin"].includes(req.session.adminRole)) return res.status(403).json({ error: "Insufficient permissions" });
+  const userId = String(req.query.user_id || "").trim();
+  if (userId && !validateUUID(userId)) return res.status(400).json({ error: "Valid user_id required" });
+  try {
+    const resolved = await resolveAppFeatureFlagsForUser(userId || null);
+    res.json({ ok: true, ...resolved });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/admin/api/app-flags/:key", adminAuth, async (req, res) => {
+  const role = req.session.adminRole;
+  if (!["super_admin", "admin"].includes(role)) return res.status(403).json({ error: "Insufficient permissions" });
+  const key = String(req.params.key || "").trim();
+  const registry = appFlagRegistryMap();
+  const base = registry.get(key);
+  if (!base) return res.status(404).json({ error: "Unknown app feature flag" });
+  if (APP_DANGEROUS_LEVELS.has(base.danger_level) && role !== "super_admin") {
+    await logAction("unauthorized_attempt", req.session.adminEmail, role, null, { endpoint: "app-flags", flag: key, required_permission: "super_admin" }, req);
+    return res.status(403).json({ error: "Super admin required for dangerous flags" });
+  }
+  const scope = String(req.body?.scope || "").trim();
+  if (!APP_FLAG_SCOPES.has(scope)) return res.status(400).json({ error: "Invalid scope" });
+  try {
+    const before = (await getAppFeatureFlagDefinitions()).find(flag => flag.key === key);
+    await saveAppFeatureFlag(key, { scope }, req.session.adminEmail || "admin");
+    const flags = await getAppFeatureFlagDefinitions();
+    const after = flags.find(flag => flag.key === key);
+    await logAction(before?.scope === scope ? "flag_updated" : "flag_scope_changed", req.session.adminEmail, role, null, {
+      flag: key,
+      before_scope: before?.scope || null,
+      after_scope: scope,
+      danger_level: base.danger_level,
+    }, req);
+    res.json({ ok: true, flag: after, flags });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/admin/api/app-flags/:key/allowlist", adminAuth, async (req, res) => {
+  const role = req.session.adminRole;
+  if (!["super_admin", "admin"].includes(role)) return res.status(403).json({ error: "Insufficient permissions" });
+  const key = String(req.params.key || "").trim();
+  const userId = String(req.body?.user_id || "").trim();
+  const registry = appFlagRegistryMap();
+  const base = registry.get(key);
+  if (!base) return res.status(404).json({ error: "Unknown app feature flag" });
+  if (APP_DANGEROUS_LEVELS.has(base.danger_level) && role !== "super_admin") return res.status(403).json({ error: "Super admin required for dangerous flags" });
+  if (!validateUUID(userId)) return res.status(400).json({ error: "Valid user_id required" });
+  try {
+    const definitions = await getAppFeatureFlagDefinitions();
+    const current = definitions.find(flag => flag.key === key);
+    const allowlist = Array.from(new Set([...(current?.allowlist || []), userId]));
+    await saveAppFeatureFlag(key, { scope: current?.scope || base.scope, allowlist }, req.session.adminEmail || "admin");
+    await logAction("flag_allowlist_added", req.session.adminEmail, role, userId, { flag: key }, req);
+    res.json({ ok: true, flags: await getAppFeatureFlagDefinitions() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/admin/api/app-flags/:key/allowlist/:user_id", adminAuth, async (req, res) => {
+  const role = req.session.adminRole;
+  if (!["super_admin", "admin"].includes(role)) return res.status(403).json({ error: "Insufficient permissions" });
+  const key = String(req.params.key || "").trim();
+  const userId = String(req.params.user_id || "").trim();
+  const registry = appFlagRegistryMap();
+  const base = registry.get(key);
+  if (!base) return res.status(404).json({ error: "Unknown app feature flag" });
+  if (APP_DANGEROUS_LEVELS.has(base.danger_level) && role !== "super_admin") return res.status(403).json({ error: "Super admin required for dangerous flags" });
+  if (!validateUUID(userId)) return res.status(400).json({ error: "Valid user_id required" });
+  try {
+    const definitions = await getAppFeatureFlagDefinitions();
+    const current = definitions.find(flag => flag.key === key);
+    const allowlist = (current?.allowlist || []).filter(id => id !== userId);
+    await saveAppFeatureFlag(key, { scope: current?.scope || base.scope, allowlist }, req.session.adminEmail || "admin");
+    await logAction("flag_allowlist_removed", req.session.adminEmail, role, userId, { flag: key }, req);
+    res.json({ ok: true, flags: await getAppFeatureFlagDefinitions() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post("/admin/api/feature-flags/:key", adminAuth, async (req, res) => {
@@ -6950,6 +7212,29 @@ const STARTUP_FLAGS = [
 // ── Session watchdog — force-ends stale sessions every 30 s ──────
 // A session is stale if it hasn't pinged in 45 seconds.
 // Accounts for all unbilled Decart time before closing.
+(async () => {
+  try {
+    const overrides = await getStoredAppFeatureFlagOverrides();
+    let changed = false;
+    APP_FEATURE_FLAG_REGISTRY.forEach(flag => {
+      if (!overrides[flag.key]) {
+        overrides[flag.key] = {
+          scope: flag.scope || flag.default_scope || (flag.default_value ? "global" : "off"),
+          allowlist: [],
+          metadata: {},
+          updated_at: new Date().toISOString(),
+          updated_by: "startup",
+        };
+        changed = true;
+      }
+    });
+    if (changed) await setStoredAppFeatureFlagOverrides(overrides);
+    console.log(`[APP FLAGS] ${APP_FEATURE_FLAG_REGISTRY.length} app feature flags ensured`);
+  } catch (err) {
+    console.warn("[APP FLAGS] Startup registry init error:", err.message);
+  }
+})();
+
 if (process.env.BILLING_CALC_HARNESS_ONLY === "1") {
   const harness = runBillingCalculationHarness();
   console.log(JSON.stringify(harness, null, 2));

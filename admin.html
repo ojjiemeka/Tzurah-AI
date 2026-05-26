@@ -1113,6 +1113,17 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 .flag-row:last-child { border-bottom:none; }
 .flag-key { font-size:0.82rem; font-weight:600; color:var(--text); font-family:monospace; }
 .flag-desc { font-size:0.72rem; color:var(--muted); margin-top:2px; }
+.tab-btn[data-tab="flags"] { display:none !important; }
+.app-flag-group { margin-bottom:16px; }
+.app-flag-group-title { font-size:10px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);font-weight:800;margin:12px 0 8px; }
+.app-flag-row { display:grid;grid-template-columns:minmax(220px,1fr) 150px 120px 1fr;gap:12px;align-items:start;padding:12px 0;border-bottom:1px solid var(--border); }
+.app-flag-label { font-size:13px;font-weight:800;color:var(--text); }
+.app-flag-key { font-size:10px;color:var(--muted);font-family:monospace;margin-top:2px; }
+.app-flag-desc { font-size:11px;color:var(--text2);line-height:1.4;margin-top:4px; }
+.app-flag-scope { width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 8px;font-size:12px; }
+.app-flag-allowlist { font-size:11px;color:var(--muted); }
+.app-flag-allowlist button { margin-top:6px; }
+@media (max-width: 900px) { .app-flag-row { grid-template-columns:1fr; } }
 .toggle-switch { position:relative; display:inline-block; width:44px; height:24px; flex-shrink:0; }
 .toggle-switch input { opacity:0; width:0; height:0; }
 .toggle-slider { position:absolute; cursor:pointer; inset:0; background:#333; border-radius:24px; transition:0.3s; }
@@ -1540,7 +1551,7 @@ kbd {
   <button class="tab-btn active" data-tab="overview">Overview</button>
   <button class="tab-btn" data-tab="billing">Billing</button>
   <button class="tab-btn" data-tab="users">Users</button>
-  <button class="tab-btn" data-tab="devaccounts">Dev/Test Accounts</button>
+  <button class="tab-btn" data-tab="devaccounts">Dev</button>
   <button class="tab-btn" data-tab="revenue">Revenue</button>
   <button class="tab-btn" data-tab="purchases">Purchases</button>
   <button class="tab-btn" data-tab="sessions">🖥️ Sessions</button>
@@ -1930,11 +1941,47 @@ kbd {
               Production users always use the production key. Only dev/test accounts can use the dev key when admin test environment is set to dev.
               Protected billing test users are separate from dev accounts.
             </div>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:12px">
+              <select id="dev-decart-admin-test-env" class="recon-filter" style="flex:1">
+                <option value="prod">Production</option>
+                <option value="dev">Development/Test</option>
+              </select>
+              <button class="btn btn-accent btn-sm" onclick="saveDecartAdminTestEnv('dev-decart-admin-test-env')">Save</button>
+            </div>
           </div>
         </div>
       </div>
       <div class="pb-allowlist" id="dev-account-list">
         <div class="loading-cell"><div class="spinner"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-card" style="margin-top:16px">
+    <div class="panel-hdr">
+      <span class="ptitle">App Feature Flags</span>
+      <button class="btn btn-ghost btn-sm" style="margin-left:auto;font-size:10px" onclick="loadAppFlags()">Refresh</button>
+    </div>
+    <div class="panel-body">
+      <div style="font-size:13px;color:var(--text2);max-width:980px;margin-bottom:12px">
+        Global affects all users. Dev Accounts affects only users marked as Dev/Test.
+        Allowlist affects selected users only. Dangerous flags require super admin.
+      </div>
+      <div id="app-flags-list"><div class="loading-cell"><div class="spinner"></div></div></div>
+    </div>
+  </div>
+
+  <div class="panel-card" style="margin-top:16px">
+    <div class="panel-hdr"><span class="ptitle">Resolved Flag Preview</span></div>
+    <div class="panel-body">
+      <div class="two-col">
+        <div>
+          <div id="flag-preview-picker-wrap"></div>
+          <button class="btn btn-accent btn-sm" style="width:100%;justify-content:center;margin-top:8px" onclick="previewSelectedAppFlags()">Preview selected user</button>
+        </div>
+        <div>
+          <div id="flag-preview-result" class="prompt-debug" style="min-height:140px">Select a user to preview effective flags.</div>
+        </div>
       </div>
     </div>
   </div>
@@ -2351,7 +2398,7 @@ kbd {
           <button class="btn btn-accent btn-sm" onclick="openUpdateKeyModal('DECART_API_KEY_DEV','Decart Dev/Test API Key')">Update</button>
         </div>
       </div>
-      <div class="settings-row">
+      <div class="settings-row" id="settings-decart-admin-test-env-row" style="display:none">
         <div class="settings-row-label-wrap">
           <div class="settings-row-label">Admin Test Decart Environment</div>
           <div class="settings-row-meta">Only allowlisted test users/admin test flows may use dev.</div>
@@ -4583,7 +4630,19 @@ function initDevAccountsTab() {
       onSelect: renderDevAccountSelection,
     });
   }
+  const previewWrap = document.getElementById("flag-preview-picker-wrap");
+  if (previewWrap && !previewWrap.dataset.mounted) {
+    previewWrap.innerHTML = UserPicker.markup("flag-preview-picker", {
+      label: "Preview user",
+      placeholder: "Search email, display name, or user ID",
+      hint: "Preview shows resolved flags after scope, dev-account, and allowlist rules.",
+      advanced: true,
+    });
+    previewWrap.dataset.mounted = "true";
+    UserPicker.mount("flag-preview-picker");
+  }
   loadDevAccounts();
+  loadAppFlags();
 }
 
 function renderDevAccountSelection(user) {
@@ -4611,6 +4670,8 @@ function renderDevAccounts(data = {}) {
   set("devacct-dev-key", env.dev_configured ? "configured" : "missing");
   set("devacct-active-env", env.admin_test_env || "prod");
   set("devacct-count", fmtN(data.count || window._devAccounts.length || 0));
+  const devEnvSelect = document.getElementById("dev-decart-admin-test-env");
+  if (devEnvSelect) devEnvSelect.value = env.admin_test_env || "prod";
   if (!list) return;
   if (!window._devAccounts.length) {
     list.innerHTML = `<div class="td-empty">No dev/test accounts configured.</div>`;
@@ -4665,6 +4726,172 @@ async function removeDevAccount(userId) {
     toast("Dev/test account removed", "success");
   } catch (e) {
     toast("Remove failed: " + e.message, "error");
+  }
+}
+
+function appFlagStatusBadge(flag) {
+  const enabled = flag.scope !== "off";
+  const cls = flag.danger_level === "dangerous" ? "badge-red" : enabled ? "badge-green" : "badge-muted";
+  const text = flag.scope === "off" ? "Off" : flag.scope === "global" ? "Global" : flag.scope === "dev_accounts" ? "Dev Accounts" : "Allowlist";
+  return `<span class="badge ${cls}">${esc(text)}</span>`;
+}
+
+function renderAppFlags(flags = []) {
+  window._appFlags = flags || [];
+  const root = document.getElementById("app-flags-list");
+  if (!root) return;
+  if (!flags.length) {
+    root.innerHTML = `<div class="td-empty">No app feature flags configured.</div>`;
+    return;
+  }
+  const groups = {};
+  flags.forEach(flag => {
+    const category = flag.category || "Developer";
+    (groups[category] ||= []).push(flag);
+  });
+  root.innerHTML = Object.entries(groups).map(([category, rows]) => `
+    <div class="app-flag-group">
+      <div class="app-flag-group-title">${esc(category)}</div>
+      ${rows.map(flag => renderAppFlagRow(flag)).join("")}
+    </div>
+  `).join("");
+}
+
+function renderAppFlagRow(flag) {
+  const danger = flag.danger_level === "dangerous"
+    ? `<span class="badge badge-red">Dangerous</span>`
+    : flag.danger_level === "moderate"
+      ? `<span class="badge badge-amber">Moderate</span>`
+      : `<span class="badge badge-green">Safe</span>`;
+  const disabled = flag.danger_level === "dangerous" && window._adminRole !== "super_admin" ? "disabled" : "";
+  const allowlistUsers = (flag.allowlist || []).map(id => findCachedAdminUser(id) || { id, email: shortSessionId(id), display_name: "Allowlisted user", credits: 0, status: "allowlisted" });
+  return `
+    <div class="app-flag-row" data-flag-key="${esc(flag.key)}">
+      <div>
+        <div class="app-flag-label">${esc(flag.label || flag.key)}</div>
+        <div class="app-flag-key">${esc(flag.key)}</div>
+        <div class="app-flag-desc">${esc(flag.description || "")}</div>
+      </div>
+      <div>
+        <select class="app-flag-scope" onchange="updateAppFlagScope('${esc(flag.key)}', this.value)" ${disabled}>
+          ${["off","global","dev_accounts","allowlist"].map(scope => `<option value="${scope}" ${flag.scope === scope ? "selected" : ""}>${scope}</option>`).join("")}
+        </select>
+      </div>
+      <div>${appFlagStatusBadge(flag)}<div style="margin-top:6px">${danger}</div></div>
+      <div class="app-flag-allowlist">
+        ${flag.scope === "allowlist" ? `
+          <div>${fmtN(flag.allowlist?.length || 0)} allowlisted user${(flag.allowlist?.length || 0) === 1 ? "" : "s"}</div>
+          <button class="btn btn-ghost btn-xs" onclick="openAppFlagAllowlistModal('${esc(flag.key)}')">Manage allowlist</button>
+          <div style="margin-top:6px">${allowlistUsers.slice(0, 3).map(user => `<div>${esc(user.email || shortSessionId(user.id))}</div>`).join("")}</div>
+        ` : `<span>Use allowlist scope to manage users.</span>`}
+      </div>
+    </div>`;
+}
+
+async function loadAppFlags() {
+  const root = document.getElementById("app-flags-list");
+  if (root) root.innerHTML = `<div class="loading-cell"><div class="spinner"></div></div>`;
+  try {
+    const data = await api("/admin/api/app-flags");
+    renderAppFlags(data.flags || []);
+  } catch (e) {
+    if (root) root.innerHTML = `<div class="td-empty" style="color:var(--danger)">Failed to load app flags: ${esc(e.message)}</div>`;
+  }
+}
+
+async function updateAppFlagScope(key, scope) {
+  const flag = (window._appFlags || []).find(item => item.key === key);
+  if (flag?.danger_level === "dangerous" && scope !== "off") {
+    const ok = await showModalConfirm(`Enable ${flag.label || key} for scope ${scope}? This can affect payment behavior.`, {
+      title: "Dangerous Flag",
+      confirmLabel: "Update",
+      variant: "warning",
+    });
+    if (!ok) return loadAppFlags();
+  }
+  try {
+    const data = await apiPost(`/admin/api/app-flags/${encodeURIComponent(key)}`, { scope });
+    toast("Flag updated", "success");
+    renderAppFlags(data.flags || []);
+  } catch (e) {
+    toast("Flag update failed: " + e.message, "error");
+    loadAppFlags();
+  }
+}
+
+function openAppFlagAllowlistModal(key) {
+  const flag = (window._appFlags || []).find(item => item.key === key);
+  if (!flag) return;
+  const ov = showModal({
+    title: `Allowlist: ${flag.label || key}`,
+    body: `
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Search by email or name. UUID is stored internally only.</div>
+      ${UserPicker.markup("app-flag-allowlist-picker", { label: "Add user", advanced: true })}
+      <button class="btn btn-accent btn-sm" style="width:100%;justify-content:center;margin:8px 0 12px" onclick="addAppFlagAllowlistUser('${esc(key)}')">Add to allowlist</button>
+      <div id="app-flag-allowlist-list">${renderAppFlagAllowlistList(flag)}</div>
+    `,
+    confirmLabel: "Close",
+    showCancel: false,
+  });
+  if (ov) setTimeout(() => UserPicker.mount("app-flag-allowlist-picker"), 0);
+}
+
+function renderAppFlagAllowlistList(flag) {
+  if (!flag.allowlist?.length) return `<div class="td-empty">No allowlisted users yet.</div>`;
+  return flag.allowlist.map(id => {
+    const user = findCachedAdminUser(id) || { id, email: shortSessionId(id), display_name: "Allowlisted user", credits: 0, status: "allowlisted" };
+    return protectedBillingUserCard(user, {
+      action: `<button class="btn btn-ghost btn-xs" onclick="removeAppFlagAllowlistUser('${esc(flag.key)}','${esc(id)}')">Remove</button>`,
+    });
+  }).join("");
+}
+
+async function addAppFlagAllowlistUser(key) {
+  const userId = UserPicker.getSelectedId("app-flag-allowlist-picker");
+  if (!userId) return toast("Select a valid user first.", "error");
+  try {
+    const data = await apiPost(`/admin/api/app-flags/${encodeURIComponent(key)}/allowlist`, { user_id: userId });
+    toast("Allowlist updated", "success");
+    renderAppFlags(data.flags || []);
+    const flag = (data.flags || []).find(item => item.key === key);
+    const list = document.getElementById("app-flag-allowlist-list");
+    if (list && flag) list.innerHTML = renderAppFlagAllowlistList(flag);
+  } catch (e) {
+    toast("Allowlist add failed: " + e.message, "error");
+  }
+}
+
+async function removeAppFlagAllowlistUser(key, userId) {
+  try {
+    const res = await adminFetch(`/admin/api/app-flags/${encodeURIComponent(key)}/allowlist/${encodeURIComponent(userId)}`, { method: "DELETE" });
+    if (!res?.ok) throw new Error("Request failed");
+    const data = await res.json();
+    toast("Allowlist updated", "success");
+    renderAppFlags(data.flags || []);
+    const flag = (data.flags || []).find(item => item.key === key);
+    const list = document.getElementById("app-flag-allowlist-list");
+    if (list && flag) list.innerHTML = renderAppFlagAllowlistList(flag);
+  } catch (e) {
+    toast("Allowlist remove failed: " + e.message, "error");
+  }
+}
+
+async function previewSelectedAppFlags() {
+  const userId = UserPicker.getSelectedId("flag-preview-picker");
+  const result = document.getElementById("flag-preview-result");
+  if (!userId) return toast("Select a valid user first.", "error");
+  if (result) result.textContent = "Loading...";
+  try {
+    const data = await api(`/admin/api/app-flags/resolve?user_id=${encodeURIComponent(userId)}`);
+    const lines = [
+      `Dev account: ${data.is_dev_account ? "yes" : "no"}`,
+      `Environment: ${data.environment || "user"}`,
+      "",
+      ...Object.entries(data.flags || {}).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}: ${value ? "true" : "false"}`),
+    ];
+    if (result) result.textContent = lines.join("\n");
+  } catch (e) {
+    if (result) result.textContent = `Failed to preview flags: ${e.message}`;
   }
 }
 
@@ -7955,8 +8182,8 @@ function openUpdateKeyModal(keyName, label) {
   });
 }
 
-async function saveDecartAdminTestEnv() {
-  const value = document.getElementById("decart-admin-test-env")?.value || "prod";
+async function saveDecartAdminTestEnv(selectId = "decart-admin-test-env") {
+  const value = document.getElementById(selectId)?.value || "prod";
   try {
     await apiPost("/admin/api/settings/update-key", {
       key_name: "DECART_ACTIVE_ENV_FOR_ADMIN_TESTS",
@@ -7964,6 +8191,7 @@ async function saveDecartAdminTestEnv() {
     });
     toast(`Admin test Decart environment set to ${value}`, "success");
     loadSettings();
+    loadDevAccounts();
   } catch(e) {
     toast("Error: " + e.message, "error");
   }
@@ -8190,7 +8418,7 @@ const TAB_PERMISSIONS = {
   overview:      ['super_admin', 'admin', 'support', 'analyst'],
   billing:       ['super_admin', 'admin', 'support', 'analyst'],
   users:         ['super_admin', 'admin', 'support'],
-  devaccounts:   ['super_admin'],
+  devaccounts:   ['super_admin', 'admin'],
   revenue:       ['super_admin', 'admin', 'analyst'],
   purchases:     ['super_admin', 'admin', 'support', 'analyst'],
   sessions:      ['super_admin', 'admin', 'support'],
@@ -8201,7 +8429,7 @@ const TAB_PERMISSIONS = {
   ipblocks:      ['super_admin', 'admin'],
   subadmins:     ['super_admin'],
   tests:         ['super_admin', 'admin'],
-  flags:         ['super_admin'],
+  flags:         [],
   settings:      ['super_admin'],
   audit:         ['super_admin'],
 };
@@ -9265,7 +9493,7 @@ document.addEventListener("keydown", (e) => {
   if (_gKeyPressed) {
     clearTimeout(_gKeyTimer);
     _gKeyPressed = false;
-    const tabMap = { u: "users", b: "billing", d: "devaccounts", r: "revenue", o: "overview", a: "audit", f: "flags", s: "settings" };
+    const tabMap = { u: "users", b: "billing", d: "devaccounts", r: "revenue", o: "overview", a: "audit", f: "devaccounts", s: "settings" };
     const tab = tabMap[k];
     if (tab) { e.preventDefault(); switchTab(tab); }
   }
