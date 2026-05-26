@@ -15,6 +15,7 @@ set -euo pipefail
 #      - gcp-server.js
 #      - admin.html
 #      - admin-login.html
+#      - git-update.sh
 #      - AGENT.md
 #      - BRAIN.md
 #      - COMPONENTS.md
