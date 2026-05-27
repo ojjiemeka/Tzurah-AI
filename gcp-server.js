@@ -1953,6 +1953,28 @@ app.get("/internal/decart-key", (req, res) => {
 // ═══════════════════════════════════════════════════════════════════
 // BOOTSTRAP — app startup config for Electron clients
 // ═══════════════════════════════════════════════════════════════════
+app.get("/api/public-config", bootstrapRateLimiter, async (_req, res) => {
+  try {
+    const resolvedAppFlags = await resolveAppFeatureFlagsForUser(null);
+    return res.json({
+      success: true,
+      app_name: process.env.APP_NAME || "Loqii",
+      app_version: process.env.APP_VERSION || "1.0.0",
+      supabase_url: serverConfig.supabaseUrl,
+      supabase_anon_key: serverConfig.supabaseAnonKey,
+      public_flags: publicAppFlagsFromResolved(resolvedAppFlags.flags),
+      auth_providers: {
+        email: true,
+        google: resolvedAppFlags.flags.enable_google_oauth === true,
+      },
+      environment_label: isProduction() ? "production" : (isStaging() ? "staging" : "development"),
+    });
+  } catch (err) {
+    console.warn("[PUBLIC CONFIG] failed closed:", err.message);
+    return res.status(503).json({ success: false, error: "Configuration unavailable" });
+  }
+});
+
 app.get("/api/bootstrap", bootstrapRateLimiter, async (req, res) => {
   console.log("[BOOTSTRAP] Request from:", req.ip, "at:", new Date().toISOString());
   if (req.headers["x-app-secret"] !== BOOTSTRAP_SECRET) {
@@ -4434,6 +4456,33 @@ async function resolveAppFeatureFlagsForUser(userId = null) {
     is_dev_account: isDevAccount,
     environment: isDevAccount ? "dev_account" : "user",
   };
+}
+
+function publicAppFlagsFromResolved(flags = {}) {
+  const publicKeys = [
+    "show_onboarding",
+    "onboarding_required",
+    "enable_google_oauth",
+    "enable_help_center",
+    "enable_light_mode",
+    "enable_scene_engine",
+    "enable_style_engine",
+    "enable_background_mode",
+    "enable_topup_flow",
+  ];
+  const publicFlags = {};
+  publicKeys.forEach((key) => { publicFlags[key] = flags[key] === true; });
+  publicFlags.enable_real_payments = flags.enable_real_payments === true;
+  publicFlags.enable_mock_payments = false;
+  publicFlags.mock_payments = false;
+  publicFlags.enable_dev_tools = false;
+  publicFlags.enable_advanced_diagnostics = false;
+  publicFlags.enable_prompt_debug = false;
+  publicFlags.enable_session_debug = false;
+  publicFlags.enable_performance_metrics = false;
+  publicFlags.enable_oauth_debug = false;
+  publicFlags.enable_reconnect_debug = false;
+  return publicFlags;
 }
 
 async function resolveOptionalUserFromAuthHeader(req) {

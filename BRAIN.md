@@ -16,3 +16,4 @@ Short, high-signal lessons only. Add durable rules, not session notes.
 - Feature flags are release gates.
 - Settings is stable config; Dev is experiment control.
 - Production config fails closed before serving traffic.
+- Public config is not trust; privileged bootstrap is trust.

@@ -255,7 +255,9 @@ Location: `gcp-server.js`
 Responsibility:
 - Admin auth/RBAC, Supabase admin access, Decart token proxy, payments, credit packs, email, announcements, settings, tests, and audit logs.
 - Central production config validation before Express/session/Supabase startup.
-- Backend-owned app-safe config returned through `/api/bootstrap` and `/api/app-config`.
+- Backend-owned public pre-login config returned through `/api/public-config`.
+- Authenticated/user-resolved app config returned through `/api/app-config`.
+- Privileged local proxy bootstrap returned through `/api/bootstrap` only when `x-app-secret` matches `BOOTSTRAP_SECRET`.
 
 Key helpers:
 - `adminAuth`
@@ -277,6 +279,8 @@ Debug checklist:
 - Log admin actions for mutations.
 - Production startup must fail closed when required env is missing or default secrets are detected.
 - Do not add literal fallback secrets for `BOOTSTRAP_SECRET`, `INTERNAL_SECRET`, `ADMIN_SECRET`, Supabase, Stripe, or Decart keys.
+- `/api/public-config` may return Supabase URL, Supabase anon key, app metadata, public flags, and auth provider availability only.
+- `/api/public-config` must never return service-role keys, Decart keys, internal secrets, payment secrets, admin settings, or user-specific diagnostics.
 
 ### Production Config Ownership
 
