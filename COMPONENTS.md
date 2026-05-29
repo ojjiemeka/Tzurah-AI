@@ -258,6 +258,8 @@ Responsibility:
 - Backend-owned public pre-login config returned through `/api/public-config`.
 - Authenticated/user-resolved app config returned through `/api/app-config`.
 - Privileged local proxy bootstrap returned through `/api/bootstrap` only when `x-app-secret` matches `BOOTSTRAP_SECRET`.
+- Authenticated Decart client tokens returned through `/decart/token` and `/api/decart/client-token`.
+- Legacy `/internal/decart-key` must not return permanent Decart keys; use client-token endpoints instead.
 
 Key helpers:
 - `adminAuth`
@@ -281,6 +283,7 @@ Debug checklist:
 - Do not add literal fallback secrets for `BOOTSTRAP_SECRET`, `INTERNAL_SECRET`, `ADMIN_SECRET`, Supabase, Stripe, or Decart keys.
 - `/api/public-config` may return Supabase URL, Supabase anon key, app metadata, public flags, and auth provider availability only.
 - `/api/public-config` must never return service-role keys, Decart keys, internal secrets, payment secrets, admin settings, or user-specific diagnostics.
+- Decart permanent `dct_...` keys stay in backend environment only. Browser/Electron realtime clients receive only short-lived Decart client tokens.
 
 ### Production Config Ownership
 

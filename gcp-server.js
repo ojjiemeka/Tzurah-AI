@@ -1863,7 +1863,7 @@ app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now(), service: 
  * Requires valid Supabase JWT. Verifies user has credits > 0.
  * Returns a short-lived Decart client token.
  */
-app.get("/decart/token", requireAuth, async (req, res) => {
+async function handleDecartClientToken(req, res) {
   const decart = await resolveDecartEnvironmentForUser(
     req.userId,
     req.query?.decart_env || req.headers["x-decart-env"]
@@ -1898,20 +1898,17 @@ app.get("/decart/token", requireAuth, async (req, res) => {
   const decartEmail = await getAuthEmailByUserId(req.userId).catch(() => null);
   console.log("[DECART TOKEN ENV]", { user_id: req.userId, email: decartEmail, env: decart.env, reason: decart.reason });
 
-  if (process.env.NODE_ENV === "development") {
-    return res.json({
-      apiKey: decart.key,
-      decart_environment_used: decart.env,
-      decart_test_user: decart.test_user,
-      decart_fallback_to_prod: decart.fallback_to_prod,
-      decart_reason: decart.reason,
-    });
-  }
-
   try {
     const { createDecartClient } = await import("@decartai/sdk");
     const client = createDecartClient({ apiKey: decart.key });
-    const token  = await client.tokens.create();
+    const token  = await client.tokens.create({
+      expiresIn: decart.env === "dev" ? 300 : 600,
+      metadata: {
+        user_id: req.userId,
+        environment: decart.env,
+        app: "loqii",
+      },
+    });
     const payload = token && typeof token === "object" ? { ...token } : { token };
     payload.decart_environment_used = decart.env;
     payload.decart_test_user = decart.test_user;
@@ -1930,7 +1927,10 @@ app.get("/decart/token", requireAuth, async (req, res) => {
     console.error("[Tzurah] /decart/token failed:", err.message);
     res.status(503).json({ error: "Token generation failed — try again shortly" });
   }
-});
+}
+
+app.get("/decart/token", requireAuth, handleDecartClientToken);
+app.get("/api/decart/client-token", requireAuth, handleDecartClientToken);
 
 // ── Internal: raw Decart key for local Electron server ───────────
 // NOT public — secured by internal secret or localhost-only IP.
@@ -1942,12 +1942,9 @@ app.get("/internal/decart-key", (req, res) => {
     console.warn("[INTERNAL TOKEN] Unauthorized request from:", req.ip);
     return res.status(403).json({ error: "Forbidden" });
   }
-  const requestedEnv = String(req.query?.env || req.headers["x-decart-env"] || "").toLowerCase();
-  const env = requestedEnv === "dev" && decartAdminTestEnv() === "dev" ? "dev" : "prod";
-  const token = decartKeyForEnv(env);
-  if (!token) return res.status(500).json({ error: "API key not configured" });
-  console.log("[INTERNAL TOKEN] Serving Decart key to:", req.ip, "env=", env);
-  return res.json({ token, decart_environment_used: env });
+  return res.status(410).json({
+    error: "Use authenticated /decart/token or /api/decart/client-token for short-lived client tokens",
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════
