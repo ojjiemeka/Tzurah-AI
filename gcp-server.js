@@ -3530,9 +3530,24 @@ app.delete("/admin/api/users/:id", adminAuth, async (req, res) => {
 //   ALTER TABLE public.sessions ADD COLUMN IF NOT EXISTS session_id  TEXT;
 app.post("/session/ping", async (req, res) => {
   const { user_id, email, credits_used, session_id } = req.body || {};
-  console.log("[PING]", user_id, email || "no-email", "sid:", session_id);
-  if (!user_id) return res.status(400).json({ error: "user_id required" });
-  if (!validateUUID(user_id)) return res.status(400).json({ error: "Invalid user_id format" });
+  const auth = String(req.headers.authorization || "");
+  let jwtUser = null;
+  if (auth.startsWith("Bearer ")) {
+    jwtUser = await supabaseAdmin.auth.getUser(auth.slice(7).trim())
+      .then(({ data }) => data?.user || null)
+      .catch(() => null);
+  }
+  console.log("[SESSION PING] request received", {
+    jwt_user_id: jwtUser?.id || null,
+    jwt_email: jwtUser?.email || null,
+    user_id,
+    email: email || null,
+    session_id: session_id || null,
+    body_keys: Object.keys(req.body || {}),
+    auth_present: auth.startsWith("Bearer "),
+  });
+  if (!user_id) return res.status(400).json({ ok: false, error: "user_id required", reason: "missing_user_id" });
+  if (!validateUUID(user_id)) return res.status(400).json({ ok: false, error: "Invalid user_id format", reason: "invalid_user_id" });
   try {
     if (session_id) {
       const { data: requestedSession, error: requestedErr } = await supabaseAdmin
@@ -3671,10 +3686,22 @@ app.post("/session/ping", async (req, res) => {
         }).eq("id", existing.id);
     }
 
-    res.json({ ok: true });
+    console.log("[SESSION PING] result", {
+      action: isNewSession ? (existing ? "updated_new_session" : "inserted") : "updated_existing",
+      user_id,
+      session_id: session_id || existing?.session_id || null,
+      is_active: true,
+      kill_signal: false,
+    });
+    res.json({ ok: true, session_id: session_id || existing?.session_id || null, is_active: true });
   } catch (err) {
-    console.error("[PING] error:", err.message);
-    res.json({ ok: true, warn: err.message });
+    console.error("[SESSION PING] result", {
+      action: "error",
+      user_id,
+      session_id: session_id || null,
+      error: err.message,
+    });
+    res.status(500).json({ ok: false, error: "Session ping failed", reason: err.message });
   }
 });
 
