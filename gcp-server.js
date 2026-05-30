@@ -124,19 +124,23 @@ const APP_FEATURE_FLAG_REGISTRY = [
   { key: "onboarding_required", label: "Require onboarding", description: "Show onboarding even if the user previously completed it.", category: "User Experience", default_value: false, default_scope: "off", scope: "off", danger_level: "moderate" },
   { key: "enable_help_center", label: "Help Center", description: "Show the in-app Help Center entry point.", category: "User Experience", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
   { key: "enable_light_mode", label: "Light mode", description: "Allow users to switch to light mode.", category: "User Experience", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
+  { key: "enable_beta_updater", label: "Beta updater", description: "Enable beta update surfaces in the Loqii app.", category: "User Experience", default_value: false, default_scope: "off", scope: "off", danger_level: "moderate" },
   { key: "enable_google_oauth", label: "Google OAuth", description: "Allow Google sign-in in Loqii auth screens.", category: "Auth", default_value: true, default_scope: "global", scope: "global", danger_level: "moderate" },
   { key: "enable_scene_engine", label: "Scene engine", description: "Enable the scene preset panel and scene prompt layer.", category: "AI Features", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
+  { key: "enable_scene_system", label: "Scene system", description: "Compatibility rollout flag for the scene preset system.", category: "AI Features", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
   { key: "enable_style_engine", label: "Style engine", description: "Enable style presets and style prompt behavior.", category: "AI Features", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
+  { key: "enable_style_system", label: "Style system", description: "Compatibility rollout flag for the style preset system.", category: "AI Features", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
   { key: "enable_background_mode", label: "Background mode", description: "Enable background-only prompt controls.", category: "AI Features", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
-  { key: "enable_dev_tools", label: "Developer tools", description: "Show internal developer controls in the Loqii app.", category: "Developer", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate" },
-  { key: "enable_advanced_diagnostics", label: "Advanced diagnostics", description: "Show internal diagnostics sections.", category: "Diagnostics", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate" },
-  { key: "enable_prompt_debug", label: "Prompt debug", description: "Show prompt layer debug snapshots.", category: "Diagnostics", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate" },
-  { key: "enable_session_debug", label: "Session debug", description: "Show raw session diagnostic values.", category: "Diagnostics", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate" },
-  { key: "enable_performance_metrics", label: "Performance metrics", description: "Show RTT, reconnect, FPS, and performance diagnostics.", category: "Diagnostics", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate" },
-  { key: "enable_oauth_debug", label: "OAuth debug", description: "Show OAuth debug diagnostics for QA.", category: "Diagnostics", default_value: false, default_scope: "off", scope: "off", danger_level: "moderate" },
-  { key: "enable_reconnect_debug", label: "Reconnect debug", description: "Show reconnect timers and retry diagnostics.", category: "Diagnostics", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate" },
+  { key: "enable_obs_tools", label: "OBS tools", description: "Enable OBS helper and streaming controls.", category: "AI Features", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
+  { key: "enable_dev_tools", label: "Developer tools", description: "Show internal developer controls in the Loqii app.", category: "Developer", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate", dev_only: true },
+  { key: "enable_advanced_diagnostics", label: "Advanced diagnostics", description: "Show internal diagnostics sections.", category: "Diagnostics", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate", dev_only: true },
+  { key: "enable_prompt_debug", label: "Prompt debug", description: "Show prompt layer debug snapshots.", category: "Diagnostics", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate", dev_only: true },
+  { key: "enable_session_debug", label: "Session debug", description: "Show raw session diagnostic values.", category: "Diagnostics", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate", dev_only: true },
+  { key: "enable_performance_metrics", label: "Performance metrics", description: "Show RTT, reconnect, FPS, and performance diagnostics.", category: "Diagnostics", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate", dev_only: true },
+  { key: "enable_oauth_debug", label: "OAuth debug", description: "Show OAuth debug diagnostics for QA.", category: "Diagnostics", default_value: false, default_scope: "off", scope: "off", danger_level: "moderate", dev_only: true },
+  { key: "enable_reconnect_debug", label: "Reconnect debug", description: "Show reconnect timers and retry diagnostics.", category: "Diagnostics", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate", dev_only: true },
   { key: "enable_real_payments", label: "Real payments", description: "Enable live payment provider flow when configured.", category: "Payments", default_value: false, default_scope: "off", scope: "off", danger_level: "dangerous" },
-  { key: "enable_mock_payments", label: "Mock payments", description: "Enable mock top-up purchases for internal testing.", category: "Payments", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate" },
+  { key: "enable_mock_payments", label: "Mock payments", description: "Enable mock top-up purchases for internal testing.", category: "Payments", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate", dev_only: true },
   { key: "enable_topup_flow", label: "Top-up flow", description: "Allow users to open Add Credits/top-up surfaces.", category: "Payments", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
 ];
 
@@ -1960,6 +1964,10 @@ app.get("/api/public-config", bootstrapRateLimiter, async (_req, res) => {
       supabase_url: serverConfig.supabaseUrl,
       supabase_anon_key: serverConfig.supabaseAnonKey,
       public_flags: publicAppFlagsFromResolved(resolvedAppFlags.flags),
+      metadata: {
+        source: "public_config",
+        hidden_dev_only_flags_count: resolvedAppFlags.metadata?.hidden_dev_only_flags_count || 0,
+      },
       auth_providers: {
         email: true,
         google: resolvedAppFlags.flags.enable_google_oauth === true,
@@ -1993,6 +2001,7 @@ app.get("/api/bootstrap", bootstrapRateLimiter, async (req, res) => {
       feature_flags:          resolvedAppFlags.flags,
       app_flags:              resolvedAppFlags.flags,
       is_dev_account:         false,
+      metadata:               resolvedAppFlags.metadata,
       credit_packs:           packs || [],
       burn_rate:              2.18,
       free_credits_on_signup: 6,
@@ -2015,6 +2024,7 @@ app.get("/api/app-config", async (req, res) => {
       app_flags: resolved.flags,
       is_dev_account: resolved.is_dev_account,
       environment: resolved.environment,
+      metadata: resolved.metadata,
       app_version: process.env.APP_VERSION || "1.0.0",
     });
   } catch (err) {
@@ -4443,6 +4453,7 @@ async function getAppFeatureFlagDefinitions() {
     return {
       ...base,
       default_value: base.default_value === true,
+      dev_only: base.dev_only === true,
       scope,
       enabled: scope !== "off",
       allowlist,
@@ -4456,11 +4467,33 @@ async function getAppFeatureFlagDefinitions() {
 
 function resolveAppFlagValue(flag, { userId = null, isDevAccount = false } = {}) {
   const scope = normalizeAppFlagScope(flag.scope, flag.default_scope || "off");
-  if (scope === "off") return false;
-  if (scope === "global") return true;
-  if (scope === "dev_accounts") return isDevAccount === true;
-  if (scope === "allowlist") return !!(userId && (flag.allowlist || []).includes(userId));
-  return flag.default_value === true;
+  const allowlisted = !!(userId && (flag.allowlist || []).includes(userId));
+  let enabled = false;
+  let source = "default";
+  if (allowlisted) {
+    enabled = true;
+    source = "allowlist";
+  } else if (scope === "off") {
+    enabled = false;
+    source = "global_off";
+  } else if (scope === "global") {
+    enabled = true;
+    source = "global";
+  } else if (scope === "dev_accounts") {
+    enabled = isDevAccount === true;
+    source = enabled ? "dev_account" : "dev_only_hidden";
+  } else if (scope === "allowlist") {
+    enabled = false;
+    source = "allowlist_no_match";
+  } else {
+    enabled = flag.default_value === true;
+    source = "default";
+  }
+
+  if (flag.dev_only === true && !allowlisted && !isDevAccount) {
+    return { enabled: false, source: "dev_only_hidden", hidden: enabled === true || scope !== "off" };
+  }
+  return { enabled, source, overridden: allowlisted, hidden: false };
 }
 
 async function resolveAppFeatureFlagsForUser(userId = null) {
@@ -4468,17 +4501,37 @@ async function resolveAppFeatureFlagsForUser(userId = null) {
   const devEntries = await getDevTestAccountEntries().catch(() => []);
   const isDevAccount = !!(userId && devEntries.some(entry => entry.id === userId));
   const flags = {};
+  const sources = {};
+  const overriddenFlags = [];
+  let hiddenDevOnlyFlagsCount = 0;
   definitions.forEach(flag => {
-    flags[flag.key] = resolveAppFlagValue(flag, { userId, isDevAccount });
+    const resolved = resolveAppFlagValue(flag, { userId, isDevAccount });
+    flags[flag.key] = resolved.enabled === true;
+    sources[flag.key] = resolved.source || "default";
+    if (resolved.overridden) overriddenFlags.push(flag.key);
+    if (resolved.hidden) hiddenDevOnlyFlagsCount += 1;
   });
+  flags.enable_scene_engine = flags.enable_scene_engine || flags.enable_scene_system === true;
+  flags.enable_scene_system = flags.enable_scene_system || flags.enable_scene_engine === true;
+  flags.enable_style_engine = flags.enable_style_engine || flags.enable_style_system === true;
+  flags.enable_style_system = flags.enable_style_system || flags.enable_style_engine === true;
   flags.mock_payments = flags.enable_mock_payments === true;
   flags.enable_background = flags.enable_background_mode === true;
   flags.enable_style_mode = flags.enable_style_engine === true;
+  flags.enable_obs_tools = flags.enable_obs_tools === true;
   return {
     flags,
     definitions,
     is_dev_account: isDevAccount,
     environment: isDevAccount ? "dev_account" : "user",
+    metadata: {
+      source: "resolved",
+      dev_user: isDevAccount,
+      overridden_flags: overriddenFlags,
+      hidden_dev_only_flags_count: hiddenDevOnlyFlagsCount,
+      flag_sources: sources,
+      refreshed_at: new Date().toISOString(),
+    },
   };
 }
 
@@ -4490,8 +4543,11 @@ function publicAppFlagsFromResolved(flags = {}) {
     "enable_help_center",
     "enable_light_mode",
     "enable_scene_engine",
+    "enable_scene_system",
     "enable_style_engine",
+    "enable_style_system",
     "enable_background_mode",
+    "enable_obs_tools",
     "enable_topup_flow",
   ];
   const publicFlags = {};
@@ -6174,7 +6230,7 @@ app.get("/admin/api/app-flags/resolve", adminAuth, async (req, res) => {
   }
 });
 
-app.post("/admin/api/app-flags/:key", adminAuth, async (req, res) => {
+async function updateAppFlagScopeHandler(req, res) {
   const role = req.session.adminRole;
   if (!["super_admin", "admin"].includes(role)) return res.status(403).json({ error: "Insufficient permissions" });
   const key = String(req.params.key || "").trim();
@@ -6202,7 +6258,10 @@ app.post("/admin/api/app-flags/:key", adminAuth, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+}
+
+app.post("/admin/api/app-flags/:key", adminAuth, updateAppFlagScopeHandler);
+app.patch("/admin/api/app-flags/:key", adminAuth, updateAppFlagScopeHandler);
 
 app.post("/admin/api/app-flags/:key/allowlist", adminAuth, async (req, res) => {
   const role = req.session.adminRole;

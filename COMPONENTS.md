@@ -307,9 +307,13 @@ Rules:
 - Settings owns stable admin/app configuration only.
 - Dev owns app feature flags, dev/test accounts, diagnostics toggles, rollout controls, and test-mode controls.
 - Flag resolution is scope-based: `off` is false, `global` is true, `dev_accounts` is true only for users in `dev_test_accounts`, and `allowlist` is true only for selected user IDs.
+- User allowlist entries are explicit overrides and may enable a flag for one selected user even when the global scope is `off`.
+- Dev-only flags are resolved false for normal production users unless the user is a dev/test account or explicitly allowlisted.
+- Resolver metadata includes source, overridden flag keys, hidden dev-only flag count, and per-flag sources for admin preview.
 - Dangerous flags require `super_admin`; non-dangerous app flags may be managed by `admin` or `super_admin`.
 - Public app config endpoints return resolved booleans and safe metadata only. They never return secrets.
 - Allowlist and dev-account flows must use `UserPicker`; raw UUID entry is only a collapsed advanced fallback.
+- Current flag storage is `app_settings.app_feature_flags_registry` JSON. A future `feature_flags`/`feature_flag_overrides` table can replace this without changing the resolver contract.
 
 ## Local Decart Token Proxy
 

@@ -17,3 +17,4 @@ Short, high-signal lessons only. Add durable rules, not session notes.
 - Settings is stable config; Dev is experiment control.
 - Production config fails closed before serving traffic.
 - Public config is not trust; privileged bootstrap is trust.
+- Dev-only flags resolve false for normal users unless a server-side dev account or allowlist says otherwise.
