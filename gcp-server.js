@@ -1790,6 +1790,19 @@ const allowedOrigins = [
   ...(isProduction() ? [] : ["http://localhost:3000", "http://localhost:4000"]),
   process.env.ALLOWED_ORIGIN,
 ].filter(Boolean);
+const electronLocalOrigins = new Set(["http://localhost:3000"]);
+
+function isAllowedCorsOrigin(req, origin) {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  if (req.path.startsWith("/session/") && electronLocalOrigins.has(origin)) {
+    if (req.path === "/session/end") {
+      console.log("[SESSION END] cors origin allowed", { origin, path: req.path });
+    }
+    return true;
+  }
+  return false;
+}
 
 // ── Express setup ─────────────────────────────────────────────────
 const app = express();
@@ -1808,8 +1821,7 @@ app.use((req, res, next) => {
   }
   cors({
     origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
+      if (isAllowedCorsOrigin(req, origin)) return callback(null, true);
       callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
