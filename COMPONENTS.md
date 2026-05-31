@@ -296,6 +296,19 @@ Rules:
 - Production requires Supabase URL/service role/anon key, bootstrap/internal/admin secrets, Decart production key, Stripe key/webhook secret, and app base URL.
 - Mock payments and diagnostics are disabled by default in production unless explicitly feature-flagged for dev/test users.
 
+### Backend Production Hardening
+
+Owner:
+- `gcp-server.js`
+
+Rules:
+- Admin session storage is abstracted through `createAdminSessionStore()`.
+- Local development may use Express MemoryStore with an explicit warning.
+- Production should set `REDIS_SESSION_URL` or `REDIS_URL`; set `REQUIRE_PERSISTENT_SESSION_STORE=true` when deployment is ready to fail closed without Redis.
+- Rate limiting is route-aware: `/session/ping` has a higher ceiling for 5-second health cadence, `/session/end` has a narrower finalization limit, Decart token endpoints use token-specific limits, and admin login uses auth-specific limits.
+- The existing stale-session watchdog and reconciliation scans remain the cleanup owners; do not change billing math from infrastructure hardening work.
+- CORS remains centralized through `isAllowedCorsOrigin()`, including the localhost Electron session route allowance.
+
 ### App Feature Flag Control Plane
 
 Owner:

@@ -20,6 +20,7 @@ set -euo pipefail
 #      - BRAIN.md
 #      - COMPONENTS.md
 #      - PHASE7A_SOAK_TEST.md
+#      - package.json
 # ================================================================
 
 DEPLOY_DIR="../tzurah-server-deploy"
@@ -32,6 +33,7 @@ DEPLOY_SAFE_FILES=(
   "BRAIN.md"
   "COMPONENTS.md"
   "PHASE7A_SOAK_TEST.md"
+  "package.json"
 )
 
 DRY_RUN=0
@@ -115,7 +117,7 @@ echo "Staged files:"
 echo "$STAGED_FILES" | sed 's/^/  - /'
 echo
 
-WHITELIST_PATTERN="^(gcp-server\.js|admin\.html|admin-login\.html|git-update\.sh|AGENT\.md|BRAIN\.md|COMPONENTS\.md|PHASE7A_SOAK_TEST\.md)$"
+WHITELIST_PATTERN="^(gcp-server\.js|admin\.html|admin-login\.html|git-update\.sh|AGENT\.md|BRAIN\.md|COMPONENTS\.md|PHASE7A_SOAK_TEST\.md|package\.json)$"
 BAD_FILES=$(echo "$STAGED_FILES" | grep -Ev "$WHITELIST_PATTERN" || true)
 if [[ -n "$BAD_FILES" ]]; then
   echo "ERROR: Refusing to commit files outside the deploy-safe whitelist:"

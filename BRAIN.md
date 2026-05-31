@@ -18,3 +18,5 @@ Short, high-signal lessons only. Add durable rules, not session notes.
 - Production config fails closed before serving traffic.
 - Public config is not trust; privileged bootstrap is trust.
 - Dev-only flags resolve false for normal users unless a server-side dev account or allowlist says otherwise.
+- Admin sessions need a persistent store before broad production; MemoryStore is local/dev fallback only.
+- Rate limits must be route-aware; session pings are health traffic, not login traffic.

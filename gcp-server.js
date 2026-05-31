@@ -446,6 +446,51 @@ const authLimiter = rateLimit({
   message: { error: "Too many auth attempts" },
   skip: (req) => req.ip === "127.0.0.1" || req.ip === "::1",
 });
+const sessionPingLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 320,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many session pings" },
+});
+const sessionEndLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many session finalization requests" },
+});
+
+function createAdminSessionStore() {
+  const redisUrl = process.env.REDIS_SESSION_URL || process.env.REDIS_URL || "";
+  const requirePersistent = isProduction() && process.env.REQUIRE_PERSISTENT_SESSION_STORE === "true";
+
+  if (!redisUrl) {
+    const message = "[SESSION STORE] Redis session store not configured; using Express MemoryStore";
+    if (isProduction()) console.warn(`${message}. Set REDIS_SESSION_URL and REQUIRE_PERSISTENT_SESSION_STORE=true before broad production use.`);
+    else console.warn(`${message} for local development only.`);
+    if (requirePersistent) throw new Error("Production persistent session store required but REDIS_SESSION_URL is missing");
+    return undefined;
+  }
+
+  try {
+    const { createClient } = require("redis");
+    const RedisStoreModule = require("connect-redis");
+    const RedisStore = RedisStoreModule.RedisStore || RedisStoreModule.default || RedisStoreModule;
+    const client = createClient({ url: redisUrl });
+    client.on("error", (err) => console.warn("[SESSION STORE] Redis error:", err.message));
+    client.connect().catch((err) => {
+      console.warn("[SESSION STORE] Redis connect failed:", err.message);
+    });
+    console.log("[SESSION STORE] Redis-backed admin session store enabled");
+    return new RedisStore({ client, prefix: "tzurah-admin:" });
+  } catch (err) {
+    const message = `[SESSION STORE] Redis session store unavailable: ${err.message}`;
+    if (requirePersistent) throw new Error(message);
+    console.warn(`${message}. Falling back to MemoryStore.`);
+    return undefined;
+  }
+}
 
 // ── UUID validation ────────────────────────────────────────────────
 function validateUUID(str) {
@@ -1829,8 +1874,10 @@ app.use((req, res, next) => {
 });
 app.use("/api/",      apiLimiter);
 app.use("/credits/",  apiLimiter);
-app.use("/session/",  apiLimiter);
+app.use("/session/ping", sessionPingLimiter);
+app.use("/session/end",  sessionEndLimiter);
 app.use("/decart/token", tokenLimiter);
+app.use("/api/decart/client-token", tokenLimiter);
 app.use("/admin/login",  authLimiter);
 
 // Raw body for Stripe webhook signature verification (must come before express.json)
@@ -1838,6 +1885,7 @@ app.use("/stripe/webhook", express.raw({ type: "application/json" }));
 app.use(express.json());
 app.use(session({
   secret:            serverConfig.adminSecret,
+  store:             createAdminSessionStore(),
   resave:            false,
   saveUninitialized: false,
   cookie:            { secure: false, httpOnly: true, sameSite: "lax", maxAge: 24 * 60 * 60 * 1000 },
