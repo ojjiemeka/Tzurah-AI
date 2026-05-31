@@ -20,3 +20,5 @@ Short, high-signal lessons only. Add durable rules, not session notes.
 - Dev-only flags resolve false for normal users unless a server-side dev account or allowlist says otherwise.
 - Admin sessions need a persistent store before broad production; MemoryStore is local/dev fallback only.
 - Rate limits must be route-aware; session pings are health traffic, not login traffic.
+- Dangerous admin mutations require backend super_admin gates, not hidden buttons.
+- Production readiness excludes payments until payment-provider hardening is explicit.

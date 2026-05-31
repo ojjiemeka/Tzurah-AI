@@ -21,6 +21,11 @@ set -euo pipefail
 #      - COMPONENTS.md
 #      - PHASE7A_SOAK_TEST.md
 #      - package.json
+#      - ADMIN_RBAC_AUDIT.md
+#      - PRODUCTION_DB_INDEXES.md
+#      - SECURITY_REVIEW_100_1000_USERS.md
+#      - PRODUCTION_RUNBOOK.md
+#      - PRODUCTION_READINESS_100_1000.md
 # ================================================================
 
 DEPLOY_DIR="../tzurah-server-deploy"
@@ -34,6 +39,11 @@ DEPLOY_SAFE_FILES=(
   "COMPONENTS.md"
   "PHASE7A_SOAK_TEST.md"
   "package.json"
+  "ADMIN_RBAC_AUDIT.md"
+  "PRODUCTION_DB_INDEXES.md"
+  "SECURITY_REVIEW_100_1000_USERS.md"
+  "PRODUCTION_RUNBOOK.md"
+  "PRODUCTION_READINESS_100_1000.md"
 )
 
 DRY_RUN=0
@@ -117,7 +127,7 @@ echo "Staged files:"
 echo "$STAGED_FILES" | sed 's/^/  - /'
 echo
 
-WHITELIST_PATTERN="^(gcp-server\.js|admin\.html|admin-login\.html|git-update\.sh|AGENT\.md|BRAIN\.md|COMPONENTS\.md|PHASE7A_SOAK_TEST\.md|package\.json)$"
+WHITELIST_PATTERN="^(gcp-server\.js|admin\.html|admin-login\.html|git-update\.sh|AGENT\.md|BRAIN\.md|COMPONENTS\.md|PHASE7A_SOAK_TEST\.md|package\.json|ADMIN_RBAC_AUDIT\.md|PRODUCTION_DB_INDEXES\.md|SECURITY_REVIEW_100_1000_USERS\.md|PRODUCTION_RUNBOOK\.md|PRODUCTION_READINESS_100_1000\.md)$"
 BAD_FILES=$(echo "$STAGED_FILES" | grep -Ev "$WHITELIST_PATTERN" || true)
 if [[ -n "$BAD_FILES" ]]; then
   echo "ERROR: Refusing to commit files outside the deploy-safe whitelist:"

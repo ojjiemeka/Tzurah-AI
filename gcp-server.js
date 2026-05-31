@@ -147,6 +147,47 @@ const APP_FEATURE_FLAG_REGISTRY = [
 const APP_FLAG_SCOPES = new Set(["off", "global", "dev_accounts", "allowlist"]);
 const APP_DANGEROUS_LEVELS = new Set(["dangerous", "high"]);
 
+const _criticalAlertCache = new Map();
+function sanitizeAlertPayload(payload = {}) {
+  const blocked = /token|secret|key|password|authorization|cookie/i;
+  const clean = {};
+  for (const [key, value] of Object.entries(payload || {})) {
+    if (blocked.test(key)) clean[key] = "[redacted]";
+    else if (value && typeof value === "object") clean[key] = sanitizeAlertPayload(value);
+    else clean[key] = value;
+  }
+  return clean;
+}
+
+async function sendCriticalAlert(type, payload = {}) {
+  if (process.env.ENABLE_CRITICAL_ALERTS !== "true") return false;
+  const webhookUrl = process.env.ALERT_WEBHOOK_URL;
+  if (!webhookUrl) return false;
+  const now = Date.now();
+  const dedupeKey = `${type}:${JSON.stringify(payload).slice(0, 240)}`;
+  const lastSent = _criticalAlertCache.get(dedupeKey) || 0;
+  if (now - lastSent < 5 * 60 * 1000) return false;
+  _criticalAlertCache.set(dedupeKey, now);
+  try {
+    const response = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type,
+        service: "tzurah-server",
+        environment: serverConfig?.environment || runtimeEnvironment(),
+        ts: new Date(now).toISOString(),
+        payload: sanitizeAlertPayload(payload),
+      }),
+    });
+    if (!response.ok) console.warn("[ALERT] Critical alert webhook failed:", response.status);
+    return response.ok;
+  } catch (err) {
+    console.warn("[ALERT] Critical alert send failed:", err.message);
+    return false;
+  }
+}
+
 // Credit packs (1 credit = 10 seconds)
 const PACKS = {
   starter:  { name: "Starter",  price: 20,  credits: 42,   minutes: 7,   priceId: process.env.STRIPE_PRICE_STARTER  },
@@ -363,6 +404,14 @@ async function logAction(action, adminEmail, adminRole, targetUser, details, req
     else    console.warn("[AUDIT] Logged with basic schema — add migration columns for full audit data");
   }
   console.log(`[AUDIT] ${now} | ${adminRole}:${adminEmail} | ${action} | target:${targetUser || "n/a"}`);
+  if (/protected_billing|force_legacy|credit|reconciliation|soak|decart|settings|subadmin|admin|delete|ban|flag_scope_changed/.test(String(action || ""))) {
+    sendCriticalAlert("admin_dangerous_action", {
+      action,
+      admin: adminEmail || "unknown",
+      role: adminRole || "unknown",
+      target: targetUser || null,
+    });
+  }
 }
 
 // ── Admin login rate limit (in-memory, per IP) ────────────────────
@@ -401,6 +450,51 @@ function adminAuth(req, res, next) {
 }
 
 // ── User auth middleware (Supabase JWT) ────────────────────────────
+function requireSuperAdminAction(actionName = "super_admin_action") {
+  return async (req, res, next) => {
+    const role = req.session?.adminRole;
+    if (role === "super_admin") return next();
+    const adminEmail = req.session?.adminEmail || "unknown";
+    console.warn(`[RBAC DENY] action=${actionName} user=${adminEmail} role=${role || "unknown"}`);
+    await logAction("rbac_denied", adminEmail, role, null, {
+      action: actionName,
+      required_role: "super_admin",
+      path: req.path,
+      method: req.method,
+    }, req).catch(() => {});
+    sendCriticalAlert("admin_rbac_denied", {
+      action: actionName,
+      admin: adminEmail,
+      role: role || "unknown",
+      path: req.path,
+    });
+    return res.status(403).json({ error: "Super admin required" });
+  };
+}
+
+function requireAdminPermission(permission, options = {}) {
+  return async (req, res, next) => {
+    const role = req.session?.adminRole;
+    if (can(role, permission)) return next();
+    const adminEmail = req.session?.adminEmail || "unknown";
+    console.warn(`[RBAC DENY] action=${permission} user=${adminEmail} role=${role || "unknown"}`);
+    await logAction("rbac_denied", adminEmail, role, null, {
+      permission,
+      path: req.path,
+      method: req.method,
+    }, req).catch(() => {});
+    if (options.dangerous) {
+      sendCriticalAlert("admin_rbac_denied", {
+        action: permission,
+        admin: adminEmail,
+        role: role || "unknown",
+        path: req.path,
+      });
+    }
+    return res.status(403).json({ error: "Insufficient permissions", required: permission });
+  };
+}
+
 async function requireAuth(req, res, next) {
   const auth = (req.headers.authorization || "").trim();
   if (!auth.startsWith("Bearer ")) {
@@ -446,6 +540,14 @@ const authLimiter = rateLimit({
   message: { error: "Too many auth attempts" },
   skip: (req) => req.ip === "127.0.0.1" || req.ip === "::1",
 });
+const adminMutationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 80,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => ["GET", "HEAD", "OPTIONS"].includes(req.method),
+  message: { error: "Too many admin mutation requests" },
+});
 const sessionPingLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 320,
@@ -461,15 +563,26 @@ const sessionEndLimiter = rateLimit({
   message: { error: "Too many session finalization requests" },
 });
 
+let sessionStoreFatalError = null;
+
 function createAdminSessionStore() {
   const redisUrl = process.env.REDIS_SESSION_URL || process.env.REDIS_URL || "";
   const requirePersistent = isProduction() && process.env.REQUIRE_PERSISTENT_SESSION_STORE === "true";
 
   if (!redisUrl) {
-    const message = "[SESSION STORE] Redis session store not configured; using Express MemoryStore";
-    if (isProduction()) console.warn(`${message}. Set REDIS_SESSION_URL and REQUIRE_PERSISTENT_SESSION_STORE=true before broad production use.`);
-    else console.warn(`${message} for local development only.`);
-    if (requirePersistent) throw new Error("Production persistent session store required but REDIS_SESSION_URL is missing");
+    if (isProduction()) {
+      console.warn("[SESSION STORE] mode=memory dev-only production Redis not configured");
+    } else {
+      console.warn("[SESSION STORE] mode=memory dev-only");
+    }
+    if (requirePersistent) {
+      console.error("[SESSION STORE] production persistent store required but unavailable");
+      sendCriticalAlert("redis_session_store_unavailable", {
+        environment: serverConfig.environment,
+        reason: "REDIS_SESSION_URL missing",
+      });
+      sessionStoreFatalError = "Production persistent session store required but REDIS_SESSION_URL is missing";
+    }
     return undefined;
   }
 
@@ -482,12 +595,20 @@ function createAdminSessionStore() {
     client.connect().catch((err) => {
       console.warn("[SESSION STORE] Redis connect failed:", err.message);
     });
-    console.log("[SESSION STORE] Redis-backed admin session store enabled");
+    console.log("[SESSION STORE] mode=redis");
     return new RedisStore({ client, prefix: "tzurah-admin:" });
   } catch (err) {
     const message = `[SESSION STORE] Redis session store unavailable: ${err.message}`;
-    if (requirePersistent) throw new Error(message);
-    console.warn(`${message}. Falling back to MemoryStore.`);
+    if (requirePersistent) {
+      console.error("[SESSION STORE] production persistent store required but unavailable");
+      sendCriticalAlert("redis_session_store_unavailable", {
+        environment: serverConfig.environment,
+        reason: err.message,
+      });
+      sessionStoreFatalError = message;
+      return undefined;
+    }
+    console.warn(`${message}. Falling back to MemoryStore. [SESSION STORE] mode=memory dev-only`);
     return undefined;
   }
 }
@@ -694,6 +815,15 @@ async function logBillingReconciliationEvent({ userId, sessionId, type, severity
     }
     if (error && !isMissingBillingMigrationError(error)) {
       console.warn("[BILLING RECON] Insert error:", error.message);
+    }
+    if (normalizedSeverity === "critical" || DANGEROUS_RECON_TYPES.has(type) || /failed_billing|duplicate_live|invalid_live|mismatch_severe/.test(String(type || ""))) {
+      sendCriticalAlert("billing_reconciliation_critical", {
+        type,
+        severity: normalizedSeverity,
+        user_id: userId || null,
+        session_id: sessionId || null,
+        details: sanitizeAlertPayload(details),
+      });
     }
   } catch (err) {
     if (!isMissingBillingMigrationError(err)) {
@@ -1879,6 +2009,7 @@ app.use("/session/end",  sessionEndLimiter);
 app.use("/decart/token", tokenLimiter);
 app.use("/api/decart/client-token", tokenLimiter);
 app.use("/admin/login",  authLimiter);
+app.use("/admin/api/", adminMutationLimiter);
 
 // Raw body for Stripe webhook signature verification (must come before express.json)
 app.use("/stripe/webhook", express.raw({ type: "application/json" }));
@@ -1989,6 +2120,11 @@ async function handleDecartClientToken(req, res) {
     res.json(payload);
   } catch (err) {
     console.error("[Tzurah] /decart/token failed:", err.message);
+    sendCriticalAlert("decart_token_failure", {
+      user_id: req.userId,
+      decart_environment_used: decart.env,
+      reason: err.message,
+    });
     res.status(503).json({ error: "Token generation failed — try again shortly" });
   }
 }
@@ -3074,7 +3210,7 @@ app.get("/admin/api/dev-accounts", adminAuth, async (_req, res) => {
   }
 });
 
-app.post("/admin/api/dev-accounts", adminAuth, async (req, res) => {
+app.post("/admin/api/dev-accounts", adminAuth, requireSuperAdminAction("dev_account_add"), async (req, res) => {
   if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Super admin required" });
   const userId = String(req.body?.user_id || "").trim();
   if (!validateUUID(userId)) return res.status(400).json({ error: "Valid user_id required" });
@@ -3093,7 +3229,7 @@ app.post("/admin/api/dev-accounts", adminAuth, async (req, res) => {
   }
 });
 
-app.delete("/admin/api/dev-accounts/:user_id", adminAuth, async (req, res) => {
+app.delete("/admin/api/dev-accounts/:user_id", adminAuth, requireSuperAdminAction("dev_account_remove"), async (req, res) => {
   if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Super admin required" });
   const userId = String(req.params.user_id || "").trim();
   if (!validateUUID(userId)) return res.status(400).json({ error: "Valid user_id required" });
@@ -3401,7 +3537,7 @@ app.get("/admin/api/purchases", adminAuth, async (req, res) => {
 
 // ── Admin: gift credits ───────────────────────────────────────────
 // Accepts { userId, amount } (admin.html) OR legacy { user_id, credits }
-app.post("/admin/api/gift-credits", adminAuth, async (req, res) => {
+app.post("/admin/api/gift-credits", adminAuth, requireSuperAdminAction("credit_modify_gift"), async (req, res) => {
   const role = req.session.adminRole;
   if (!can(role, "gift_credits")) {
     await logAction("unauthorized_attempt", req.session.adminEmail, role, null, { endpoint: "gift-credits", required_permission: "gift_credits" }, req);
@@ -3461,7 +3597,7 @@ app.post("/admin/api/gift-credits", adminAuth, async (req, res) => {
 });
 
 // ── Admin: deduct credits ─────────────────────────────────────────
-app.post("/admin/api/deduct-credits", adminAuth, async (req, res) => {
+app.post("/admin/api/deduct-credits", adminAuth, requireSuperAdminAction("credit_modify_deduct"), async (req, res) => {
   const role = req.session.adminRole;
   if (!can(role, "deduct_credits")) {
     await logAction("unauthorized_attempt", req.session.adminEmail, role, null, { endpoint: "deduct-credits", required_permission: "deduct_credits" }, req);
@@ -3495,7 +3631,7 @@ app.post("/admin/api/deduct-credits", adminAuth, async (req, res) => {
 });
 
 // ── Admin: ban user ───────────────────────────────────────────────
-app.post("/admin/api/ban-user", adminAuth, async (req, res) => {
+app.post("/admin/api/ban-user", adminAuth, requireSuperAdminAction("user_status_ban"), async (req, res) => {
   const role = req.session.adminRole;
   if (!can(role, "ban_user")) {
     await logAction("unauthorized_attempt", req.session.adminEmail, role, null, { endpoint: "ban-user", required_permission: "ban_user" }, req);
@@ -3516,7 +3652,7 @@ app.post("/admin/api/ban-user", adminAuth, async (req, res) => {
 });
 
 // ── Admin: unban user ─────────────────────────────────────────────
-app.post("/admin/api/unban-user", adminAuth, async (req, res) => {
+app.post("/admin/api/unban-user", adminAuth, requireSuperAdminAction("user_status_unban"), async (req, res) => {
   const role = req.session.adminRole;
   if (!can(role, "unban_user")) {
     await logAction("unauthorized_attempt", req.session.adminEmail, role, null, { endpoint: "unban-user", required_permission: "unban_user" }, req);
@@ -3537,7 +3673,7 @@ app.post("/admin/api/unban-user", adminAuth, async (req, res) => {
 });
 
 // ── Admin: delete user ────────────────────────────────────────────
-app.delete("/admin/api/users/:id", adminAuth, async (req, res) => {
+app.delete("/admin/api/users/:id", adminAuth, requireSuperAdminAction("user_delete"), async (req, res) => {
   const role = req.session.adminRole;
   try {
     const userId = req.params.id;
@@ -3964,7 +4100,7 @@ app.get("/admin/api/decart-balance", adminAuth, async (_req, res) => {
 });
 
 // POST /admin/api/decart-balance — manually set balance, threshold, or cost rate
-app.post("/admin/api/decart-balance", adminAuth, async (req, res) => {
+app.post("/admin/api/decart-balance", adminAuth, requireSuperAdminAction("decart_balance_update"), async (req, res) => {
   const role = req.session.adminRole;
   const { balance, threshold, cost_per_second } = req.body || {};
   try {
@@ -4818,7 +4954,7 @@ app.get("/admin/api/reconciliation/summary", adminAuth, async (req, res) => {
   }
 });
 
-app.post("/admin/api/reconciliation/resolve-historical-criticals", adminAuth, async (req, res) => {
+app.post("/admin/api/reconciliation/resolve-historical-criticals", adminAuth, requireSuperAdminAction("reconciliation_resolve_historical_criticals"), async (req, res) => {
   if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Super admin required" });
   const requestedMinutes = req.body?.older_than_minutes != null
     ? Number(req.body.older_than_minutes)
@@ -5009,7 +5145,7 @@ app.get("/admin/api/billing-cutover/status", adminAuth, async (req, res) => {
   }
 });
 
-app.post("/admin/api/billing-cutover/flags", adminAuth, async (req, res) => {
+app.post("/admin/api/billing-cutover/flags", adminAuth, requireSuperAdminAction("protected_billing_flags_update"), async (req, res) => {
   if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Super admin required" });
   const updates = req.body?.flags || {};
   try {
@@ -5036,7 +5172,7 @@ app.post("/admin/api/billing-cutover/flags", adminAuth, async (req, res) => {
   }
 });
 
-app.post("/admin/api/billing-cutover/test-users", adminAuth, async (req, res) => {
+app.post("/admin/api/billing-cutover/test-users", adminAuth, requireSuperAdminAction("protected_billing_test_user_update"), async (req, res) => {
   if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Super admin required" });
   const userId = String(req.body?.user_id || "").trim();
   const enabled = req.body?.enabled === true;
@@ -5053,7 +5189,7 @@ app.post("/admin/api/billing-cutover/test-users", adminAuth, async (req, res) =>
   }
 });
 
-app.post("/admin/api/billing-cutover/force-legacy", adminAuth, async (req, res) => {
+app.post("/admin/api/billing-cutover/force-legacy", adminAuth, requireSuperAdminAction("protected_billing_force_legacy"), async (req, res) => {
   if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Super admin required" });
   const enabled = req.body?.enabled !== false;
   try {
@@ -5079,7 +5215,7 @@ app.post("/admin/api/billing-cutover/force-legacy", adminAuth, async (req, res) 
 });
 
 // POST /admin/api/reconciliation/:id/resolve - mark one anomaly resolved
-app.post("/admin/api/reconciliation/:id/resolve", adminAuth, async (req, res) => {
+app.post("/admin/api/reconciliation/:id/resolve", adminAuth, requireSuperAdminAction("reconciliation_event_resolve"), async (req, res) => {
   const id = req.params.id;
   if (!validateUUID(id || "")) return res.status(400).json({ error: "Invalid reconciliation event id" });
   const note = String(req.body?.note || "").trim();
@@ -5427,7 +5563,7 @@ app.get("/admin/api/soak-test/users", (req, res, next) => {
 });
 
 // POST /admin/api/reconciliation/soak-test - internal dry-run synthetic billing rows
-app.post("/admin/api/reconciliation/soak-test", adminAuth, async (req, res) => {
+app.post("/admin/api/reconciliation/soak-test", adminAuth, requireSuperAdminAction("billing_soak_test_run"), async (req, res) => {
   if (!requireSoakSuperAdmin(req, res)) return;
 
   const dryRun = req.body?.dry_run !== false;
@@ -5552,7 +5688,7 @@ app.post("/admin/api/reconciliation/soak-test", adminAuth, async (req, res) => {
 });
 
 // POST /admin/api/reconciliation/soak-test/cleanup - clean only synthetic soak rows
-app.post("/admin/api/reconciliation/soak-test/cleanup", adminAuth, async (req, res) => {
+app.post("/admin/api/reconciliation/soak-test/cleanup", adminAuth, requireSuperAdminAction("billing_soak_test_cleanup"), async (req, res) => {
   if (!requireSoakSuperAdmin(req, res)) return;
   const mode = ["current_run", "all_test"].includes(String(req.body?.mode || "all_test"))
     ? String(req.body?.mode || "all_test")
@@ -5988,7 +6124,7 @@ app.get("/admin/api/settings", adminAuth, async (req, res) => {
 });
 
 // Reveals the actual (unmasked) value of a specific env key
-app.post("/admin/api/settings/reveal-key", adminAuth, (req, res) => {
+app.post("/admin/api/settings/reveal-key", adminAuth, requireSuperAdminAction("settings_reveal_secret"), (req, res) => {
   if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Insufficient permissions", required: "super_admin" });
   const { key_name } = req.body || {};
   const revealable = ["DECART_API_KEY", "DECART_API_KEY_PROD", "DECART_API_KEY_DEV", "SUPABASE_SERVICE_ROLE_KEY", "ADMIN_EMAIL"];
@@ -6004,7 +6140,7 @@ app.post("/admin/api/settings/reveal-key", adminAuth, (req, res) => {
 });
 
 // Updates a single env key in .env + live process.env
-app.post("/admin/api/settings/update-key", adminAuth, async (req, res) => {
+app.post("/admin/api/settings/update-key", adminAuth, requireSuperAdminAction("settings_update_secret"), async (req, res) => {
   if (req.session.adminRole !== "super_admin") return res.status(403).json({ error: "Insufficient permissions", required: "super_admin" });
   const { key_name, value, confirm } = req.body || {};
   if (!SETTINGS_ALLOWED_KEYS.includes(key_name)) {
@@ -6059,7 +6195,7 @@ app.get("/admin/api/settings/server-info", adminAuth, (req, res) => {
 });
 
 // Graceful exit — PM2 restarts the process automatically
-app.post("/admin/api/settings/restart", adminAuth, (req, res) => {
+app.post("/admin/api/settings/restart", adminAuth, requireSuperAdminAction("server_restart"), (req, res) => {
   res.json({ success: true });
   setTimeout(() => process.exit(0), 500);
 });
@@ -6091,7 +6227,7 @@ app.get("/admin/api/db/stats", adminAuth, async (_req, res) => {
 });
 
 // POST /admin/api/db/action — execute a named destructive action
-app.post("/admin/api/db/action", adminAuth, async (req, res) => {
+app.post("/admin/api/db/action", adminAuth, requireSuperAdminAction("database_action"), async (req, res) => {
   const { action } = req.body || {};
   const SENTINEL = "00000000-0000-0000-0000-000000000000"; // never matches real UUID
 
@@ -6213,7 +6349,7 @@ app.post("/auth/webhook", async (req, res) => {
 });
 
 // ── Repair missing profiles (one-time admin utility) ──────────────
-app.post("/admin/api/repair-missing-profiles", adminAuth, async (req, res) => {
+app.post("/admin/api/repair-missing-profiles", adminAuth, requireSuperAdminAction("repair_missing_profiles"), async (req, res) => {
   try {
     const { data: { users }, error: authErr } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
     if (authErr) throw authErr;
@@ -6303,6 +6439,11 @@ async function updateAppFlagScopeHandler(req, res) {
   }
   const scope = String(req.body?.scope || "").trim();
   if (!APP_FLAG_SCOPES.has(scope)) return res.status(400).json({ error: "Invalid scope" });
+  if (scope === "global" && role !== "super_admin") {
+    await logAction("unauthorized_attempt", req.session.adminEmail, role, null, { endpoint: "app-flags", flag: key, scope, required_permission: "super_admin" }, req);
+    sendCriticalAlert("admin_rbac_denied", { action: "feature_flag_global_scope", admin: req.session.adminEmail, role, flag: key });
+    return res.status(403).json({ error: "Super admin required for global flag rollout" });
+  }
   try {
     const before = (await getAppFeatureFlagDefinitions()).find(flag => flag.key === key);
     await saveAppFeatureFlag(key, { scope }, req.session.adminEmail || "admin");
@@ -7548,6 +7689,10 @@ setInterval(() => {
   });
 }, 2 * 60 * 1000);
 
+if (sessionStoreFatalError) {
+  console.error("[STARTUP] Refusing to listen:", sessionStoreFatalError);
+  setTimeout(() => process.exit(1), 1000);
+} else {
 app.listen(PORT, () => {
   console.log("═══════════════════════════════════════════════════════");
   console.log("  Tzurah Live — GCP Server");
@@ -7584,3 +7729,4 @@ app.listen(PORT, () => {
   console.log("  GET  /admin/api/email/sent     → Sent email log");
   console.log("═══════════════════════════════════════════════════════\n");
 });
+}

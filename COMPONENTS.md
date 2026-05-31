@@ -308,6 +308,15 @@ Rules:
 - Rate limiting is route-aware: `/session/ping` has a higher ceiling for 5-second health cadence, `/session/end` has a narrower finalization limit, Decart token endpoints use token-specific limits, and admin login uses auth-specific limits.
 - The existing stale-session watchdog and reconciliation scans remain the cleanup owners; do not change billing math from infrastructure hardening work.
 - CORS remains centralized through `isAllowedCorsOrigin()`, including the localhost Electron session route allowance.
+- Dangerous admin mutations use backend super_admin gates through `requireSuperAdminAction()`.
+- Critical alerts are env-driven through `sendCriticalAlert()` with `ENABLE_CRITICAL_ALERTS=true` and `ALERT_WEBHOOK_URL`.
+- Production readiness docs:
+  - `ADMIN_RBAC_AUDIT.md`
+  - `PRODUCTION_DB_INDEXES.md`
+  - `SECURITY_REVIEW_100_1000_USERS.md`
+  - `PRODUCTION_RUNBOOK.md`
+  - `PRODUCTION_READINESS_100_1000.md`
+- Payment-provider production readiness is deferred and must not be inferred from this hardening pass.
 
 ### App Feature Flag Control Plane
 
