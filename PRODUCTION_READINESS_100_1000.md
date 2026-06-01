@@ -17,7 +17,7 @@ Payments are deferred and not production-ready in this phase.
 | Alerts | Partial | Helper exists; production webhook env required |
 | DB indexes | Planned | Apply `PRODUCTION_DB_INDEXES.md` in Supabase |
 | Backup/recovery | Documented | See `PRODUCTION_RUNBOOK.md` |
-| Payments | Deferred / Not production-ready / Next phase | Payment-provider readiness skipped |
+| Payments | Scaffolded / Disabled | Provider none, configured false, live mode false; see `PAYMENT_PRODUCTION_READINESS.md` |
 
 ## Current Estimate
 
@@ -43,3 +43,13 @@ Payments are deferred and not production-ready in this phase.
 ## Next Phase
 
 Payment production readiness: provider selection, webhook hardening, test/live separation, payment reconciliation, refund/admin operations, and fraud controls.
+
+## Payment Scaffold Checkpoint
+
+Payment readiness docs now exist:
+
+- `CHECKPOINT_PAYMENT_READINESS_SCAFFOLD_2026_05_31.md`
+- `PAYMENT_PRODUCTION_READINESS.md`
+- `PAYMENT_DB_SCHEMA.md`
+
+The scaffold is intentionally non-live. Enabling payments requires provider selection, verified webhook signatures, idempotent fulfillment, ledger-backed credit grants, and reconciliation.

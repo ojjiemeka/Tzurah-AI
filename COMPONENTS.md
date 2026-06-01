@@ -381,3 +381,28 @@ Project docs:
 - `COMPONENTS.md`
 
 If docs are added to deploy sync, whitelist only docs explicitly and keep local-only app files blocked.
+
+## Payment Readiness Scaffold
+
+Location:
+- `gcp-server.js`
+- `PAYMENT_PRODUCTION_READINESS.md`
+- `PAYMENT_DB_SCHEMA.md`
+- `CHECKPOINT_PAYMENT_READINESS_SCAFFOLD_2026_05_31.md`
+
+Responsibility:
+- Keep production payment provider state explicit and disabled by default.
+- Return safe payment readiness metadata without secrets.
+- Fail closed for checkout and webhook routes while provider is `none`.
+- Keep mock payments dev/test only and separate from real purchase fulfillment.
+
+Current state:
+- `provider=none`
+- `configured=false`
+- `live_mode=false`
+- checkout disabled
+- webhook processing disabled
+- fulfillment disabled
+
+Launch rule:
+- Real purchase fulfillment must not grant credits until verified provider webhooks, idempotency keys, immutable credit ledger writes, and reconciliation checks are implemented and tested.

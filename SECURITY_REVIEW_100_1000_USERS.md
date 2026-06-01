@@ -18,6 +18,7 @@ Payments are intentionally excluded from production readiness in this phase.
 | Security headers | Partial | Basic headers set manually; Helmet can be added later if package policy allows |
 | Audit logs | Pass | `logAction()` records mutations and RBAC denial attempts |
 | Critical alerts | Partial | Env-driven webhook helper exists; production requires `ENABLE_CRITICAL_ALERTS=true` and `ALERT_WEBHOOK_URL` |
+| Payments | Scaffolded / Disabled | Provider none, checkout/webhooks fail closed, no provider secrets exposed |
 
 ## Production Env Checklist
 
@@ -40,5 +41,5 @@ Payments are intentionally excluded from production readiness in this phase.
 
 - `nodemailer` has a high-severity advisory requiring a breaking upgrade path.
 - Helmet is not installed; current headers are manual.
-- Payment-provider production readiness remains deferred.
+- Payment-provider production readiness is scaffolded but disabled; live mode requires verified webhooks, idempotency, ledger, and reconciliation.
 - Supabase migrations/indexes must be applied and verified separately.

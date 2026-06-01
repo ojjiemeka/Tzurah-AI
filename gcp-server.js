@@ -139,6 +139,11 @@ const APP_FEATURE_FLAG_REGISTRY = [
   { key: "enable_performance_metrics", label: "Performance metrics", description: "Show RTT, reconnect, FPS, and performance diagnostics.", category: "Diagnostics", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate", dev_only: true },
   { key: "enable_oauth_debug", label: "OAuth debug", description: "Show OAuth debug diagnostics for QA.", category: "Diagnostics", default_value: false, default_scope: "off", scope: "off", danger_level: "moderate", dev_only: true },
   { key: "enable_reconnect_debug", label: "Reconnect debug", description: "Show reconnect timers and retry diagnostics.", category: "Diagnostics", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate", dev_only: true },
+  { key: "enable_payments", label: "Payments", description: "Master gate for production payment surfaces.", category: "Payments", default_value: false, default_scope: "off", scope: "off", danger_level: "dangerous" },
+  { key: "enable_payment_checkout", label: "Payment checkout", description: "Allow users to create real provider checkout sessions.", category: "Payments", default_value: false, default_scope: "off", scope: "off", danger_level: "dangerous" },
+  { key: "enable_payment_webhooks", label: "Payment webhooks", description: "Allow real provider webhooks to be processed for fulfillment.", category: "Payments", default_value: false, default_scope: "off", scope: "off", danger_level: "dangerous" },
+  { key: "enable_payment_admin_tools", label: "Payment admin tools", description: "Show payment readiness and rollout controls to admins.", category: "Payments", default_value: false, default_scope: "off", scope: "off", danger_level: "dangerous", dev_only: true },
+  { key: "enable_credit_pack_purchase", label: "Credit pack purchase", description: "Allow credit packs to be purchased through a real provider.", category: "Payments", default_value: false, default_scope: "off", scope: "off", danger_level: "dangerous" },
   { key: "enable_real_payments", label: "Real payments", description: "Enable live payment provider flow when configured.", category: "Payments", default_value: false, default_scope: "off", scope: "off", danger_level: "dangerous" },
   { key: "enable_mock_payments", label: "Mock payments", description: "Enable mock top-up purchases for internal testing.", category: "Payments", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate", dev_only: true },
   { key: "enable_topup_flow", label: "Top-up flow", description: "Allow users to open Add Credits/top-up surfaces.", category: "Payments", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
@@ -186,6 +191,113 @@ async function sendCriticalAlert(type, payload = {}) {
     console.warn("[ALERT] Critical alert send failed:", err.message);
     return false;
   }
+}
+
+const PAYMENT_LIFECYCLE_STATES = Object.freeze([
+  "draft",
+  "checkout_requested",
+  "checkout_created",
+  "checkout_failed",
+  "payment_pending",
+  "payment_authorized",
+  "payment_captured",
+  "fulfillment_pending",
+  "fulfilled",
+  "failed",
+  "refunded",
+  "cancelled",
+]);
+
+const PAYMENT_FEATURE_KEYS = Object.freeze([
+  "enable_payments",
+  "enable_payment_checkout",
+  "enable_payment_webhooks",
+  "enable_credit_pack_purchase",
+  "enable_real_payments",
+  "enable_mock_payments",
+  "enable_topup_flow",
+]);
+
+function buildPaymentProviderRegistry() {
+  return {
+    provider: "none",
+    active_provider: "none",
+    configured: false,
+    live_mode: false,
+    checkout_enabled: false,
+    webhook_processing_enabled: false,
+    fulfillment_enabled: false,
+    idempotency_required: true,
+    ledger_required: true,
+    providers: {
+      none: {
+        configured: true,
+        live_mode: false,
+        checkout: false,
+        webhooks: false,
+        fulfillment: false,
+      },
+      stripe: {
+        configured: false,
+        live_mode: false,
+        checkout: false,
+        webhooks: false,
+        fulfillment: false,
+      },
+      monnify: {
+        configured: false,
+        live_mode: false,
+        checkout: false,
+        webhooks: false,
+        fulfillment: false,
+      },
+      paypal: {
+        configured: false,
+        live_mode: false,
+        checkout: false,
+        webhooks: false,
+        fulfillment: false,
+      },
+    },
+    lifecycle_states: PAYMENT_LIFECYCLE_STATES,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function paymentDisabledPayload(extra = {}) {
+  return {
+    ok: false,
+    code: "payments_not_configured",
+    message: "Payments are not configured yet.",
+    configured: false,
+    live_mode: false,
+    provider: "none",
+    ...extra,
+  };
+}
+
+function paymentConfigPayload(extra = {}) {
+  const registry = buildPaymentProviderRegistry();
+  return {
+    ok: true,
+    ...registry,
+    feature_flags: Object.fromEntries(PAYMENT_FEATURE_KEYS.map((key) => [key, key === "enable_topup_flow"])),
+    mock_payments: {
+      configured: true,
+      live_mode: false,
+      dev_only: true,
+    },
+    ...extra,
+  };
+}
+
+async function alertPaymentAttempt(type, payload = {}) {
+  await sendCriticalAlert(type, {
+    provider: "none",
+    configured: false,
+    live_mode: false,
+    ...payload,
+  }).catch(() => {});
 }
 
 // Credit packs (1 credit = 10 seconds)
@@ -561,6 +673,27 @@ const sessionEndLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many session finalization requests" },
+});
+const paymentCheckoutLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many payment checkout requests" },
+});
+const paymentStatusLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many payment status requests" },
+});
+const paymentWebhookLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many payment webhook requests" },
 });
 
 let sessionStoreFatalError = null;
@@ -2695,6 +2828,46 @@ app.post("/credits/sync", requireAuth, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
+// Provider-agnostic payment readiness scaffold.
+// Real providers stay disabled until the production readiness checklist is complete.
+app.get("/api/payments/config", paymentStatusLimiter, (_req, res) => {
+  res.json(paymentConfigPayload({ source: "payment_readiness_scaffold" }));
+});
+
+app.post("/api/payments/checkout", paymentCheckoutLimiter, requireAuth, async (req, res) => {
+  await alertPaymentAttempt("live_payment_attempt_while_disabled", {
+    endpoint: "/api/payments/checkout",
+    user_id: req.userId || null,
+    body_keys: Object.keys(req.body || {}),
+  });
+  return res.status(503).json(paymentDisabledPayload({
+    endpoint: "/api/payments/checkout",
+    checkout_enabled: false,
+  }));
+});
+
+app.get("/api/payments/status/:purchase_id", paymentStatusLimiter, requireAuth, (req, res) => {
+  return res.status(503).json(paymentDisabledPayload({
+    endpoint: "/api/payments/status",
+    purchase_id: req.params.purchase_id || null,
+  }));
+});
+
+app.post("/api/payments/webhook/:provider", paymentWebhookLimiter, async (req, res) => {
+  const provider = String(req.params.provider || "").toLowerCase();
+  await alertPaymentAttempt("payment_webhook_attempt_while_disabled", {
+    endpoint: "/api/payments/webhook/:provider",
+    provider,
+    body_keys: Object.keys(req.body || {}),
+    signature_present: Boolean(req.headers["stripe-signature"] || req.headers["x-monnify-signature"] || req.headers["paypal-transmission-sig"]),
+  });
+  return res.status(503).json(paymentDisabledPayload({
+    endpoint: "/api/payments/webhook/:provider",
+    provider,
+    webhook_processing_enabled: false,
+  }));
+});
+
 // STRIPE
 // ═══════════════════════════════════════════════════════════════════
 
@@ -2703,6 +2876,16 @@ app.post("/credits/sync", requireAuth, async (req, res) => {
  * Body: { pack: 'starter'|'basic'|'standard'|'pro'|'ultra'|'max' }
  */
 app.post("/stripe/create-checkout", requireAuth, async (req, res) => {
+  await alertPaymentAttempt("legacy_stripe_checkout_blocked", {
+    endpoint: "/stripe/create-checkout",
+    user_id: req.userId || null,
+  });
+  return res.status(503).json(paymentDisabledPayload({
+    endpoint: "/stripe/create-checkout",
+    checkout_enabled: false,
+    legacy_endpoint: true,
+  }));
+
   if (!stripe) return res.status(503).json({ error: "Stripe not configured" });
 
   const { pack } = req.body || {};
@@ -2734,7 +2917,17 @@ app.post("/stripe/create-checkout", requireAuth, async (req, res) => {
  * POST /stripe/webhook
  * Verifies Stripe signature, credits user on payment completion.
  */
-app.post("/stripe/webhook", (req, res) => {
+app.post("/stripe/webhook", async (req, res) => {
+  await alertPaymentAttempt("legacy_stripe_webhook_blocked", {
+    endpoint: "/stripe/webhook",
+    signature_present: Boolean(req.headers["stripe-signature"]),
+  });
+  return res.status(503).json(paymentDisabledPayload({
+    endpoint: "/stripe/webhook",
+    webhook_processing_enabled: false,
+    legacy_endpoint: true,
+  }));
+
   if (!stripe || !serverConfig.stripeWebhookSecret) return res.sendStatus(200);
 
   let event;
@@ -2796,6 +2989,46 @@ app.post("/stripe/webhook", (req, res) => {
 // Serve admin HTML dashboard
 app.get("/admin", adminAuth, (_req, res) => {
   res.sendFile(path.join(__dirname, "admin.html"));
+});
+
+app.get("/admin/api/payments/readiness", adminAuth, async (_req, res) => {
+  let creditPackCount = 0;
+  let activePackCount = 0;
+  try {
+    const { data } = await supabaseAdmin
+      .from("credit_packs")
+      .select("id,is_active")
+      .limit(100);
+    const rows = Array.isArray(data) ? data : [];
+    creditPackCount = rows.length;
+    activePackCount = rows.filter((row) => row.is_active !== false).length;
+  } catch (_) {}
+
+  res.json({
+    ok: true,
+    readiness: paymentConfigPayload({
+      credit_packs: {
+        total: creditPackCount,
+        active: activePackCount,
+        purchase_enabled: false,
+      },
+      admin_tools_enabled: false,
+      webhook_verification: {
+        configured: false,
+        required: true,
+      },
+      checkout: {
+        configured: false,
+        enabled: false,
+      },
+      fulfillment: {
+        configured: false,
+        enabled: false,
+        requires_idempotency: true,
+        requires_ledger: true,
+      },
+    }),
+  });
 });
 
 // Admin login page
@@ -4745,10 +4978,20 @@ function publicAppFlagsFromResolved(flags = {}) {
     "enable_background_mode",
     "enable_obs_tools",
     "enable_topup_flow",
+    "enable_payments",
+    "enable_payment_checkout",
+    "enable_payment_webhooks",
+    "enable_payment_admin_tools",
+    "enable_credit_pack_purchase",
   ];
   const publicFlags = {};
   publicKeys.forEach((key) => { publicFlags[key] = flags[key] === true; });
-  publicFlags.enable_real_payments = flags.enable_real_payments === true;
+  publicFlags.enable_payments = false;
+  publicFlags.enable_payment_checkout = false;
+  publicFlags.enable_payment_webhooks = false;
+  publicFlags.enable_payment_admin_tools = false;
+  publicFlags.enable_credit_pack_purchase = false;
+  publicFlags.enable_real_payments = false;
   publicFlags.enable_mock_payments = false;
   publicFlags.mock_payments = false;
   publicFlags.enable_dev_tools = false;

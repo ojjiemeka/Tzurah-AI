@@ -1557,6 +1557,7 @@ kbd {
   <button class="tab-btn" data-tab="devaccounts">Dev</button>
   <button class="tab-btn" data-tab="revenue">Revenue</button>
   <button class="tab-btn" data-tab="purchases">Purchases</button>
+  <button class="tab-btn" data-tab="paymentreadiness">Payments</button>
   <button class="tab-btn" data-tab="sessions">🖥️ Sessions</button>
   <button class="tab-btn" data-tab="alerts">Alerts</button>
   <button class="tab-btn" data-tab="announcements">📣 Announcements</button>
@@ -2127,6 +2128,23 @@ kbd {
 </div>
 
 <!-- ══ SESSIONS ══════════════════════════════════════════════════ -->
+<div class="tab-panel" id="tab-paymentreadiness">
+  <div class="panel-card" style="margin:0 0 20px">
+    <div class="sec-hdr">
+      <h3>Payment Readiness</h3>
+      <button class="btn btn-ghost btn-sm" onclick="loadPaymentReadiness()">Reload</button>
+    </div>
+    <p class="muted" style="margin:0 0 16px">
+      Production payment providers are scaffolded but intentionally disabled. Status must remain
+      <strong>provider=none</strong>, <strong>configured=false</strong>, and <strong>live_mode=false</strong>
+      until the launch checklist is complete.
+    </p>
+    <div id="payment-readiness-mount" class="grid two">
+      <div class="card"><div class="muted">Loading payment readiness...</div></div>
+    </div>
+  </div>
+</div>
+
 <div class="tab-panel" id="tab-sessions" style="display:none">
 
   <!-- Live Sessions -->
@@ -3660,6 +3678,7 @@ function switchTab(tab) {
     case 'devaccounts':   initDevAccountsTab(); break;
     case 'revenue':       if (!cache.allPurchases.length) loadRevenuePurchases(); break;
     case 'purchases':     if (!allPurchases.length) loadPurchasesData(); break;
+    case 'paymentreadiness': loadPaymentReadiness(); break;
     case 'sessions':      loadSessionsTab(); break;
     case 'alerts':        loadAlertRules(); break;
     case 'announcements': loadAnnouncements(); break;
@@ -3676,6 +3695,65 @@ function switchTab(tab) {
 }
 
 // ── Logout ────────────────────────────────────────────────────────
+async function loadPaymentReadiness() {
+  const mount = document.getElementById("payment-readiness-mount");
+  if (!mount) return;
+  mount.innerHTML = `<div class="card"><div class="muted">Loading payment readiness...</div></div>`;
+  try {
+    const data = await api("/admin/api/payments/readiness");
+    const readiness = data?.readiness || {};
+    const providers = readiness.providers || {};
+    const creditPacks = readiness.credit_packs || {};
+    const rows = [
+      ["Provider", readiness.provider || readiness.active_provider || "none"],
+      ["Configured", readiness.configured === true ? "true" : "false"],
+      ["Live mode", readiness.live_mode === true ? "true" : "false"],
+      ["Checkout", readiness.checkout_enabled || readiness.checkout?.enabled ? "enabled" : "disabled"],
+      ["Webhooks", readiness.webhook_processing_enabled ? "enabled" : "disabled"],
+      ["Fulfillment", readiness.fulfillment_enabled || readiness.fulfillment?.enabled ? "enabled" : "disabled"],
+      ["Credit packs", `${creditPacks.active || 0} active / ${creditPacks.total || 0} total`],
+    ];
+    const providerRows = Object.entries(providers).map(([name, provider]) => `
+      <tr>
+        <td>${esc(name)}</td>
+        <td>${provider?.configured ? "configured" : "not configured"}</td>
+        <td>${provider?.live_mode ? "live" : "off"}</td>
+        <td>${provider?.checkout ? "yes" : "no"}</td>
+        <td>${provider?.webhooks ? "yes" : "no"}</td>
+      </tr>
+    `).join("");
+    mount.innerHTML = `
+      <div class="card">
+        <h3>Current Status</h3>
+        <table><tbody>
+          ${rows.map(([label, value]) => `<tr><td>${esc(label)}</td><td><strong>${esc(value)}</strong></td></tr>`).join("")}
+        </tbody></table>
+      </div>
+      <div class="card">
+        <h3>Launch Gates</h3>
+        <ul style="margin:0;padding-left:18px;color:var(--text2);line-height:1.8">
+          <li>Provider registry exists, active provider remains <strong>none</strong>.</li>
+          <li>Checkout and webhook endpoints fail closed.</li>
+          <li>Fulfillment requires idempotency, ledger writes, and verified webhooks before activation.</li>
+          <li>Mock payments remain dev/test only.</li>
+        </ul>
+      </div>
+      <div class="card" style="grid-column:1/-1">
+        <h3>Provider Registry</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Provider</th><th>Configured</th><th>Mode</th><th>Checkout</th><th>Webhooks</th></tr></thead>
+            <tbody>${providerRows || `<tr><td colspan="5" class="muted">No providers registered.</td></tr>`}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  } catch (e) {
+    console.error("loadPaymentReadiness:", e.message);
+    mount.innerHTML = `<div class="card"><div class="error">Failed to load payment readiness.</div></div>`;
+  }
+}
+
 function mountBillingPage() {
   const card = document.getElementById("billing-reconciliation-card");
   const mount = document.getElementById("billing-reconciliation-mount");

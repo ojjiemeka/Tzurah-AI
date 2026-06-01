@@ -22,3 +22,4 @@ Short, high-signal lessons only. Add durable rules, not session notes.
 - Rate limits must be route-aware; session pings are health traffic, not login traffic.
 - Dangerous admin mutations require backend super_admin gates, not hidden buttons.
 - Production readiness excludes payments until payment-provider hardening is explicit.
+- Payments launch from disabled scaffolds: provider none, configured false, live mode false until webhook verification, idempotency, ledger, and reconciliation are proven.

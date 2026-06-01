@@ -105,3 +105,21 @@ Then disable risky flags or force legacy billing before restart if needed.
 - Do not delete audit/reconciliation history.
 - Do not expose service-role, Decart, Stripe, or internal secrets.
 - Do not deploy Loqii app files through this server repo.
+
+## Payment Readiness Runbook
+
+Current production payment posture:
+
+- provider: `none`
+- configured: `false`
+- live_mode: `false`
+- checkout: disabled
+- webhook processing: disabled
+
+If a live checkout or webhook attempt appears while disabled:
+
+1. Keep payment flags off.
+2. Inspect critical alert payload for endpoint/provider only; never add secrets to logs.
+3. Confirm `/api/payments/config` still reports provider `none`.
+4. Confirm no credit ledger or profile credit mutation occurred from payment fulfillment.
+5. Leave usage billing/session deduction untouched.
