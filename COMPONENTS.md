@@ -406,3 +406,16 @@ Current state:
 
 Launch rule:
 - Real purchase fulfillment must not grant credits until verified provider webhooks, idempotency keys, immutable credit ledger writes, and reconciliation checks are implemented and tested.
+- Dev/test credit pack preview may be enabled through `enable_credit_pack_purchase` without enabling real checkout.
+- Normal users still resolve payment checkout and credit pack purchase false while provider is `none`.
+
+## Production DB Index Readiness
+
+Location:
+- `PRODUCTION_DB_INDEXES.md`
+- `PRODUCTION_DB_INDEXES_APPLY.sql`
+
+Responsibility:
+- Provide additive index SQL for Supabase SQL editor application.
+- Guard optional tables and columns before creating indexes.
+- Avoid data mutation, table drops, and billing/session behavior changes.

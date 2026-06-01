@@ -3708,7 +3708,9 @@ async function loadPaymentReadiness() {
       ["Provider", readiness.provider || readiness.active_provider || "none"],
       ["Configured", readiness.configured === true ? "true" : "false"],
       ["Live mode", readiness.live_mode === true ? "true" : "false"],
-      ["Checkout", readiness.checkout_enabled || readiness.checkout?.enabled ? "enabled" : "disabled"],
+      ["Real checkout", readiness.checkout_enabled || readiness.checkout?.enabled ? "enabled" : "disabled"],
+      ["Credit pack preview for dev accounts", readiness.credit_pack_preview?.dev_accounts_enabled ? "enabled" : "disabled"],
+      ["Mock payments", readiness.mock_payments?.dev_accounts_enabled ? "dev/test enabled" : "disabled"],
       ["Webhooks", readiness.webhook_processing_enabled ? "enabled" : "disabled"],
       ["Fulfillment", readiness.fulfillment_enabled || readiness.fulfillment?.enabled ? "enabled" : "disabled"],
       ["Credit packs", `${creditPacks.active || 0} active / ${creditPacks.total || 0} total`],
@@ -3734,6 +3736,7 @@ async function loadPaymentReadiness() {
         <ul style="margin:0;padding-left:18px;color:var(--text2);line-height:1.8">
           <li>Provider registry exists, active provider remains <strong>none</strong>.</li>
           <li>Checkout and webhook endpoints fail closed.</li>
+          <li>Credit pack preview can be shown to dev/test accounts without enabling real payments.</li>
           <li>Fulfillment requires idempotency, ledger writes, and verified webhooks before activation.</li>
           <li>Mock payments remain dev/test only.</li>
         </ul>
@@ -4896,6 +4899,141 @@ function renderAppFlagRow(flag) {
     </div>`;
 }
 
+const FLAG_PREVIEW_GROUPS = [
+  {
+    title: "Core App",
+    flags: [
+      ["enable_google_oauth", "Google OAuth", "Controls Google sign-in visibility."],
+      ["enable_help_center", "Help Center", "Controls the in-app Help entry point."],
+      ["show_onboarding", "Onboarding", "Controls first-run onboarding."],
+      ["onboarding_required", "Required Onboarding", "Forces onboarding when enabled."],
+      ["enable_light_mode", "Light Mode", "Allows light/dark theme switching."],
+    ],
+  },
+  {
+    title: "Creator Tools",
+    flags: [
+      ["enable_scene_engine", "Scenes", "Scene preset panel and prompt layer."],
+      ["enable_background_mode", "Background", "Background controls."],
+      ["enable_style_engine", "Style", "Style preset behavior."],
+      ["enable_obs_tools", "OBS Tools", "OBS helper controls."],
+    ],
+  },
+  {
+    title: "Diagnostics / Dev Tools",
+    flags: [
+      ["enable_advanced_diagnostics", "Advanced Diagnostics", "Internal diagnostics panels."],
+      ["enable_performance_metrics", "Performance Metrics", "RTT, reconnect, FPS and health metrics."],
+      ["enable_prompt_debug", "Prompt Debug", "Raw prompt layer diagnostics."],
+      ["enable_session_debug", "Session Debug", "Raw session diagnostics."],
+      ["enable_reconnect_debug", "Reconnect Debug", "Reconnect timers and retry diagnostics."],
+      ["enable_oauth_debug", "OAuth Debug", "OAuth QA diagnostics."],
+      ["enable_dev_tools", "Dev Tools", "Developer surfaces."],
+    ],
+  },
+  {
+    title: "Payments",
+    flags: [
+      ["enable_topup_flow", "Top-up Flow", "Shows Add Credits entry points."],
+      ["enable_credit_pack_purchase", "Credit Pack Purchase", "Dev/test credit pack preview; real checkout remains provider-gated."],
+      ["enable_mock_payments", "Mock Payments", "Dev/test mock purchase flow only."],
+      ["enable_payments", "Payments", "Master real payment gate."],
+      ["enable_payment_checkout", "Payment Checkout", "Real checkout creation gate."],
+      ["enable_payment_webhooks", "Payment Webhooks", "Real webhook processing gate."],
+      ["enable_payment_admin_tools", "Payment Admin Tools", "Payment control-plane admin tools."],
+      ["enable_real_payments", "Real Payments", "Legacy live payment compatibility gate."],
+    ],
+  },
+];
+
+function flagSourceLabel(source) {
+  const labels = {
+    default: "default",
+    global: "global",
+    global_off: "default off",
+    dev_account: "dev account",
+    dev_preview: "dev/test preview",
+    dev_only_hidden: "dev-only hidden",
+    allowlist: "user override",
+    allowlist_no_match: "allowlist no match",
+    provider_disabled: "provider disabled",
+    normal_user_provider_disabled: "provider disabled",
+    normal_user_dev_only_hidden: "dev-only hidden",
+  };
+  return labels[source] || source || "default";
+}
+
+function flagPreviewReason(key, value, source, data) {
+  if (key === "enable_credit_pack_purchase") {
+    if (value) return "Enabled for dev/test preview only. Real checkout remains disabled.";
+    if (!data.is_dev_account) return "Disabled because payments are not configured for production users.";
+    return "Disabled until a super admin enables dev/test credit pack preview.";
+  }
+  if (key === "enable_mock_payments") {
+    if (value) return "Enabled for dev/test mock purchases only.";
+    return data.is_dev_account ? "Disabled until explicitly enabled for dev/test." : "Hidden from normal users.";
+  }
+  if (/payment|real_payments|enable_payments/.test(key)) {
+    if (source === "provider_disabled" || source === "normal_user_provider_disabled") return "Disabled because provider is none and live mode is off.";
+  }
+  if (/diagnostics|debug|dev_tools|performance/.test(key) && !value && !data.is_dev_account) return "Hidden from normal users.";
+  return value ? "Enabled by resolved feature rules." : "Disabled by resolved feature rules.";
+}
+
+function renderFlagPreviewGroup(group, data) {
+  const flags = data.flags || {};
+  const sources = data.metadata?.flag_sources || {};
+  return `
+    <div class="card" style="margin-bottom:12px">
+      <h3 style="margin-top:0">${esc(group.title)}</h3>
+      <div style="display:grid;gap:8px">
+        ${group.flags.map(([key, label, description]) => {
+          const value = flags[key] === true;
+          const source = sources[key] || "default";
+          return `
+            <div style="display:grid;grid-template-columns:minmax(160px,1fr) auto minmax(110px,auto);gap:10px;align-items:start;padding:8px 0;border-top:1px solid var(--border)">
+              <div>
+                <div style="font-weight:800;color:var(--text)">${esc(label)}</div>
+                <div style="font-size:11px;color:var(--muted)">${esc(description)}</div>
+                <div style="font-size:11px;color:var(--text2);margin-top:3px">${esc(flagPreviewReason(key, value, source, data))}</div>
+              </div>
+              <span class="badge ${value ? "badge-green" : "badge-muted"}">${value ? "ON" : "OFF"}</span>
+              <span class="badge ${source.includes("provider") ? "badge-amber" : source.includes("override") || source === "allowlist" ? "badge-green" : "badge-muted"}">${esc(flagSourceLabel(source))}</span>
+            </div>`;
+        }).join("")}
+      </div>
+    </div>`;
+}
+
+function renderResolvedFlagPreview(data, userId) {
+  const metadata = data.metadata || {};
+  const payment = metadata.payment_readiness || {};
+  const user = findCachedAdminUser(userId) || { email: shortSessionId(userId), display_name: "Selected user" };
+  const overrideCount = (metadata.overridden_flags || []).length;
+  return `
+    <div style="display:grid;gap:12px">
+      <div class="card">
+        <h3 style="margin-top:0">Summary</h3>
+        <div class="billing-state-grid">
+          <div class="billing-state-item"><div class="billing-state-label">User</div><div class="billing-state-value">${esc(user.email || shortSessionId(userId))}</div></div>
+          <div class="billing-state-item"><div class="billing-state-label">Dev/Test Account</div><div class="billing-state-value">${data.is_dev_account ? "Yes" : "No"}</div></div>
+          <div class="billing-state-item"><div class="billing-state-label">Environment</div><div class="billing-state-value">${esc(data.environment || "user")}</div></div>
+          <div class="billing-state-item"><div class="billing-state-label">Source</div><div class="billing-state-value">${esc(metadata.source || "resolved")}</div></div>
+          <div class="billing-state-item"><div class="billing-state-label">Overrides</div><div class="billing-state-value">${fmtN(overrideCount)}</div></div>
+          <div class="billing-state-item"><div class="billing-state-label">Hidden Dev-only Flags</div><div class="billing-state-value">${fmtN(metadata.hidden_dev_only_flags_count || 0)}</div></div>
+          <div class="billing-state-item"><div class="billing-state-label">Payments Configured</div><div class="billing-state-value">${payment.configured ? "Yes" : "No"}</div></div>
+          <div class="billing-state-item"><div class="billing-state-label">Real Checkout</div><div class="billing-state-value">${payment.real_checkout_enabled ? "Enabled" : "Disabled"}</div></div>
+          <div class="billing-state-item"><div class="billing-state-label">Mock Payments</div><div class="billing-state-value">${payment.mock_payments_enabled ? "Dev-only enabled" : "Disabled"}</div></div>
+        </div>
+      </div>
+      ${FLAG_PREVIEW_GROUPS.map(group => renderFlagPreviewGroup(group, data)).join("")}
+      <details class="card">
+        <summary style="cursor:pointer;font-weight:800">Advanced raw flags</summary>
+        <pre style="white-space:pre-wrap;font-size:11px;color:var(--text2);margin-top:10px">${esc(JSON.stringify({ flags: data.flags || {}, metadata }, null, 2))}</pre>
+      </details>
+    </div>`;
+}
+
 async function loadAppFlags() {
   const root = document.getElementById("app-flags-list");
   if (root) root.innerHTML = `<div class="loading-cell"><div class="spinner"></div></div>`;
@@ -4988,20 +5126,10 @@ async function previewSelectedAppFlags() {
   const userId = UserPicker.getSelectedId("flag-preview-picker");
   const result = document.getElementById("flag-preview-result");
   if (!userId) return toast("Select a valid user first.", "error");
-  if (result) result.textContent = "Loading...";
+  if (result) result.innerHTML = "Loading...";
   try {
     const data = await api(`/admin/api/app-flags/resolve?user_id=${encodeURIComponent(userId)}`);
-    const metadata = data.metadata || {};
-    const lines = [
-      `Dev account: ${data.is_dev_account ? "yes" : "no"}`,
-      `Environment: ${data.environment || "user"}`,
-      `Source: ${metadata.source || "resolved"}`,
-      `Overrides: ${(metadata.overridden_flags || []).join(", ") || "none"}`,
-      `Hidden dev-only flags: ${fmtN(metadata.hidden_dev_only_flags_count || 0)}`,
-      "",
-      ...Object.entries(data.flags || {}).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => `${key}: ${value ? "true" : "false"}`),
-    ];
-    if (result) result.textContent = lines.join("\n");
+    if (result) result.innerHTML = renderResolvedFlagPreview(data, userId);
   } catch (e) {
     if (result) result.textContent = `Failed to preview flags: ${e.message}`;
   }

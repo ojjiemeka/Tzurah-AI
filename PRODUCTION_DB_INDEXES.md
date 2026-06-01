@@ -2,6 +2,8 @@
 
 This is an additive index plan for 100-1000 user readiness. Apply in Supabase SQL after confirming table names exist. Do not change billing math while applying indexes.
 
+Use `PRODUCTION_DB_INDEXES_APPLY.sql` as the copy/paste SQL for Supabase. It checks optional tables and columns before creating indexes.
+
 ## Recommended Indexes
 
 ```sql
@@ -47,3 +49,18 @@ create index if not exists idx_admin_actions_action on public.admin_actions(acti
 - Test/soak rows may be cleaned only when explicitly marked as synthetic/test data.
 - Prefer dry-run SQL before deletes.
 - Cleanup jobs must log counts and criteria.
+
+## How To Apply
+
+1. Open Supabase SQL editor for the production project.
+2. Copy the full contents of `PRODUCTION_DB_INDEXES_APPLY.sql`.
+3. Run during a low-traffic maintenance window.
+4. Confirm the final verification query returns the expected index names.
+5. Save the Supabase query result or screenshot in release notes.
+
+## What Not To Do
+
+- Do not run destructive SQL.
+- Do not drop or recreate billing/session tables.
+- Do not alter credit, billing, reconciliation, or session data.
+- Do not add payment scaffold indexes unless payment tables have been created by a separate reviewed migration.

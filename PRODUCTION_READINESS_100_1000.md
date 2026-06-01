@@ -40,6 +40,10 @@ Payments are deferred and not production-ready in this phase.
 - Run backup restore drill.
 - Complete payment production readiness phase.
 
+## DB Index Readiness
+
+`PRODUCTION_DB_INDEXES_APPLY.sql` is the actionable Supabase SQL editor script for additive index creation. It uses table/column guards and `CREATE INDEX IF NOT EXISTS` through safe dynamic SQL. Apply manually; do not run remote migrations automatically from this repo.
+
 ## Next Phase
 
 Payment production readiness: provider selection, webhook hardening, test/live separation, payment reconciliation, refund/admin operations, and fraud controls.

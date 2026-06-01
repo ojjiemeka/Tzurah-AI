@@ -143,7 +143,7 @@ const APP_FEATURE_FLAG_REGISTRY = [
   { key: "enable_payment_checkout", label: "Payment checkout", description: "Allow users to create real provider checkout sessions.", category: "Payments", default_value: false, default_scope: "off", scope: "off", danger_level: "dangerous" },
   { key: "enable_payment_webhooks", label: "Payment webhooks", description: "Allow real provider webhooks to be processed for fulfillment.", category: "Payments", default_value: false, default_scope: "off", scope: "off", danger_level: "dangerous" },
   { key: "enable_payment_admin_tools", label: "Payment admin tools", description: "Show payment readiness and rollout controls to admins.", category: "Payments", default_value: false, default_scope: "off", scope: "off", danger_level: "dangerous", dev_only: true },
-  { key: "enable_credit_pack_purchase", label: "Credit pack purchase", description: "Allow credit packs to be purchased through a real provider.", category: "Payments", default_value: false, default_scope: "off", scope: "off", danger_level: "dangerous" },
+  { key: "enable_credit_pack_purchase", label: "Show credit packs to dev/test accounts", description: "Allow dev/test accounts to preview credit packs without enabling real checkout.", category: "Payments", default_value: false, default_scope: "off", scope: "off", danger_level: "dangerous" },
   { key: "enable_real_payments", label: "Real payments", description: "Enable live payment provider flow when configured.", category: "Payments", default_value: false, default_scope: "off", scope: "off", danger_level: "dangerous" },
   { key: "enable_mock_payments", label: "Mock payments", description: "Enable mock top-up purchases for internal testing.", category: "Payments", default_value: false, default_scope: "dev_accounts", scope: "dev_accounts", danger_level: "moderate", dev_only: true },
   { key: "enable_topup_flow", label: "Top-up flow", description: "Allow users to open Add Credits/top-up surfaces.", category: "Payments", default_value: true, default_scope: "global", scope: "global", danger_level: "safe" },
@@ -218,12 +218,15 @@ const PAYMENT_FEATURE_KEYS = Object.freeze([
   "enable_topup_flow",
 ]);
 
+const PROVIDER_CONFIGURED = false;
+const PAYMENT_LIVE_MODE = false;
+
 function buildPaymentProviderRegistry() {
   return {
     provider: "none",
     active_provider: "none",
-    configured: false,
-    live_mode: false,
+    configured: PROVIDER_CONFIGURED,
+    live_mode: PAYMENT_LIVE_MODE,
     checkout_enabled: false,
     webhook_processing_enabled: false,
     fulfillment_enabled: false,
@@ -289,6 +292,32 @@ function paymentConfigPayload(extra = {}) {
     },
     ...extra,
   };
+}
+
+async function getPaymentReadinessSnapshot() {
+  const definitions = await getAppFeatureFlagDefinitions().catch(() => []);
+  const byKey = new Map(definitions.map(flag => [flag.key, flag]));
+  const scopeOf = (key) => byKey.get(key)?.scope || "off";
+  const devCreditPackPreviewEnabled = ["dev_accounts", "allowlist", "global"].includes(scopeOf("enable_credit_pack_purchase"));
+  const devMockPaymentsEnabled = ["dev_accounts", "allowlist", "global"].includes(scopeOf("enable_mock_payments"));
+  return paymentConfigPayload({
+    credit_pack_preview: {
+      dev_accounts_enabled: devCreditPackPreviewEnabled,
+      normal_users_enabled: false,
+      reason: "Credit pack preview can be shown to dev/test accounts without enabling real checkout.",
+    },
+    mock_payments: {
+      configured: true,
+      live_mode: false,
+      dev_only: true,
+      dev_accounts_enabled: devMockPaymentsEnabled,
+      normal_users_enabled: false,
+    },
+    real_checkout: {
+      enabled: false,
+      reason: "Disabled because no payment provider is configured.",
+    },
+  });
 }
 
 async function alertPaymentAttempt(type, payload = {}) {
@@ -2830,8 +2859,9 @@ app.post("/credits/sync", requireAuth, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════
 // Provider-agnostic payment readiness scaffold.
 // Real providers stay disabled until the production readiness checklist is complete.
-app.get("/api/payments/config", paymentStatusLimiter, (_req, res) => {
-  res.json(paymentConfigPayload({ source: "payment_readiness_scaffold" }));
+app.get("/api/payments/config", paymentStatusLimiter, async (_req, res) => {
+  const readiness = await getPaymentReadinessSnapshot();
+  res.json({ ...readiness, source: "payment_readiness_scaffold" });
 });
 
 app.post("/api/payments/checkout", paymentCheckoutLimiter, requireAuth, async (req, res) => {
@@ -3004,9 +3034,11 @@ app.get("/admin/api/payments/readiness", adminAuth, async (_req, res) => {
     activePackCount = rows.filter((row) => row.is_active !== false).length;
   } catch (_) {}
 
+  const readiness = await getPaymentReadinessSnapshot();
   res.json({
     ok: true,
-    readiness: paymentConfigPayload({
+    readiness: {
+      ...readiness,
       credit_packs: {
         total: creditPackCount,
         active: activePackCount,
@@ -3027,7 +3059,7 @@ app.get("/admin/api/payments/readiness", adminAuth, async (_req, res) => {
         requires_idempotency: true,
         requires_ledger: true,
       },
-    }),
+    },
   });
 });
 
@@ -4944,7 +4976,27 @@ async function resolveAppFeatureFlagsForUser(userId = null) {
   flags.enable_scene_system = flags.enable_scene_system || flags.enable_scene_engine === true;
   flags.enable_style_engine = flags.enable_style_engine || flags.enable_style_system === true;
   flags.enable_style_system = flags.enable_style_system || flags.enable_style_engine === true;
+  const requestedCreditPackPreview = flags.enable_credit_pack_purchase === true;
+  const requestedMockPayments = flags.enable_mock_payments === true;
+  flags.enable_payments = false;
+  flags.enable_payment_checkout = false;
+  flags.enable_payment_webhooks = false;
+  flags.enable_payment_admin_tools = false;
+  flags.enable_real_payments = false;
+  flags.enable_credit_pack_purchase = isDevAccount && requestedCreditPackPreview === true;
+  flags.enable_mock_payments = isDevAccount && requestedMockPayments === true;
   flags.mock_payments = flags.enable_mock_payments === true;
+  sources.enable_payments = "provider_disabled";
+  sources.enable_payment_checkout = "provider_disabled";
+  sources.enable_payment_webhooks = "provider_disabled";
+  sources.enable_payment_admin_tools = "provider_disabled";
+  sources.enable_real_payments = "provider_disabled";
+  sources.enable_credit_pack_purchase = flags.enable_credit_pack_purchase
+    ? "dev_preview"
+    : (requestedCreditPackPreview ? "normal_user_provider_disabled" : (sources.enable_credit_pack_purchase || "default"));
+  sources.enable_mock_payments = flags.enable_mock_payments
+    ? "dev_preview"
+    : (requestedMockPayments ? "normal_user_dev_only_hidden" : (sources.enable_mock_payments || "default"));
   flags.enable_background = flags.enable_background_mode === true;
   flags.enable_style_mode = flags.enable_style_engine === true;
   flags.enable_obs_tools = flags.enable_obs_tools === true;
@@ -4959,6 +5011,14 @@ async function resolveAppFeatureFlagsForUser(userId = null) {
       overridden_flags: overriddenFlags,
       hidden_dev_only_flags_count: hiddenDevOnlyFlagsCount,
       flag_sources: sources,
+      payment_readiness: {
+        provider: "none",
+        configured: PROVIDER_CONFIGURED,
+        live_mode: PAYMENT_LIVE_MODE,
+        real_checkout_enabled: false,
+        credit_pack_preview_enabled: flags.enable_credit_pack_purchase === true,
+        mock_payments_enabled: flags.enable_mock_payments === true,
+      },
       refreshed_at: new Date().toISOString(),
     },
   };

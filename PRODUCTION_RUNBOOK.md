@@ -123,3 +123,14 @@ If a live checkout or webhook attempt appears while disabled:
 3. Confirm `/api/payments/config` still reports provider `none`.
 4. Confirm no credit ledger or profile credit mutation occurred from payment fulfillment.
 5. Leave usage billing/session deduction untouched.
+
+## Production DB Index Application
+
+Use `PRODUCTION_DB_INDEXES_APPLY.sql` in the Supabase SQL editor. The SQL is additive and checks table/column existence before creating optional indexes.
+
+Run order:
+
+1. Confirm no active incident or billing migration is underway.
+2. Run `PRODUCTION_DB_INDEXES_APPLY.sql` during low traffic.
+3. Review the verification query output for sessions, billing syncs, reconciliation events, deductions, profiles, app settings, purchases, and admin actions.
+4. Do not mutate data or change billing math during index application.

@@ -39,6 +39,8 @@ All production payment flags default off:
 
 Mock payments are separate and dev/test only.
 
+Credit pack preview is also separate from real checkout. Dev/test accounts may preview credit packs when `enable_credit_pack_purchase` is scoped to dev accounts or allowlisted users. Normal users still receive `enable_credit_pack_purchase=false` while provider is `none`.
+
 ## Provider Requirements
 
 Before a provider can be enabled:
@@ -59,4 +61,3 @@ Payment systems fail closed:
 - Webhook attempts while disabled return a disabled response.
 - Legacy Stripe checkout/webhook routes are blocked by the payment scaffold.
 - No user receives credits from an unverified payment event.
-

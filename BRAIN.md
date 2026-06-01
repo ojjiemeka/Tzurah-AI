@@ -23,3 +23,4 @@ Short, high-signal lessons only. Add durable rules, not session notes.
 - Dangerous admin mutations require backend super_admin gates, not hidden buttons.
 - Production readiness excludes payments until payment-provider hardening is explicit.
 - Payments launch from disabled scaffolds: provider none, configured false, live mode false until webhook verification, idempotency, ledger, and reconciliation are proven.
+- Credit pack preview is not checkout; dev/test visibility can be enabled while real payments stay false.
