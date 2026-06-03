@@ -14,6 +14,7 @@ Payments are deferred and not production-ready in this phase.
 | Protected billing safety | Framework present, not globally enabled | Keep force-legacy rollback available |
 | Feature flags | Good | Admin control plane exists, global rollout super_admin-gated |
 | Audit logs | Good | Admin action logging with fallback schema |
+| Admin revenue/session UI | Improved | Revenue separates real vs mock/gift rows; session end uses bounded confirm flow |
 | Alerts | Partial | Helper exists; production webhook env required |
 | DB indexes | Planned | Apply `PRODUCTION_DB_INDEXES.md` in Supabase |
 | Backup/recovery | Documented | See `PRODUCTION_RUNBOOK.md` |

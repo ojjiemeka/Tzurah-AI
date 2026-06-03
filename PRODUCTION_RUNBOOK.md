@@ -124,6 +124,14 @@ If a live checkout or webhook attempt appears while disabled:
 4. Confirm no credit ledger or profile credit mutation occurred from payment fulfillment.
 5. Leave usage billing/session deduction untouched.
 
+## Admin Revenue And Session UI Checks
+
+- Revenue admin cards separate real payment revenue from mock/dev and gift activity.
+- Treat mock/dev revenue totals as QA signal only; they are not live revenue.
+- `/admin/api/revenue/summary` is read-only and safe to call for dashboard/export summaries.
+- Session end actions require an admin reason and must remain RBAC-gated by the backend.
+- If live session rows look stale, use the Sessions page refresh before taking operator action.
+
 ## Production DB Index Application
 
 Use `PRODUCTION_DB_INDEXES_APPLY.sql` in the Supabase SQL editor. The SQL is additive and checks table/column existence before creating optional indexes.

@@ -335,6 +335,45 @@ main { padding:20px; max-width:1400px; margin:0 auto; }
 .panel-hdr .ptitle { font-size:11px; text-transform:uppercase; letter-spacing:.7px; font-weight:700; }
 .panel-body { padding:14px; }
 
+/* Admin Lego primitives: reusable layout, card, table, state, and modal classes */
+.admin-page { display:grid; gap:16px; min-width:0; }
+.admin-section {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r); overflow:hidden; min-width:0;
+}
+.admin-section-head {
+  display:flex; align-items:flex-start; justify-content:space-between; gap:12px;
+  padding:12px 14px; border-bottom:1px solid var(--border); background:var(--surface2);
+}
+.admin-section-title { font-size:13px; font-weight:850; color:var(--text); }
+.admin-section-sub { margin-top:2px; font-size:11px; color:var(--muted); }
+.admin-card {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r); padding:14px; min-width:0;
+}
+.admin-card.warn { border-color:rgba(245,158,11,.38); background:rgba(245,158,11,.06); }
+.admin-card.danger { border-color:rgba(239,68,68,.42); background:rgba(239,68,68,.06); }
+.admin-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; min-width:0; }
+.admin-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; min-width:0; }
+.admin-table-wrap { width:100%; overflow:auto; border:1px solid var(--border); border-radius:var(--r); background:var(--surface); }
+.admin-badge {
+  display:inline-flex; align-items:center; gap:4px; border-radius:999px;
+  padding:2px 8px; font-size:10px; font-weight:800; white-space:nowrap;
+  background:rgba(148,163,184,.12); color:var(--text2); border:1px solid rgba(148,163,184,.18);
+}
+.admin-badge.on, .admin-badge.success { background:rgba(34,197,94,.12); color:#4ade80; border-color:rgba(34,197,94,.25); }
+.admin-badge.off { background:rgba(148,163,184,.10); color:var(--muted); }
+.admin-badge.warn { background:rgba(245,158,11,.13); color:#fbbf24; border-color:rgba(245,158,11,.25); }
+.admin-badge.danger { background:rgba(239,68,68,.14); color:#f87171; border-color:rgba(239,68,68,.3); }
+.admin-empty,
+.admin-error {
+  padding:22px; text-align:center; border:1px dashed var(--border);
+  border-radius:var(--r); color:var(--muted); background:rgba(255,255,255,.02);
+}
+.admin-error { color:#f87171; border-color:rgba(239,68,68,.35); background:rgba(239,68,68,.06); }
+.admin-metric-value { font-size:24px; font-weight:900; color:var(--text); line-height:1; }
+.admin-metric-label { margin-top:6px; font-size:10px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); }
+
 /* ── Decart Balance card ───────────────────────────────────────── */
 .decart-input-row {
   display:flex; gap:8px; margin-bottom:12px;
@@ -556,6 +595,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   padding:0; min-width:0; max-width:480px; width:min(100%,480px);
   max-height:calc(100vh - 36px); display:flex; flex-direction:column; overflow:hidden;
 }
+.admin-modal-card.admin-modal { max-height:min(760px, calc(100vh - 36px)); }
 .admin-modal-card.modal-sm { max-width:380px; }
 .admin-modal-card.modal-md { max-width:520px; }
 .admin-modal-card.modal-lg { max-width:760px; }
@@ -569,6 +609,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   75% { transform: translateX(4px); }
 }
 .modal-header {
+  position:sticky; top:0; z-index:2;
   flex:0 0 auto; font-size:1rem; font-weight:800; color:#fff; margin:0;
   padding:16px 18px; background:#1a1a2e; border-bottom:1px solid var(--border);
 }
@@ -634,6 +675,7 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
   .pb-user-card .btn { width:100%; justify-content:center; }
 }
 .modal-footer {
+  position:sticky; bottom:0; z-index:2;
   flex:0 0 auto; display:flex; gap:8px; justify-content:flex-end; margin:0;
   padding:12px 18px; background:#1a1a2e; border-top:1px solid var(--border); flex-wrap:wrap;
 }
@@ -1096,10 +1138,11 @@ input[type="checkbox"] { accent-color:var(--accent); width:14px; height:14px; cu
 .notif-bell { position:relative; cursor:pointer; font-size:1.1rem; padding:4px 8px; border-radius:6px; transition:background 0.2s; }
 .notif-bell:hover { background:var(--surface2); }
 .notif-badge { position:absolute; top:-2px; right:-2px; background:#ef4444; color:#fff; font-size:0.6rem; font-weight:700; min-width:16px; height:16px; border-radius:8px; display:flex; align-items:center; justify-content:center; padding:0 3px; }
-.notif-panel { position:fixed; top:48px; right:16px; width:320px; background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 8px 32px rgba(0,0,0,0.4); z-index:10000; overflow:hidden; }
+.notif-panel { position:fixed; top:48px; right:16px; width:320px; max-height:min(560px, calc(100vh - 72px)); background:var(--surface); border:1px solid var(--border); border-radius:10px; box-shadow:0 8px 32px rgba(0,0,0,0.4); z-index:10000; overflow:hidden; display:flex; flex-direction:column; }
 .notif-header { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid var(--border); font-weight:700; font-size:0.85rem; }
 .notif-header button { background:none; border:none; color:var(--muted); font-size:11px; cursor:pointer; font-family:inherit; }
 .notif-header button:hover { color:var(--text); }
+#notif-list { min-height:0; overflow-y:auto; overflow-x:hidden; }
 .notif-item { padding:10px 16px; border-bottom:1px solid var(--border); cursor:pointer; transition:background 0.15s; }
 .notif-item:hover { background:var(--surface2); }
 .notif-item.unread { background:rgba(99,102,241,0.05); }
@@ -2066,6 +2109,21 @@ kbd {
 
 <!-- ══ REVENUE ════════════════════════════════════════════════════ -->
 <div class="tab-panel" id="tab-revenue">
+  <div class="admin-section" style="margin-bottom:16px">
+    <div class="admin-section-head">
+      <div>
+        <div class="admin-section-title">Revenue</div>
+        <div class="admin-section-sub">Real payment revenue is separated from mock/dev and gift activity.</div>
+      </div>
+      <div class="admin-toolbar">
+        <button class="btn btn-ghost btn-sm" onclick="loadRevenuePurchases(this)">Refresh</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportRevenueSummary()">Export Summary</button>
+      </div>
+    </div>
+    <div class="panel-body">
+      <div id="revenue-payment-state" class="admin-empty">Loading payment status...</div>
+    </div>
+  </div>
   <div class="time-range" id="time-range">
     <button class="time-pill" data-days="-1" onclick="setTimeRange(-1)">Today</button>
     <button class="time-pill" data-days="-2" onclick="setTimeRange(-2)">This month</button>
@@ -2080,6 +2138,7 @@ kbd {
     <div class="stat-card"><div class="slabel">Avg Order Value</div><div class="sval" id="rv-aov">—</div></div>
     <div class="stat-card"><div class="slabel">Top Spender</div><div class="sval" id="rv-top" style="font-size:13px">—</div></div>
   </div>
+  <div class="admin-grid" id="rev-test-cards" style="margin-bottom:20px"></div>
   <div class="sec-hdr"><h3>Revenue Chart</h3></div>
   <div class="panel-card" style="padding:16px 20px;margin-bottom:20px">
     <div id="rev-chart-wrap"><div class="loading-cell"><div class="spinner"></div></div></div>
@@ -2148,7 +2207,13 @@ kbd {
 <div class="tab-panel" id="tab-sessions" style="display:none">
 
   <!-- Live Sessions -->
-  <div style="padding:16px 20px 8px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Live Sessions</div>
+  <div class="admin-section-head" style="margin-bottom:0;border:1px solid var(--border);border-bottom:0;border-radius:10px 10px 0 0">
+    <div>
+      <div class="admin-section-title">Live Sessions</div>
+      <div class="admin-section-sub">Active sessions refresh from the live session endpoint. Dangerous end actions require confirmation.</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="refreshSessionsPanel(this)">Refresh</button>
+  </div>
   <div class="panel-card" style="margin:0 0 20px">
     <div class="table-wrap">
       <table class="mobile-cards">
@@ -3328,7 +3393,7 @@ function showModal(htmlOrOpts, opts = {}) {
     ov.setAttribute("role", "dialog");
     ov.setAttribute("aria-modal", "true");
     ov.innerHTML = `
-      <div class="admin-modal-card ${modalSizeClass(htmlOrOpts.size)}">
+      <div class="admin-modal-card admin-modal ${modalSizeClass(htmlOrOpts.size)}">
         <div class="modal-header" style="${showClose ? "display:flex;align-items:center;gap:10px" : ""}">
           <span>${title || ""}</span>
           ${showClose ? `<button type="button" class="modal-btn-cancel modal-x" style="margin-left:auto;background:none;border:0;color:var(--muted);font-size:20px;line-height:1;cursor:pointer" aria-label="Close">&times;</button>` : ""}
@@ -3369,7 +3434,7 @@ function showModal(htmlOrOpts, opts = {}) {
   ov.dataset.closeOnBackdrop = behavior.closeOnBackdrop ? "true" : "false";
   ov.setAttribute("role", "dialog");
   ov.setAttribute("aria-modal", "true");
-  ov.innerHTML = `<div class="admin-modal-card ${modalSizeClass(opts.size)}">${htmlOrOpts}</div>`;
+  ov.innerHTML = `<div class="admin-modal-card admin-modal ${modalSizeClass(opts.size)}">${htmlOrOpts}</div>`;
   document.body.appendChild(ov);
 
   ov.querySelectorAll(".modal-btn-cancel").forEach(btn => {
@@ -3588,6 +3653,77 @@ const Modal = {
 };
 
 // ── Tabs ──────────────────────────────────────────────────────────
+const AdminToast = {
+  success(message) { toast(message, "success"); },
+  warning(message) { toast(message, "warning"); },
+  error(message) { toast(message, "error"); },
+  info(message) { toast(message, "info"); },
+};
+
+const AdminModal = {
+  open(options = {}) {
+    return Modal.open({
+      size: "lg",
+      persistent: options.persistent ?? false,
+      closeOnBackdrop: options.closeOnBackdrop ?? true,
+      closeOnEscape: options.closeOnEscape ?? true,
+      ...options,
+    });
+  },
+  close(idOrOverlay) { return Modal.close(idOrOverlay); },
+  setLoading(idOrOverlay, loading) { return Modal.setLoading(idOrOverlay, loading); },
+};
+
+function AdminConfirm(options = {}) {
+  return showModalConfirm(options.description || options.message || "Continue?", {
+    title: options.title || "Confirm",
+    confirmLabel: options.confirmLabel || "Confirm",
+    cancelLabel: options.cancelLabel || "Cancel",
+    variant: options.danger ? "danger" : options.variant,
+    persistent: options.persistent ?? true,
+    closeOnBackdrop: options.closeOnBackdrop ?? false,
+    closeOnEscape: options.closeOnEscape ?? true,
+  });
+}
+
+const AdminTableState = {
+  loading(colspan = 1, label = "Loading...") {
+    return `<tr><td colspan="${colspan}" class="loading-cell"><div class="spinner"></div><div style="margin-top:8px">${esc(label)}</div></td></tr>`;
+  },
+  empty(colspan = 1, message = "No data yet.") {
+    return `<tr><td colspan="${colspan}"><div class="admin-empty">${esc(message)}</div></td></tr>`;
+  },
+  error(colspan = 1, message = "Could not load data.", retry = "") {
+    return `<tr><td colspan="${colspan}"><div class="admin-error">${esc(message)}${retry ? `<div style="margin-top:10px">${retry}</div>` : ""}</div></td></tr>`;
+  },
+  stale(colspan = 1, message = "Data may be stale.") {
+    return `<tr><td colspan="${colspan}"><div class="admin-empty"><span class="admin-badge warn">Stale</span> ${esc(message)}</div></td></tr>`;
+  },
+};
+
+const AdminButton = {
+  loading: btnLoading,
+  async run(btn, label, fn) {
+    const restore = btnLoading(btn, label || "Working...");
+    try {
+      return await fn();
+    } finally {
+      restore();
+    }
+  },
+};
+
+function AdminDataCard({ label, value, status = "", trend = "", state = "" } = {}) {
+  const cls = state === "warning" ? "warn" : state === "danger" ? "danger" : "";
+  return `
+    <div class="admin-card ${cls}">
+      ${status ? `<div style="display:flex;justify-content:flex-end;margin-bottom:8px">${status}</div>` : ""}
+      <div class="admin-metric-value">${esc(value ?? "--")}</div>
+      <div class="admin-metric-label">${esc(label || "")}</div>
+      ${trend ? `<div style="margin-top:6px;font-size:11px;color:var(--muted)">${trend}</div>` : ""}
+    </div>`;
+}
+
 function getTabLabel(tab) {
   const btn = document.querySelector(`.tab-bar .tab-btn[data-tab="${tab}"]`);
   return btn ? btn.textContent.trim() : tab;
@@ -3724,6 +3860,38 @@ async function loadPaymentReadiness() {
         <td>${provider?.webhooks ? "yes" : "no"}</td>
       </tr>
     `).join("");
+    const readinessCards = [
+      AdminDataCard({
+        label: "Provider Configuration",
+        value: readiness.provider || readiness.active_provider || "none",
+        status: readiness.configured ? `<span class="admin-badge success">Configured</span>` : `<span class="admin-badge off">Disabled</span>`,
+      }),
+      AdminDataCard({
+        label: "Credit Pack Catalog",
+        value: `${creditPacks.active || 0} active / ${creditPacks.total || 0} total`,
+        status: readiness.credit_pack_preview?.dev_accounts_enabled ? `<span class="admin-badge warn">Dev Preview</span>` : `<span class="admin-badge off">Hidden</span>`,
+      }),
+      AdminDataCard({
+        label: "Checkout Status",
+        value: readiness.checkout_enabled || readiness.checkout?.enabled ? "enabled" : "disabled",
+        status: `<span class="admin-badge off">Fail Closed</span>`,
+      }),
+      AdminDataCard({
+        label: "Webhook Status",
+        value: readiness.webhook_processing_enabled ? "enabled" : "disabled",
+        status: `<span class="admin-badge off">No Fulfillment</span>`,
+      }),
+      AdminDataCard({
+        label: "Fulfillment Safety",
+        value: readiness.fulfillment_enabled || readiness.fulfillment?.enabled ? "enabled" : "disabled",
+        status: `<span class="admin-badge warn">Requires Ledger</span>`,
+      }),
+      AdminDataCard({
+        label: "Dev/Test Preview",
+        value: readiness.mock_payments?.dev_accounts_enabled ? "dev/test enabled" : "disabled",
+        status: `<span class="admin-badge warn">Not Revenue</span>`,
+      }),
+    ].join("");
     mount.innerHTML = `
       <div class="card">
         <h3>Current Status</h3>
@@ -3740,6 +3908,11 @@ async function loadPaymentReadiness() {
           <li>Fulfillment requires idempotency, ledger writes, and verified webhooks before activation.</li>
           <li>Mock payments remain dev/test only.</li>
         </ul>
+      </div>
+      <div class="card" style="grid-column:1/-1">
+        <h3>Payment Readiness Sections</h3>
+        <p class="muted" style="margin-top:0">Real payment activation controls are intentionally absent until provider keys, webhooks, fulfillment, and reconciliation launch gates are complete.</p>
+        <div class="admin-grid">${readinessCards}</div>
       </div>
       <div class="card" style="grid-column:1/-1">
         <h3>Provider Registry</h3>
@@ -3872,6 +4045,7 @@ async function loadLiveSessions() {
     const d = await api("/admin/api/live-sessions");
     const sessions = d.sessions || [];
     cache.liveSessions = sessions;
+    window._liveSessionRows = sessions;
 
     const dot = document.getElementById("live-dot");
     const sdot = document.getElementById("sessions-dot");
@@ -3890,12 +4064,15 @@ async function loadLiveSessions() {
       document.getElementById("live-burn").textContent = "Total burning: 0 cr/min";
       return;
     }
-    tbody.innerHTML = sessions.map(s => `
-      <tr>
+    tbody.innerHTML = sessions.map((s, idx) => `
+      <tr data-session-user="${esc(s.user_id || "")}">
         <td class="td-email">${esc(s.email)}</td>
         <td>${fmtSecs(s.duration_secs)}</td>
         <td>${(s.credits_per_min||130.8).toFixed(1)}</td>
-        <td><button class="btn btn-red btn-xs" onclick="showEndSessionModal('${esc(s.user_id)}','${esc(s.email)}')">End</button></td>
+        <td>
+          <button class="btn btn-ghost btn-xs" onclick="openSessionDetailModal('live', ${idx})">Details</button>
+          <button class="btn btn-red btn-xs" data-end-session="${esc(s.user_id || "")}" onclick="showEndSessionModal('${esc(s.user_id)}','${esc(s.email)}')">End</button>
+        </td>
       </tr>`).join("");
 
     const totalBurn = (sessions.length * 130.8).toFixed(1);
@@ -3968,24 +4145,77 @@ function showEndSessionModal(userId, email) {
   });
 }
 
+function showEndSessionModal(userId, email) {
+  const modal = AdminModal.open({
+    title: "End Session",
+    size: "md",
+    persistent: true,
+    closeOnBackdrop: false,
+    body: `
+      <p class="modal-subtitle" style="margin-bottom:14px">
+        Ending session for <strong>${esc(email || userId)}</strong>.<br>
+        <span style="color:var(--muted);font-size:11px">Select a reason. The user will be notified.</span>
+      </p>
+      <div class="reason-options">
+        ${END_SESSION_REASONS.map(r => `
+          <label class="reason-opt">
+            <input type="radio" name="kill-reason" value="${esc(r.value)}">
+            <span class="reason-icon">${r.icon}</span>
+            <span>${esc(r.label)}</span>
+          </label>`).join("")}
+      </div>
+      <div id="reason-other-wrap" style="display:none;margin-top:10px">
+        <input type="text" id="reason-other-text" class="modal-input" placeholder="Describe reason" style="width:100%">
+      </div>
+      <textarea id="kill-admin-note" class="modal-input"
+        placeholder="Internal admin note (optional, not shown to user)"
+        style="width:100%;margin-top:10px;height:64px;resize:vertical"></textarea>
+    `,
+    footer: `
+      <button class="modal-btn-cancel">Cancel</button>
+      <button class="modal-btn-confirm btn-red">End Session</button>
+    `,
+  });
+
+  modal.querySelectorAll("input[name='kill-reason']").forEach(r => r.addEventListener("change", () => {
+    const other = modal.querySelector("#reason-other-wrap");
+    if (other) other.style.display = r.value === "other" ? "block" : "none";
+  }));
+
+  modal.querySelector(".modal-btn-confirm")?.addEventListener("click", async () => {
+    const selected = modal.querySelector("input[name='kill-reason']:checked");
+    if (!selected) {
+      AdminToast.error("Please select a reason");
+      return;
+    }
+    let reason = selected.value;
+    if (reason === "other") {
+      const custom = modal.querySelector("#reason-other-text")?.value.trim();
+      reason = custom || "other";
+    }
+    const adminNote = modal.querySelector("#kill-admin-note")?.value.trim() || "";
+    AdminModal.close(modal);
+    await _doEndSession(userId, email, reason, adminNote);
+  });
+}
+
 async function _doEndSession(userId, email, reason, adminNote) {
     const btn = document.querySelector(`[data-end-session="${userId}"]`);
     if (btn) { btn.textContent = "Ending…"; btn.disabled = true; }
 
     try {
       await apiPost("/admin/api/end-session", { userId, reason, admin_note: adminNote });
-      toast(`Ended session for ${esc(email)}`);
+      AdminToast.success(`Ended session for ${email || userId}`);
 
       // Blue flash on user's last-seen cell in Users table
       flashUserRow(userId, {}, "session");
 
       // Immediately remove row — don't wait for SSE
-      const row = document.getElementById("session-row-" + userId);
-      if (row) row.remove();
+      document.querySelectorAll(`[data-session-user="${CSS.escape(userId)}"]`).forEach(row => row.remove());
       delete sessionStartTimes[userId];
 
       // Recount remaining live rows
-      const remaining = document.querySelectorAll("#live-tbody tr[id^='session-row-']").length;
+      const remaining = document.querySelectorAll("#live-tbody tr[data-session-user]").length;
       const dot      = document.getElementById("live-dot");
       const sdot     = document.getElementById("sessions-dot");
       const countEl  = document.getElementById("live-count");
@@ -4005,7 +4235,7 @@ async function _doEndSession(userId, email, reason, adminNote) {
         if (burnEl) burnEl.textContent = `Total credits burning: ${(remaining * 130.8).toFixed(1)} cr/min`;
       }
     } catch(e) {
-      toast("Error: " + e.message, "error");
+      AdminToast.error("Error: " + e.message);
       if (btn) { btn.textContent = "End"; btn.disabled = false; }
     }
 }
@@ -6469,15 +6699,21 @@ function doExportCSV() {
 // ══════════════════════════════════════════════════════════════════
 // REVENUE
 // ══════════════════════════════════════════════════════════════════
-async function loadRevenuePurchases() {
+async function loadRevenuePurchases(btn = null) {
+  const restore = btn ? AdminButton.loading(btn, "Refreshing") : null;
   document.getElementById("rev-chart-wrap").innerHTML = `<div class="loading-cell"><div class="spinner spinner-lg"></div></div>`;
   try {
     const periodParam = revDays === -1 ? "today" : revDays === -2 ? "month" : revDays === 0 ? "all" : String(revDays);
     const d = await api(`/admin/api/revenue?period=${periodParam}`);
+    window._revenueSummary = d.summary || d.data || null;
+    window._revenueMetadata = d.metadata || {};
     cache.allPurchases = d.purchases || [];
     renderRevenue();
   } catch(e) {
     document.getElementById("rev-chart-wrap").innerHTML = `<div class="loading-cell" style="color:var(--danger)">Error: ${esc(e.message)}</div>`;
+    AdminToast.error("Revenue load failed: " + e.message);
+  } finally {
+    restore?.();
   }
 }
 
@@ -6489,6 +6725,25 @@ function setTimeRange(days) {
 }
 
 function renderRevenue() {
+  const summary = window._revenueSummary || {};
+  const stateEl = document.getElementById("revenue-payment-state");
+  if (stateEl) {
+    const configured = summary.payments_configured === true;
+    const liveMode = summary.live_mode === true;
+    stateEl.className = configured && liveMode ? "admin-empty" : "admin-empty";
+    stateEl.innerHTML = configured && liveMode
+      ? `<span class="admin-badge success">Live payments configured</span> Provider: ${esc(summary.payment_provider_status || "unknown")}`
+      : `<span class="admin-badge warn">Payments disabled</span> No live payment revenue yet. Payments are currently disabled. Mock/dev activity is separated below.`;
+  }
+  const testCards = document.getElementById("rev-test-cards");
+  if (testCards) {
+    testCards.innerHTML = [
+      AdminDataCard({ label: "Real Revenue", value: fmt$(summary.real_revenue_total || 0), status: `<span class="admin-badge ${summary.real_revenue_total ? "success" : "off"}">real</span>` }),
+      AdminDataCard({ label: "Mock/Dev Revenue", value: fmt$(summary.mock_revenue_total || 0), status: `<span class="admin-badge warn">test mode</span>` }),
+      AdminDataCard({ label: "Real Purchases", value: fmtN(summary.real_purchase_count || 0), trend: `${fmtN(summary.credit_pack_purchase_count || 0)} total pack purchase rows` }),
+      AdminDataCard({ label: "Gift/Test Credits", value: fmtN(summary.gift_credit_count || 0), status: `<span class="admin-badge off">not revenue</span>` }),
+    ].join("");
+  }
   const now = Date.now();
   let cutoff, prev;
   if (revDays === -1) {
@@ -6512,17 +6767,19 @@ function renderRevenue() {
         return t >= prev && t < cutoff;
       })
     : [];
+  const realFiltered = filtered.filter(p => p.revenue_type ? p.revenue_type === "real" : ((p.amount_usd || 0) > 0 && !String(p.stripe_session_id || "").startsWith("mock_") && !String(p.stripe_session_id || "").startsWith("gift_")));
+  const realPrevPeriod = prevPeriod.filter(p => p.revenue_type ? p.revenue_type === "real" : ((p.amount_usd || 0) > 0 && !String(p.stripe_session_id || "").startsWith("mock_") && !String(p.stripe_session_id || "").startsWith("gift_")));
 
-  const totalRev  = filtered.reduce((s,p) => s+(p.amount_usd||0), 0);
-  const prevRev   = prevPeriod.reduce((s,p) => s+(p.amount_usd||0), 0);
-  const paidOnly  = filtered.filter(p => (p.amount_usd||0) > 0);
+  const totalRev  = realFiltered.reduce((s,p) => s+(p.amount_usd||0), 0);
+  const prevRev   = realPrevPeriod.reduce((s,p) => s+(p.amount_usd||0), 0);
+  const paidOnly  = realFiltered.filter(p => (p.amount_usd||0) > 0);
   const aov       = paidOnly.length ? totalRev / paidOnly.length : 0;
   const pct       = prevRev > 0 ? ((totalRev-prevRev)/prevRev*100).toFixed(1) : "—";
   const pctLabel  = pct !== "—" ? (parseFloat(pct)>=0?"+":"")+pct+"%" : "—";
 
   // Top spender
   const byUser = {};
-  filtered.forEach(p => { if (p.amount_usd>0) byUser[p.user_email||p.user_id] = (byUser[p.user_email||p.user_id]||0)+(p.amount_usd||0); });
+  realFiltered.forEach(p => { if (p.amount_usd>0) byUser[p.user_email||p.user_id] = (byUser[p.user_email||p.user_id]||0)+(p.amount_usd||0); });
   const topEntry = Object.entries(byUser).sort((a,b)=>b[1]-a[1])[0];
   const topLabel = topEntry ? `${topEntry[0].split("@")[0]} (${fmt$(topEntry[1])})` : "—";
 
@@ -6541,7 +6798,7 @@ function renderRevenue() {
     const key = new Date(now - i*86400000).toISOString().split("T")[0];
     byDay[key] = 0;
   }
-  filtered.forEach(p => {
+  realFiltered.forEach(p => {
     const key = (p.created_at||"").split("T")[0];
     if (key in byDay) byDay[key] = Number((byDay[key]+(p.amount_usd||0)).toFixed(2));
   });
@@ -6549,7 +6806,7 @@ function renderRevenue() {
 
   // Pack breakdown
   const packs = {};
-  filtered.filter(p=>p.amount_usd>0).forEach(p => {
+  realFiltered.filter(p=>p.amount_usd>0).forEach(p => {
     const n = p.pack_name||"Unknown";
     if (!packs[n]) packs[n] = { count:0, revenue:0 };
     packs[n].count++;
@@ -6607,7 +6864,7 @@ function renderRevenueChart(data) {
 }
 
 function renderAnalyticsPeriods() {
-  const all = cache.allPurchases || [];
+  const all = (cache.allPurchases || []).filter(p => p.revenue_type ? p.revenue_type === "real" : ((p.amount_usd || 0) > 0 && !String(p.stripe_session_id || "").startsWith("mock_") && !String(p.stripe_session_id || "").startsWith("gift_")));
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -6641,6 +6898,29 @@ function renderAnalyticsPeriods() {
 // ══════════════════════════════════════════════════════════════════
 // PURCHASES
 // ══════════════════════════════════════════════════════════════════
+async function exportRevenueSummary() {
+  const summary = window._revenueSummary || {};
+  const rows = [{
+    real_revenue_total: summary.real_revenue_total || 0,
+    mock_revenue_total: summary.mock_revenue_total || 0,
+    real_purchase_count: summary.real_purchase_count || 0,
+    mock_purchase_count: summary.mock_purchase_count || 0,
+    gift_credit_count: summary.gift_credit_count || 0,
+    payments_configured: summary.payments_configured === true,
+    live_mode: summary.live_mode === true,
+    provider: summary.payment_provider_status || "none",
+  }];
+  await AdminExport.exportRows(rows, {
+    title: "Tzurah Revenue Summary",
+    filename: `tzurah-revenue-summary-${AdminExport.stamp()}`,
+    format: "json",
+    metadata: {
+      note: "Real revenue excludes mock/dev and gift credit rows.",
+      period: revDays,
+    },
+  });
+}
+
 async function loadPurchasesData() {
   try {
     const d = await api("/admin/api/purchases?limit=500");
@@ -8558,6 +8838,48 @@ function loadSessionsTab() {
   loadSessionHistory();
 }
 
+async function refreshSessionsPanel(btn) {
+  await AdminButton.run(btn, "Refreshing", async () => {
+    await loadLiveSessions();
+    renderSessLive(cache.liveSessions || []);
+    await loadSessionHistory();
+    AdminToast.info("Sessions refreshed");
+  });
+}
+
+function safeSessionDetailRows(session = {}) {
+  const allowed = [
+    "user_id", "email", "session_id", "started_at", "ended_at", "last_ping",
+    "duration_secs", "credits_used", "credits_per_min", "kill_reason", "status"
+  ];
+  return allowed
+    .filter(key => session[key] !== undefined && session[key] !== null && session[key] !== "")
+    .map(key => `<tr><td>${esc(key)}</td><td>${esc(String(session[key]))}</td></tr>`)
+    .join("");
+}
+
+function openSessionDetailModal(source, index) {
+  const rows = source === "history" ? (window._sessionHistoryRows || []) : (window._liveSessionRows || []);
+  const session = rows[index];
+  if (!session) {
+    AdminToast.warning("Session detail is no longer available. Refresh sessions.");
+    return;
+  }
+  const title = session.email || session.user_id || session.session_id || "Session";
+  AdminModal.open({
+    title: `Session Detail - ${esc(title)}`,
+    size: "lg",
+    body: `
+      <div class="admin-table-wrap">
+        <table>
+          <tbody>${safeSessionDetailRows(session) || `<tr><td colspan="2"><div class="admin-empty">No session detail available.</div></td></tr>`}</tbody>
+        </table>
+      </div>
+    `,
+    footer: `<button class="modal-btn-cancel">Close</button>`,
+  });
+}
+
 function renderSessLive(sessions) {
   const tbody = document.getElementById("sess-live-tbody");
   if (!tbody) return;
@@ -8571,6 +8893,26 @@ function renderSessLive(sessions) {
       <td>${fmtSecs(s.duration_secs || 0)}</td>
       <td>${(s.credits_per_min || 130.8).toFixed(1)}</td>
       <td><button class="btn btn-red btn-xs" onclick="showEndSessionModal('${esc(s.user_id)}','${esc(s.email||"")}')">End</button></td>
+    </tr>`).join("");
+}
+
+function renderSessLive(sessions) {
+  const tbody = document.getElementById("sess-live-tbody");
+  if (!tbody) return;
+  window._liveSessionRows = sessions || [];
+  if (!sessions.length) {
+    tbody.innerHTML = AdminTableState.empty(4, "No active sessions right now.");
+    return;
+  }
+  tbody.innerHTML = sessions.map((s, idx) => `
+    <tr data-session-user="${esc(s.user_id || "")}">
+      <td class="td-email">${esc(s.email || s.user_id?.slice(0,8) || "-")}</td>
+      <td>${fmtSecs(s.duration_secs || 0)}</td>
+      <td>${(s.credits_per_min || 130.8).toFixed(1)}</td>
+      <td>
+        <button class="btn btn-ghost btn-xs" onclick="openSessionDetailModal('live', ${idx})">Details</button>
+        <button class="btn btn-red btn-xs" data-end-session="${esc(s.user_id || "")}" onclick="showEndSessionModal('${esc(s.user_id)}','${esc(s.email||"")}')">End</button>
+      </td>
     </tr>`).join("");
 }
 
@@ -8596,6 +8938,7 @@ async function loadSessionHistory() {
   try {
     const d = await api(`/admin/api/sessions/history?${params}`);
     if (!d) return;
+    window._sessionHistoryRows = d.sessions || [];
 
     sessHistTotal = d.total || 0;
     sessHistPages = d.pages || 1;
@@ -8623,12 +8966,12 @@ async function loadSessionHistory() {
       return;
     }
 
-    tbody.innerHTML = d.sessions.map(s => {
+    tbody.innerHTML = d.sessions.map((s, idx) => {
       const status = s.kill_reason
         ? `<span style="background:rgba(245,158,11,.15);color:var(--warning);border-radius:4px;padding:2px 7px;font-size:11px">Killed</span>`
         : `<span style="background:rgba(34,197,94,.1);color:var(--success);border-radius:4px;padding:2px 7px;font-size:11px">Completed</span>`;
       const killNote = s.kill_reason ? `<div style="font-size:10px;color:var(--warning);margin-top:2px">${esc(s.kill_reason)}</div>` : "";
-      return `<tr>
+      return `<tr title="Open session detail" style="cursor:pointer" onclick="openSessionDetailModal('history', ${idx})">
         <td class="td-email">${esc(s.email || s.user_id?.slice(0,8) || "—")}</td>
         <td>${s.started_at ? new Date(s.started_at).toLocaleString() : "—"}</td>
         <td>${fmtSecs(s.duration_secs || 0)}</td>
@@ -9248,7 +9591,7 @@ let notifPanelOpen = false;
 function toggleNotifPanel() {
   notifPanelOpen = !notifPanelOpen;
   const panel = document.getElementById('notif-panel');
-  if (panel) { panel.style.display = notifPanelOpen ? 'block' : 'none'; if (notifPanelOpen) loadNotifications(); }
+  if (panel) { panel.style.display = notifPanelOpen ? 'flex' : 'none'; if (notifPanelOpen) loadNotifications(); }
 }
 
 async function loadNotifications() {

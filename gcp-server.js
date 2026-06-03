@@ -320,6 +320,64 @@ async function getPaymentReadinessSnapshot() {
   });
 }
 
+function classifyPurchaseForRevenue(purchase = {}) {
+  const paymentId = String(purchase.stripe_payment_id || purchase.stripe_session_id || "");
+  const amount = Number(purchase.price_usd ?? purchase.amount_usd ?? 0) || 0;
+  if (paymentId.startsWith("mock_")) return "mock";
+  if (paymentId.startsWith("gift_") || amount <= 0) return "gift";
+  return "real";
+}
+
+function normalizeAdminPurchase(p = {}) {
+  const type = classifyPurchaseForRevenue(p);
+  return {
+    id: p.id,
+    user_id: p.user_id,
+    user_email: p.user_email || "-",
+    pack_name: p.pack_name || "Unknown",
+    amount_usd: Number(p.price_usd ?? p.amount_usd ?? 0) || 0,
+    credits_added: Number(p.credits_added || 0) || 0,
+    stripe_session_id: p.stripe_payment_id || p.stripe_session_id || null,
+    created_at: p.created_at,
+    revenue_type: type,
+    is_mock: type === "mock",
+    is_gift: type === "gift",
+    is_real_revenue: type === "real",
+  };
+}
+
+function buildRevenueSummaryPayload({ purchases = [], period = "30", paymentReadiness = null } = {}) {
+  const realRows = purchases.filter(p => p.revenue_type === "real");
+  const mockRows = purchases.filter(p => p.revenue_type === "mock");
+  const giftRows = purchases.filter(p => p.revenue_type === "gift");
+  const sum = rows => Number(rows.reduce((total, row) => total + (Number(row.amount_usd) || 0), 0).toFixed(2));
+  const creditSum = rows => rows.reduce((total, row) => total + (Number(row.credits_added) || 0), 0);
+  return {
+    ok: true,
+    data: {
+      real_revenue_total: sum(realRows),
+      mock_revenue_total: sum(mockRows),
+      gift_credit_count: giftRows.length,
+      purchase_count: purchases.length,
+      real_purchase_count: realRows.length,
+      mock_purchase_count: mockRows.length,
+      credit_pack_purchase_count: realRows.length + mockRows.length,
+      credits_added_total: creditSum(purchases),
+      refunds_count: 0,
+      rows: purchases,
+      payment_provider_status: paymentReadiness?.provider || "none",
+      payments_configured: paymentReadiness?.configured === true,
+      live_mode: paymentReadiness?.live_mode === true,
+      date_range: { period },
+    },
+    metadata: {
+      source: "purchases",
+      real_payments_enabled: paymentReadiness?.configured === true && paymentReadiness?.live_mode === true,
+      payments_disabled_message: "No live payment revenue yet. Payments are currently disabled.",
+    },
+  };
+}
+
 async function alertPaymentAttempt(type, payload = {}) {
   await sendCriticalAlert(type, {
     provider: "none",
@@ -3674,7 +3732,27 @@ app.get("/admin/api/revenue", adminAuth, async (req, res) => {
       .from("purchases")
       .select("id, user_id, pack_name, price_usd, credits_added, stripe_payment_id, created_at")
       .order("created_at", { ascending: false });
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      if (/does not exist|schema cache|relation/i.test(error.message || "")) {
+        const paymentReadiness = await getPaymentReadinessSnapshot();
+        const summary = buildRevenueSummaryPayload({ purchases: [], period, paymentReadiness });
+        return res.json({
+          ok: true,
+          purchases: [],
+          chart: [],
+          totals: {},
+          pack_breakdown: [],
+          period_total: 0,
+          prev_period_total: 0,
+          avg_order_value: 0,
+          top_spender: null,
+          summary: summary.data,
+          data: summary.data,
+          metadata: { ...summary.metadata, note: "purchases table unavailable" },
+        });
+      }
+      return res.status(500).json({ ok: false, error: error.message, code: "revenue_query_failed" });
+    }
 
     const all = allData || [];
 
@@ -3693,9 +3771,11 @@ app.get("/admin/api/revenue", adminAuth, async (req, res) => {
       stripe_session_id: p.stripe_payment_id, created_at: p.created_at,
     }));
 
-    const filtered    = cutoff     ? purchases.filter(p => p.created_at >= cutoff) : purchases;
+    const normalizedPurchases = purchases.map(normalizeAdminPurchase);
+    const filtered    = cutoff     ? normalizedPurchases.filter(p => p.created_at >= cutoff) : normalizedPurchases;
     const prevFiltered = (cutoff && prevCutoff)
-      ? purchases.filter(p => p.created_at >= prevCutoff && p.created_at < cutoff) : [];
+      ? normalizedPurchases.filter(p => p.created_at >= prevCutoff && p.created_at < cutoff) : [];
+    const realPurchases = normalizedPurchases.filter(p => p.revenue_type === "real");
 
     // Aggregate totals
     const sum  = arr => arr.reduce((s, p) => s + (p.amount_usd || 0), 0);
@@ -3703,10 +3783,10 @@ app.get("/admin/api/revenue", adminAuth, async (req, res) => {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
     const yearStart  = new Date(now.getFullYear(), 0, 1).toISOString();
     const totals = {
-      today:      { revenue: sum(purchases.filter(p => p.created_at >= midnight)),   count: purchases.filter(p => p.created_at >= midnight).length },
-      this_month: { revenue: sum(purchases.filter(p => p.created_at >= monthStart)), count: purchases.filter(p => p.created_at >= monthStart).length },
-      this_year:  { revenue: sum(purchases.filter(p => p.created_at >= yearStart)),  count: purchases.filter(p => p.created_at >= yearStart).length },
-      all_time:   { revenue: sum(purchases), count: purchases.length },
+      today:      { revenue: sum(realPurchases.filter(p => p.created_at >= midnight)),   count: realPurchases.filter(p => p.created_at >= midnight).length },
+      this_month: { revenue: sum(realPurchases.filter(p => p.created_at >= monthStart)), count: realPurchases.filter(p => p.created_at >= monthStart).length },
+      this_year:  { revenue: sum(realPurchases.filter(p => p.created_at >= yearStart)),  count: realPurchases.filter(p => p.created_at >= yearStart).length },
+      all_time:   { revenue: sum(realPurchases), count: realPurchases.length },
     };
 
     // Chart grouped by date
@@ -3717,7 +3797,7 @@ app.get("/admin/api/revenue", adminAuth, async (req, res) => {
       const key = new Date(Date.now() - i * MS).toISOString().split("T")[0];
       byDay[key] = { revenue: 0, count: 0 };
     }
-    filtered.forEach(p => {
+    filtered.filter(p => p.revenue_type === "real").forEach(p => {
       const key = (p.created_at || "").split("T")[0];
       if (key in byDay) {
         byDay[key].revenue = Number((byDay[key].revenue + (p.amount_usd || 0)).toFixed(2));
@@ -3728,7 +3808,7 @@ app.get("/admin/api/revenue", adminAuth, async (req, res) => {
 
     // Pack breakdown
     const packMap = {};
-    filtered.filter(p => (p.amount_usd || 0) > 0).forEach(p => {
+    filtered.filter(p => p.revenue_type === "real" && (p.amount_usd || 0) > 0).forEach(p => {
       const n = p.pack_name || "Unknown";
       if (!packMap[n]) packMap[n] = { pack_name: n, sales_count: 0, total_revenue: 0 };
       packMap[n].sales_count++;
@@ -3742,23 +3822,60 @@ app.get("/admin/api/revenue", adminAuth, async (req, res) => {
 
     // Top spender
     const byUser = {};
-    filtered.filter(p => (p.amount_usd || 0) > 0).forEach(p => {
+    filtered.filter(p => p.revenue_type === "real" && (p.amount_usd || 0) > 0).forEach(p => {
       const k = p.user_email || p.user_id;
       byUser[k] = (byUser[k] || 0) + (p.amount_usd || 0);
     });
     const topEntry = Object.entries(byUser).sort((a, b) => b[1] - a[1])[0];
     const top_spender = topEntry ? { email: topEntry[0], total: topEntry[1] } : null;
 
-    const period_total     = sum(filtered);
-    const prev_period_total = sum(prevFiltered);
-    const paidOnly         = filtered.filter(p => (p.amount_usd || 0) > 0);
+    const period_total     = sum(filtered.filter(p => p.revenue_type === "real"));
+    const prev_period_total = sum(prevFiltered.filter(p => p.revenue_type === "real"));
+    const paidOnly         = filtered.filter(p => p.revenue_type === "real" && (p.amount_usd || 0) > 0);
     const avg_order_value  = paidOnly.length ? period_total / paidOnly.length : 0;
+    const paymentReadiness = await getPaymentReadinessSnapshot();
+    const summaryPayload = buildRevenueSummaryPayload({ purchases: filtered, period, paymentReadiness });
 
     console.log(`[REVENUE] Returning ${purchases.length} purchases, period total: $${period_total.toFixed(2)}`);
-    res.json({ purchases, chart, totals, pack_breakdown, period_total, prev_period_total, avg_order_value, top_spender });
+    res.json({
+      ok: true,
+      purchases: normalizedPurchases,
+      chart,
+      totals,
+      pack_breakdown,
+      period_total,
+      prev_period_total,
+      avg_order_value,
+      top_spender,
+      summary: summaryPayload.data,
+      data: summaryPayload.data,
+      metadata: summaryPayload.metadata,
+    });
   } catch (err) {
     console.error("[REVENUE] Error:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ ok: false, error: err.message, code: "revenue_error" });
+  }
+});
+
+app.get("/admin/api/revenue/summary", adminAuth, async (req, res) => {
+  const period = String(req.query.period || "30");
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("purchases")
+      .select("id, user_id, pack_name, price_usd, credits_added, stripe_payment_id, created_at")
+      .order("created_at", { ascending: false })
+      .limit(1000);
+    const paymentReadiness = await getPaymentReadinessSnapshot();
+    if (error) {
+      if (/does not exist|schema cache|relation/i.test(error.message || "")) {
+        return res.json(buildRevenueSummaryPayload({ purchases: [], period, paymentReadiness }));
+      }
+      return res.status(500).json({ ok: false, error: error.message, code: "revenue_summary_query_failed" });
+    }
+    const rows = (data || []).map(normalizeAdminPurchase);
+    return res.json(buildRevenueSummaryPayload({ purchases: rows, period, paymentReadiness }));
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message, code: "revenue_summary_error" });
   }
 });
 
@@ -3794,7 +3911,7 @@ app.get("/admin/api/purchases", adminAuth, async (req, res) => {
       created_at:        p.created_at,
     }));
 
-    res.json({ ok: true, purchases: normalised });
+    res.json({ ok: true, purchases: normalised.map(normalizeAdminPurchase) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

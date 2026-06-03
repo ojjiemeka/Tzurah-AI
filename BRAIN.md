@@ -24,3 +24,6 @@ Short, high-signal lessons only. Add durable rules, not session notes.
 - Production readiness excludes payments until payment-provider hardening is explicit.
 - Payments launch from disabled scaffolds: provider none, configured false, live mode false until webhook verification, idempotency, ledger, and reconciliation are proven.
 - Credit pack preview is not checkout; dev/test visibility can be enabled while real payments stay false.
+- Admin UI should compose Lego primitives before adding one-off cards, tables, modals, or button states.
+- Revenue dashboards count real payments only; mock/dev and gift credit rows stay separated.
+- End-session UX is operational control, not billing math; keep it reasoned, RBAC-gated, and observable.

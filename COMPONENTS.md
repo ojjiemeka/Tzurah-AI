@@ -157,6 +157,37 @@ Debug checklist:
 - Test modal helper alone from the console.
 - Keep UI fixes scoped to one tab or shared helper.
 
+### Admin Lego UI Primitives
+
+Location: `admin.html`
+
+Reusable primitives:
+- Layout: `.admin-page`, `.admin-section`, `.admin-section-head`, `.admin-grid`, `.admin-toolbar`, `.admin-table-wrap`.
+- Data cards and states: `AdminDataCard()`, `AdminTableState.loading/empty/error/stale`.
+- Actions and feedback: `AdminButton.run()`, `AdminToast`, `AdminModal`, `AdminConfirm`.
+
+Rules:
+- New admin tabs should compose these primitives before adding one-off cards, modals, buttons, or table states.
+- Notification and modal bodies must be bounded and scroll internally.
+- Dangerous admin actions must use reusable modal/confirm flows and backend RBAC checks.
+
+### Revenue, Payments, And Sessions Admin Surfaces
+
+Revenue ownership:
+- Backend: `/admin/api/revenue`, `/admin/api/revenue/summary` in `gcp-server.js`.
+- Frontend: `loadRevenuePurchases()`, `renderRevenue()`, `exportRevenueSummary()` in `admin.html`.
+- Real revenue excludes mock/dev and gift credit rows. Mock/dev payment previews are visible for QA but never counted as live revenue.
+
+Payment readiness ownership:
+- Backend: payment readiness snapshot and disabled provider scaffold.
+- Frontend: `loadPaymentReadiness()` renders Provider Configuration, Credit Pack Catalog, Checkout Status, Webhook Status, Fulfillment Safety, and Dev/Test Preview.
+- There is no live payment enable button in the admin UI until provider keys, webhook verification, fulfillment idempotency, ledger writes, and reconciliation are complete.
+
+Sessions ownership:
+- Backend: live/history/end-session endpoints and RBAC.
+- Frontend: `loadLiveSessions()`, `renderSessLive()`, `loadSessionHistory()`, `openSessionDetailModal()`, `showEndSessionModal()`.
+- Ending a session must use the shared modal system, require a reason, and refresh/remove live rows without relying only on SSE.
+
 ## Billing And Session Modules
 
 Locations:
